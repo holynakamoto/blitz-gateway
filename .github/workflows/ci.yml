@@ -387,7 +387,7 @@ jobs:
 
       - name: Send Slack notification
         if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-        uses: slackapi/slack-github-action@v1
+        uses: slackapi/slack-github-action@v2
         with:
           payload: |
             {

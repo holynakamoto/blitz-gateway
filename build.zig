@@ -18,14 +18,27 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .linux) {
         // Link liburing
         exe.linkSystemLibrary("uring");
+        
+        // Link OpenSSL for TLS 1.3
+        exe.linkSystemLibrary("ssl");
+        exe.linkSystemLibrary("crypto");
 
-        // Add C wrapper with proper flags
+        // Add C wrappers with proper flags
         exe.addCSourceFile(.{
             .file = b.path("src/bind_wrapper.c"),
             .flags = &[_][]const u8{
                 "-std=c99",
                 "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined", // Disable UBSan if causing issues
+                "-fno-sanitize=undefined",
+            },
+        });
+        
+        exe.addCSourceFile(.{
+            .file = b.path("src/tls/openssl_wrapper.c"),
+            .flags = &[_][]const u8{
+                "-std=c99",
+                "-D_GNU_SOURCE",
+                "-fno-sanitize=undefined",
             },
         });
 
@@ -64,4 +77,22 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+    
+    // Foundation validation tests
+    const foundation_tests = b.addTest(.{
+        .root_source_file = b.path("src/validate_foundation.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    foundation_tests.linkLibC();
+    
+    if (target.result.os.tag == .linux) {
+        foundation_tests.linkSystemLibrary("ssl");
+        foundation_tests.linkSystemLibrary("crypto");
+    }
+
+    const run_foundation_tests = b.addRunArtifact(foundation_tests);
+    const foundation_test_step = b.step("test-foundation", "Run TLS/HTTP/2 foundation validation tests");
+    foundation_test_step.dependOn(&run_foundation_tests.step);
 }

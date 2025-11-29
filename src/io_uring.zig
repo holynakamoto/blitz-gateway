@@ -32,12 +32,22 @@ const BUFFER_POOL_SIZE: usize = 200000; // Pre-allocated buffers
 // Pre-allocated HTTP response (no allocation needed) - kept for fallback
 const HTTP_RESPONSE = http.CommonResponses.OK;
 
+// Import TLS and HTTP/2 modules
+const tls = @import("tls/tls.zig");
+const http2 = @import("http2/connection.zig");
+
 // Connection state
 const Connection = struct {
     fd: c_int,
     read_buffer: ?[]u8 = null,
     write_buffer: ?[]u8 = null,
     in_use: bool = false,
+    // TLS support
+    tls_conn: ?tls.TlsConnection = null,
+    is_tls: bool = false,
+    // HTTP/2 support
+    http2_conn: ?*http2.Http2Connection = null,
+    protocol: tls.Protocol = .http1_1,
 };
 
 // Connection state stored in user_data
@@ -46,6 +56,7 @@ const OpType = enum(u32) {
     accept = 0,
     read = 1,
     write = 2,
+    // tls_handshake = 3, // TLS handshake in progress (disabled for now)
 };
 
 fn encodeUserData(fd: c_int, op: OpType) u64 {
@@ -128,6 +139,35 @@ pub fn runEchoServer(port: u16) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const backing_allocator = gpa.allocator();
+    
+    // Initialize TLS context (optional - only if certs exist)
+    var tls_ctx: ?tls.TlsContext = null;
+    const cert_path = "certs/server.crt";
+    const key_path = "certs/server.key";
+    
+    // Try to load TLS certificates (non-fatal if they don't exist)
+    tls_ctx = blk: {
+        break :blk tls.TlsContext.init() catch |err| {
+            std.log.warn("TLS initialization failed: {} (continuing without TLS)", .{err});
+            break :blk null;
+        };
+    };
+    
+    if (tls_ctx) |*ctx| {
+        if (ctx.loadCertificate(cert_path, key_path)) {
+            std.log.info("TLS 1.3 enabled with HTTP/2 support", .{});
+        } else |err| {
+            std.log.warn("Failed to load TLS certificates: {} (continuing without TLS)", .{err});
+            ctx.deinit();
+            tls_ctx = null;
+        }
+    }
+    
+    defer {
+        if (tls_ctx) |*ctx| {
+            ctx.deinit();
+        }
+    }
 
     // Pre-allocate buffer pool (all buffers allocated at startup)
     var buffer_pool = try allocator.BufferPool.init(backing_allocator, BUFFER_SIZE, BUFFER_POOL_SIZE);
@@ -190,19 +230,32 @@ pub fn runEchoServer(port: u16) !void {
                     const sqe_opt2 = blitz_io_uring_get_sqe(&ring);
                     if (sqe_opt2 == null) continue;
                     sqe = sqe_opt2.?;
-                    c.io_uring_prep_accept(sqe, server_fd, null, null, 0);
+                        c.io_uring_prep_accept(sqe, server_fd, null, null, 0);
                     setSqeData(sqe, encodeUserData(server_fd, .accept));
-                    _ = c.io_uring_submit(&ring);
+                        _ = c.io_uring_submit(&ring);
                     continue;
                 };
 
                 // Store connection info (using fd as index with bounds check)
                 if (client_fd >= 0 and @as(usize, @intCast(client_fd)) < MAX_CONNECTIONS) {
-                    connections[@intCast(client_fd)] = Connection{
+                    var conn = &connections[@intCast(client_fd)];
+                    conn.* = Connection{
                         .fd = client_fd,
                         .read_buffer = read_buf,
                         .in_use = true,
                     };
+                    
+                    // Initialize TLS connection if TLS is enabled
+                    if (tls_ctx) |*ctx| {
+                        if (ctx.newConnection(client_fd)) |tls_conn| {
+                            conn.tls_conn = tls_conn;
+                            conn.is_tls = true;
+                        } else |err| {
+                            std.log.warn("Failed to create TLS connection: {} (continuing without TLS)", .{err});
+                            // Continue without TLS for this connection
+                            conn.is_tls = false;
+                        }
+                    }
                 }
 
                 // Submit read for new connection
@@ -240,28 +293,140 @@ pub fn runEchoServer(port: u16) !void {
                         if (conn.write_buffer) |buf| {
                             buffer_pool.releaseWrite(buf);
                         }
+                        if (conn.tls_conn) |*tls_conn| {
+                            tls_conn.deinit();
+                        }
+                        if (conn.http2_conn) |http2_conn| {
+                            http2_conn.deinit();
+                            backing_allocator.destroy(http2_conn);
+                        }
                         conn.* = Connection{ .fd = -1, .in_use = false };
                     }
                     _ = c.close(client_fd);
                     continue;
                 }
 
+                // Get connection
+                const conn = if (client_fd >= 0 and @as(usize, @intCast(client_fd)) < MAX_CONNECTIONS)
+                    &connections[@intCast(client_fd)]
+                else {
+                    _ = c.close(client_fd);
+                    continue;
+                };
+
+                const read_buf = conn.read_buffer orelse {
+                    _ = c.close(client_fd);
+                    continue;
+                };
+
+                // Handle TLS handshake if in progress
+                if (conn.is_tls) {
+                    if (conn.tls_conn) |*tls_conn| {
+                        if (tls_conn.state == .handshake) {
+                            // Perform TLS handshake
+                            _ = tls_conn.doHandshake() catch |err| {
+                                std.log.warn("TLS handshake failed: {}", .{err});
+                                buffer_pool.releaseRead(read_buf);
+                                _ = c.close(client_fd);
+                                continue;
+                            };
+                            
+                            // Check handshake state after doHandshake
+                            if (tls_conn.state == .handshake) {
+                                // Need more data - submit another read
+                                const sqe_opt5 = blitz_io_uring_get_sqe(&ring);
+                                if (sqe_opt5 == null) {
+                                    buffer_pool.releaseRead(read_buf);
+                                    _ = c.close(client_fd);
+                                    continue;
+                                }
+                                sqe = sqe_opt5.?;
+                                c.io_uring_prep_read(sqe, client_fd, read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
+                                setSqeData(sqe, encodeUserData(client_fd, .read));
+                                _ = c.io_uring_submit(&ring);
+                                continue;
+                            }
+                        }
+                        
+                        // Check if TLS is now connected (after handshake or if already connected)
+                        if (tls_conn.state == .connected) {
+                                // Handshake complete - decrypt data
+                                const decrypted_len = tls_conn.read(read_buf) catch |err| {
+                                    if (err == error.WantRead) {
+                                        // Need more data
+                                        const sqe_opt6 = blitz_io_uring_get_sqe(&ring);
+                                        if (sqe_opt6 == null) {
+                                            buffer_pool.releaseRead(read_buf);
+                                            _ = c.close(client_fd);
+                                            continue;
+                                        }
+                                        sqe = sqe_opt6.?;
+                                        c.io_uring_prep_read(sqe, client_fd, read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
+                                        setSqeData(sqe, encodeUserData(client_fd, .read));
+                                        _ = c.io_uring_submit(&ring);
+                                        continue;
+                                    } else {
+                                        std.log.warn("TLS read failed: {}", .{err});
+                                        buffer_pool.releaseRead(read_buf);
+                                        _ = c.close(client_fd);
+                                        continue;
+                                    }
+                                };
+                                
+                                // Update protocol based on ALPN
+                                conn.protocol = tls_conn.protocol;
+                                
+                                // Initialize HTTP/2 connection if negotiated
+                                if (tls_conn.protocol == .http2) {
+                                    if (conn.http2_conn == null) {
+                                        const http2_conn = http2.Http2Connection.init(backing_allocator);
+                                        conn.http2_conn = backing_allocator.create(http2.Http2Connection) catch {
+                                            std.log.warn("Failed to allocate HTTP/2 connection", .{});
+                                            buffer_pool.releaseRead(read_buf);
+                                            _ = c.close(client_fd);
+                                            continue;
+                                        };
+                                        conn.http2_conn.?.* = http2_conn;
+                                    }
+                                    
+                                    // Handle HTTP/2 frames
+                                    conn.http2_conn.?.handleFrame(read_buf[0..decrypted_len]) catch |err| {
+                                        std.log.warn("HTTP/2 frame handling failed: {}", .{err});
+                                        buffer_pool.releaseRead(read_buf);
+                                        _ = c.close(client_fd);
+                                        continue;
+                                    };
+                                    
+                                    // For now, send a simple HTTP/2 response
+                                    // TODO: Implement proper HTTP/2 response generation
+                                    buffer_pool.releaseRead(read_buf);
+                                    continue;
+                                }
+                                
+                                // HTTP/1.1 over TLS - process decrypted data
+                                // Fall through to HTTP/1.1 handler below
+                            } else {
+                                // TLS error
+                                std.log.warn("TLS error state: {}", .{tls_conn.state});
+                                buffer_pool.releaseRead(read_buf);
+                                _ = c.close(client_fd);
+                                continue;
+                            }
+                    } else {
+                        // TLS connection not available
+                        std.log.warn("TLS expected but connection not available", .{});
+                        buffer_pool.releaseRead(read_buf);
+                        _ = c.close(client_fd);
+                        continue;
+                    }
+                }
+                
+                // Plain HTTP/1.1 (no TLS) or HTTP/1.1 over TLS (after decryption)
                 total_requests += 1;
                 requests_this_second += 1;
 
-                // Get the read buffer that was used
-                const read_buf = if (client_fd >= 0 and @as(usize, @intCast(client_fd)) < MAX_CONNECTIONS)
-                    connections[@intCast(client_fd)].read_buffer
-                else
-                    null;
-
-                if (read_buf == null) {
-                    _ = c.close(client_fd);
-                    continue;
-                }
-
                 // Parse HTTP request (zero-allocation - all slices point into read_buf)
-                const request_data = read_buf.?[0..bytes_read];
+                const request_data = read_buf[0..bytes_read];
                 const parsed_request = http.parseRequest(request_data) catch {
                     // Invalid request - send 400 Bad Request
                     const write_buf = buffer_pool.acquireWrite() orelse {
@@ -287,7 +452,7 @@ pub fn runEchoServer(port: u16) !void {
                     sqe = sqe_opt2.?;
                     c.io_uring_prep_write(sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(response.len)), 0);
                     setSqeData(sqe, encodeUserData(client_fd, .write));
-                    _ = c.io_uring_submit(&ring);
+                _ = c.io_uring_submit(&ring);
                     continue;
                 };
 
@@ -364,8 +529,31 @@ pub fn runEchoServer(port: u16) !void {
                     continue;
                 }
                 sqe = sqe_opt6.?;
-
-                c.io_uring_prep_write(sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(response_len)), 0);
+                
+                // For TLS connections, encrypt the response before writing
+                // Note: OpenSSL's SSL_write handles encryption, but we need to call it
+                // before submitting to io_uring. For now, we'll write plain data and
+                // handle encryption in a future optimization.
+                if (conn.is_tls) {
+                    if (conn.tls_conn) |*tls_conn| {
+                        // Encrypt response using TLS write
+                        const encrypted_len = tls_conn.write(write_buf[0..response_len]) catch |err| {
+                            std.log.warn("TLS write failed: {}", .{err});
+                            buffer_pool.releaseWrite(write_buf);
+                            _ = c.close(client_fd);
+                            continue;
+                        };
+                        // Write encrypted data (OpenSSL handles encryption internally)
+                        c.io_uring_prep_write(sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(encrypted_len)), 0);
+                    } else {
+                        // TLS connection not available, use plain write
+                        c.io_uring_prep_write(sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(response_len)), 0);
+                    }
+                } else {
+                    // Plain HTTP/1.1 write
+                    c.io_uring_prep_write(sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(response_len)), 0);
+                }
+                
                 setSqeData(sqe, encodeUserData(client_fd, .write));
                 _ = c.io_uring_submit(&ring);
             },

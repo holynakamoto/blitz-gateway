@@ -18,11 +18,20 @@ $(OUTPUT): src/main.zig src/bind_wrapper.c
 	echo "Using include path: $$INCLUDE_PATH"; \
 	echo "Compiling bind_wrapper.c with gcc..."; \
 	gcc -c -O3 -D_GNU_SOURCE -I$$INCLUDE_PATH src/bind_wrapper.c -o /tmp/bind_wrapper.o; \
+	echo "Finding OpenSSL headers..."; \
+	OPENSSL_INCLUDE=$$(find /usr/include -name 'opensslconf.h' 2>/dev/null | head -1 | xargs dirname | xargs dirname); \
+	if [ -z "$$OPENSSL_INCLUDE" ]; then \
+		OPENSSL_INCLUDE="/usr/include"; \
+	fi; \
+	echo "Using OpenSSL include: $$OPENSSL_INCLUDE"; \
+	echo "Compiling openssl_wrapper.c with gcc..."; \
+	gcc -c -O3 -D_GNU_SOURCE -I$$INCLUDE_PATH -I$$OPENSSL_INCLUDE src/tls/openssl_wrapper.c -o /tmp/openssl_wrapper.o; \
 	echo "Building Blitz..."; \
 	cd zig-out/bin && $(ZIG) build-exe -O $(OPTIMIZE) -fstrip -target $(TARGET) \
-		-lc -I$$INCLUDE_PATH -I../../src \
-		../../src/main.zig /tmp/bind_wrapper.o \
-		/usr/lib/aarch64-linux-gnu/liburing.so.2.3; \
+		-lc -I$$INCLUDE_PATH -I$$OPENSSL_INCLUDE -I../../src \
+		../../src/main.zig /tmp/bind_wrapper.o /tmp/openssl_wrapper.o \
+		/usr/lib/aarch64-linux-gnu/liburing.so.2.3 \
+		-L/usr/lib/aarch64-linux-gnu -lssl -lcrypto; \
 	if [ -f main ] && [ ! -f ../../$(OUTPUT) ]; then mv main ../../$(OUTPUT); fi; \
 	if [ -f blitz ] && [ ! -f ../../$(OUTPUT) ]; then mv blitz ../../$(OUTPUT); fi; \
 	if [ ! -f ../../$(OUTPUT) ] && [ -f main ]; then cp main ../../$(OUTPUT); fi; \
@@ -31,7 +40,7 @@ $(OUTPUT): src/main.zig src/bind_wrapper.c
 	@echo "✅ Build complete: $(OUTPUT)"
 
 clean:
-	rm -rf zig-out /tmp/bind_wrapper.o
+	rm -rf zig-out /tmp/bind_wrapper.o /tmp/openssl_wrapper.o
 
 run: $(OUTPUT)
 	./$(OUTPUT)

@@ -8,6 +8,10 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     _ = gpa.allocator(); // Reserved for future use
 
+    // Use std.debug.print for immediate unbuffered output
+    std.debug.print("Blitz Edge Gateway v0.1.0\n", .{});
+    std.debug.print("Target: 10M+ RPS, <50µs p99 latency\n", .{});
+    
     std.log.info("Blitz Edge Gateway v0.1.0", .{});
     std.log.info("Target: 10M+ RPS, <50µs p99 latency", .{});
 

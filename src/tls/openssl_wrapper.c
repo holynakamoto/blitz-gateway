@@ -49,8 +49,9 @@ void blitz_ssl_ctx_set_alpn(SSL_CTX* ctx) {
 static int blitz_alpn_select_callback(SSL* ssl, const unsigned char** out, unsigned char* outlen,
                                const unsigned char* in, unsigned int inlen, void* arg) {
     // Prefer HTTP/2, fallback to HTTP/1.1
-    static const unsigned char http2[] = { 2, 'h', '2' };
-    static const unsigned char http11[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    // Note: OpenSSL expects protocol strings WITHOUT length prefix
+    static const unsigned char http2[] = { 'h', '2' };
+    static const unsigned char http11[] = { 'h', 't', 't', 'p', '/', '1', '.', '1' };
     
     for (unsigned int i = 0; i < inlen; ) {
         unsigned char len = in[i];
@@ -59,12 +60,12 @@ static int blitz_alpn_select_callback(SSL* ssl, const unsigned char** out, unsig
         
         if (len == 2 && memcmp(&in[i], "h2", 2) == 0) {
             *out = http2;
-            *outlen = 3;
+            *outlen = 2;  // Just the protocol string length, no prefix
             return SSL_TLSEXT_ERR_OK;
         }
         if (len == 8 && memcmp(&in[i], "http/1.1", 8) == 0) {
             *out = http11;
-            *outlen = 9;
+            *outlen = 8;  // Just the protocol string length, no prefix
             return SSL_TLSEXT_ERR_OK;
         }
         i += len;

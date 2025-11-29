@@ -150,6 +150,8 @@ pub fn init() !void {
         return error.IoUringInitFailed;
     }
 
+    // Use std.debug.print for immediate unbuffered output
+    std.debug.print("io_uring initialized with {} SQ entries\n", .{SQ_RING_SIZE});
     std.log.info("io_uring initialized with {} SQ entries", .{SQ_RING_SIZE});
 }
 
@@ -193,6 +195,10 @@ pub fn runEchoServer(port: u16) !void {
     const server_fd = try createServerSocket(port);
     defer _ = c.close(server_fd);
 
+    // Use std.debug.print for immediate unbuffered output
+    std.debug.print("Echo server listening on port {}\n", .{port});
+    std.debug.print("Target: 3M+ RPS\n", .{});
+    
     std.log.info("Echo server listening on port {}", .{port});
     std.log.info("Target: 3M+ RPS", .{});
 
@@ -216,6 +222,8 @@ pub fn runEchoServer(port: u16) !void {
     
     if (tls_ctx) |*ctx| {
         if (ctx.loadCertificate(cert_path, key_path)) {
+            // Use std.debug.print for immediate unbuffered output
+            std.debug.print("TLS 1.3 enabled with HTTP/2 support\n", .{});
             std.log.info("TLS 1.3 enabled with HTTP/2 support", .{});
         } else |err| {
             std.log.warn("Failed to load TLS certificates: {} (continuing without TLS)", .{err});
@@ -407,7 +415,8 @@ pub fn runEchoServer(port: u16) !void {
                                             _ = c.close(client_fd);
                                             continue;
                                         };
-                                        const encrypted_len = tls_conn_mut.getEncryptedOutput(write_buf_tls) catch |err| {
+                                        // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                                        const encrypted_len = tls_conn_mut.getAllEncryptedOutput(write_buf_tls) catch |err| {
                                             std.log.warn("Failed to get TLS encrypted output: {}", .{err});
                                             buffer_pool.releaseWrite(write_buf_tls);
                                             buffer_pool.releaseRead(read_buf);
@@ -452,7 +461,8 @@ pub fn runEchoServer(port: u16) !void {
                                         _ = c.close(client_fd);
                                         continue;
                                     };
-                                    const encrypted_len = tls_conn_mut.getEncryptedOutput(write_buf_tls) catch |err| {
+                                    // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                                    const encrypted_len = tls_conn_mut.getAllEncryptedOutput(write_buf_tls) catch |err| {
                                         std.log.warn("Failed to get TLS encrypted output: {}", .{err});
                                         buffer_pool.releaseWrite(write_buf_tls);
                                         buffer_pool.releaseRead(read_buf);
@@ -518,7 +528,8 @@ pub fn runEchoServer(port: u16) !void {
                                         _ = c.close(client_fd);
                                         continue;
                                     };
-                                    const encrypted_len = tls_conn.getEncryptedOutput(write_buf_tls) catch |err| {
+                                    // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                                    const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf_tls) catch |err| {
                                         std.log.warn("Failed to get TLS encrypted output: {}", .{err});
                                         buffer_pool.releaseWrite(write_buf_tls);
                                         buffer_pool.releaseRead(read_buf);
@@ -563,7 +574,8 @@ pub fn runEchoServer(port: u16) !void {
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no write buffer");
                                     continue;
                                 };
-                                const encrypted_len = tls_conn.getEncryptedOutput(write_buf_tls) catch |err| {
+                                // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                                const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf_tls) catch |err| {
                                     std.log.warn("Failed to get TLS encrypted output: {}", .{err});
                                     buffer_pool.releaseWrite(write_buf_tls);
                                     buffer_pool.releaseRead(read_buf);
@@ -629,97 +641,344 @@ pub fn runEchoServer(port: u16) !void {
                                     }
                                 };
                                 
-                                // Update protocol based on ALPN
-                                conn.protocol = tls_conn.protocol;
+                                // Update protocol based on ALPN (only if not already set, to preserve across reads)
+                                if (conn.protocol == .http1_1) {
+                                    conn.protocol = tls_conn.protocol;
+                                }
                                 
-                                // Initialize HTTP/2 connection if negotiated
-                                if (tls_conn.protocol == .http2) {
-                                    if (conn.http2_conn == null) {
+                                std.log.debug("TLS decrypted {} bytes, protocol: {} (conn.protocol: {})", .{ tls_decrypted_len, tls_conn.protocol, conn.protocol });
+                                
+                                // Initialize HTTP/2 connection if negotiated (check conn.protocol which persists across reads)
+                                if (conn.protocol == .http2) {
+                                    std.log.debug("HTTP/2 protocol detected, processing frames", .{});
+                                    const is_new_http2_conn = (conn.http2_conn == null);
+                                    
+                                    if (is_new_http2_conn) {
                                         const http2_conn = http2.Http2Connection.init(backing_allocator);
                                         conn.http2_conn = backing_allocator.create(http2.Http2Connection) catch {
                                             std.log.warn("Failed to allocate HTTP/2 connection", .{});
                                             buffer_pool.releaseRead(read_buf);
-                                            _ = c.close(client_fd);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "HTTP/2 allocation failed");
                                             continue;
                                         };
                                         conn.http2_conn.?.* = http2_conn;
+                                        
+                                        // Send initial server SETTINGS frame immediately after connection establishment
+                                        const write_buf_init = buffer_pool.acquireWrite() orelse {
+                                            buffer_pool.releaseRead(read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no write buffer for SETTINGS");
+                                            continue;
+                                        };
+                                        
+                                        const server_settings = conn.http2_conn.?.getServerSettings();
+                                        const settings_len = http2.frame.generateServerSettings(server_settings, write_buf_init) catch |err| {
+                                            std.log.warn("Failed to generate server SETTINGS: {}", .{err});
+                                            buffer_pool.releaseWrite(write_buf_init);
+                                            buffer_pool.releaseRead(read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "SETTINGS generation failed");
+                                            continue;
+                                        };
+                                        
+                                        // Encrypt and send initial SETTINGS
+                                        _ = tls_conn.write(write_buf_init[0..settings_len]) catch |err| {
+                                            std.log.warn("Failed to encrypt SETTINGS: {}", .{err});
+                                            buffer_pool.releaseWrite(write_buf_init);
+                                            buffer_pool.releaseRead(read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
+                                            continue;
+                                        };
+                                        
+                                        // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                                        const encrypted_settings_len = tls_conn.getAllEncryptedOutput(write_buf_init) catch |err| {
+                                            std.log.warn("Failed to get encrypted SETTINGS: {}", .{err});
+                                            buffer_pool.releaseWrite(write_buf_init);
+                                            buffer_pool.releaseRead(read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS output failed");
+                                            continue;
+                                        };
+                                        
+                                        const sqe_opt_settings = blitz_io_uring_get_sqe(&ring);
+                                        if (sqe_opt_settings != null) {
+                                            const settings_sqe = sqe_opt_settings.?;
+                                            c.io_uring_prep_write(settings_sqe, client_fd, write_buf_init.ptr, @as(c_uint, @intCast(encrypted_settings_len)), 0);
+                                            setSqeData(settings_sqe, encodeUserData(client_fd, .write));
+                                            _ = c.io_uring_submit(&ring);
+                                            
+                                            // Only assign write_buffer after successfully obtaining SQE
+                                            if (connections.getPtr(client_fd)) |conn_ptr| {
+                                                conn_ptr.write_buffer = write_buf_init;
+                                            }
+                                        } else {
+                                            // Clear write_buffer before releasing to avoid double-free in closeConnection
+                                            if (connections.getPtr(client_fd)) |conn_ptr| {
+                                                if (conn_ptr.write_buffer) |buf| {
+                                                    if (buf.ptr == write_buf_init.ptr) {
+                                                        conn_ptr.write_buffer = null;
+                                                    }
+                                                }
+                                            }
+                                            buffer_pool.releaseWrite(write_buf_init);
+                                            buffer_pool.releaseRead(read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no SQE for SETTINGS");
+                                            continue;
+                                        }
+                                        
+                                        // After sending initial SETTINGS, wait for client frames
+                                        buffer_pool.releaseRead(read_buf);
+                                        
+                                        // Submit read for client's SETTINGS frame
+                                        const fresh_read_buf = buffer_pool.acquireRead() orelse {
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no read buffer");
+                                            continue;
+                                        };
+                                        
+                                        if (connections.getPtr(client_fd)) |conn_ptr| {
+                                            conn_ptr.read_buffer = fresh_read_buf;
+                                        }
+                                        
+                                        const sqe_opt_read = blitz_io_uring_get_sqe(&ring);
+                                        if (sqe_opt_read != null) {
+                                            const read_sqe = sqe_opt_read.?;
+                                            c.io_uring_prep_read(read_sqe, client_fd, fresh_read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
+                                            setSqeData(read_sqe, encodeUserData(client_fd, .read));
+                                            _ = c.io_uring_submit(&ring);
+                                        } else {
+                                            buffer_pool.releaseRead(fresh_read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no SQE for read");
+                                        }
+                                        
+                                        continue; // Wait for client's SETTINGS frame
                                     }
                                     
                                     // Handle HTTP/2 frames using decrypted data
-                                    conn.http2_conn.?.handleFrame(read_buf[0..tls_decrypted_len]) catch |err| {
-                                        std.log.warn("HTTP/2 frame handling failed: {}", .{err});
+                                    // Process all frames in the buffer (may contain multiple frames)
+                                    std.log.info("Processing HTTP/2 frames, {} bytes available (first 16 bytes: {any})", .{ tls_decrypted_len, read_buf[0..@min(16, tls_decrypted_len)] });
+                                    const frame_result = conn.http2_conn.?.processAllFrames(read_buf[0..tls_decrypted_len]) catch |err| {
+                                        std.log.err("HTTP/2 frame handling failed: {} (first 16 bytes: {any})", .{ err, read_buf[0..@min(16, tls_decrypted_len)] });
                                         buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "HTTP/2 frame error");
+                                        continue;
+                                    };
+                                    const response_action = frame_result.action;
+                                    const needs_settings_ack = frame_result.needs_settings_ack;
+                                    const frames_consumed = frame_result.bytes_consumed;
+                                    std.log.info("Processed {} bytes of HTTP/2 frames, response action: {}, needs_settings_ack: {}", .{ frames_consumed, response_action, needs_settings_ack });
+                                    
+                                    // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response
+                                    // This is required by HTTP/2 spec - clients will hang if ACK comes after response
+                                    
+                                    // Process response action
+                                    const write_buf = buffer_pool.acquireWrite() orelse {
+                                        // Free response_action if it has owned resources before closing connection
+                                        response_action.deinit(backing_allocator);
+                                        buffer_pool.releaseRead(read_buf);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no write buffer");
                                         continue;
                                     };
                                     
-                                    // TODO: Implement proper HTTP/2 response generation
-                                    // For now, send GOAWAY frame before closing
-                                    std.log.warn("HTTP/2 response not yet implemented, sending GOAWAY", .{});
+                                    var response_len: usize = 0;
+                                    var offset: usize = 0;
                                     
-                                    // Send GOAWAY frame (RFC 7540 Section 6.8)
-                                    // Frame: 9 bytes header + 8 bytes payload
-                                    const goaway_buf = buffer_pool.acquireWrite() orelse {
-                                        buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
-                                        continue;
-                                    };
-                                    
-                                    // GOAWAY frame header (9 bytes)
-                                    // Length: 8 (payload size)
-                                    goaway_buf[0] = 0;
-                                    goaway_buf[1] = 0;
-                                    goaway_buf[2] = 8; // Length: 8 bytes
-                                    goaway_buf[3] = 7; // Frame type: GOAWAY
-                                    goaway_buf[4] = 0; // Flags: none
-                                    goaway_buf[5] = 0; // Reserved + Stream ID (0 for GOAWAY)
-                                    goaway_buf[6] = 0;
-                                    goaway_buf[7] = 0;
-                                    goaway_buf[8] = 0;
-                                    
-                                    // GOAWAY payload (8 bytes)
-                                    // Last-Stream-ID: 0 (no streams processed)
-                                    goaway_buf[9] = 0;
-                                    goaway_buf[10] = 0;
-                                    goaway_buf[11] = 0;
-                                    goaway_buf[12] = 0;
-                                    // Error Code: ENHANCE_YOUR_CALM (0x0B) - server is closing
-                                    goaway_buf[13] = 0;
-                                    goaway_buf[14] = 0;
-                                    goaway_buf[15] = 0;
-                                    goaway_buf[16] = 0x0B; // ENHANCE_YOUR_CALM
-                                    
-                                    // Encrypt and send GOAWAY frame
-                                    _ = tls_conn.write(goaway_buf[0..17]) catch |err| {
-                                        std.log.warn("Failed to send GOAWAY frame: {}", .{err});
-                                        buffer_pool.releaseWrite(goaway_buf);
-                                        buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
-                                        continue;
-                                    };
-                                    
-                                    const encrypted_goaway_len = tls_conn.getEncryptedOutput(goaway_buf) catch |err| {
-                                        std.log.warn("Failed to get encrypted GOAWAY: {}", .{err});
-                                        buffer_pool.releaseWrite(goaway_buf);
-                                        buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
-                                        continue;
-                                    };
-                                    
-                                    if (connections.getPtr(client_fd)) |conn_ptr| {
-                                        conn_ptr.write_buffer = goaway_buf;
+                                    // Send SETTINGS ACK first if needed (CRITICAL for HTTP/2 compliance)
+                                    if (needs_settings_ack) {
+                                        std.log.info("Sending SETTINGS ACK before response", .{});
+                                        const ack_len = http2.frame.generateSettingsAck(write_buf[offset..]) catch |err| {
+                                            std.log.warn("Failed to generate SETTINGS ACK: {}", .{err});
+                                            buffer_pool.releaseWrite(write_buf);
+                                            buffer_pool.releaseRead(read_buf);
+                                            continue;
+                                        };
+                                        offset += ack_len;
                                     }
                                     
-                                    const sqe_opt_goaway = blitz_io_uring_get_sqe(&ring);
-                                    if (sqe_opt_goaway != null) {
-                                        sqe = sqe_opt_goaway.?;
-                                        c.io_uring_prep_write(sqe, client_fd, goaway_buf.ptr, @as(c_uint, @intCast(encrypted_goaway_len)), 0);
-                                        setSqeData(sqe, encodeUserData(client_fd, .write));
+                                    // Now send the main response (if any)
+                                    switch (response_action) {
+                                        .none => {
+                                            // If we only need SETTINGS ACK (no response), send it now
+                                            if (needs_settings_ack) {
+                                                // response_len is already set to offset (ACK length) above
+                                                // Continue to encryption/write below
+                                                std.log.info("Sending SETTINGS ACK only (no response)", .{});
+                                            } else {
+                                                // No response and no ACK needed - just read more
+                                                buffer_pool.releaseWrite(write_buf);
+                                                buffer_pool.releaseRead(read_buf);
+                                                // Submit another read for next frame
+                                                const sqe_opt_next = blitz_io_uring_get_sqe(&ring);
+                                                if (sqe_opt_next != null) {
+                                                    const read_sqe = sqe_opt_next.?;
+                                                    const fresh_read_buf = buffer_pool.acquireRead() orelse {
+                                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no read buffer");
+                                                        continue;
+                                                    };
+                                                    if (connections.getPtr(client_fd)) |conn_ptr| {
+                                                        conn_ptr.read_buffer = fresh_read_buf;
+                                                    }
+                                                    c.io_uring_prep_read(read_sqe, client_fd, fresh_read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
+                                                    setSqeData(read_sqe, encodeUserData(client_fd, .read));
+                                                    _ = c.io_uring_submit(&ring);
+                                                } else {
+                                                    closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no SQE for read");
+                                                }
+                                                continue;
+                                            }
+                                        },
+                                        .send_settings => {
+                                            // Send server SETTINGS frame (initial settings)
+                                            const server_settings = conn.http2_conn.?.getServerSettings();
+                                            const settings_len = http2.frame.generateServerSettings(server_settings, write_buf[offset..]) catch |err| {
+                                                std.log.warn("Failed to generate server SETTINGS: {}", .{err});
+                                                buffer_pool.releaseWrite(write_buf);
+                                                buffer_pool.releaseRead(read_buf);
+                                                continue;
+                                            };
+                                            offset += settings_len;
+                                        },
+                                        .send_settings_ack => {
+                                            // This should not happen here since we handle it above, but keep for safety
+                                            if (!needs_settings_ack) {
+                                                const ack_len = http2.frame.generateSettingsAck(write_buf[offset..]) catch |err| {
+                                                    std.log.warn("Failed to generate SETTINGS ACK: {}", .{err});
+                                                    buffer_pool.releaseWrite(write_buf);
+                                                    buffer_pool.releaseRead(read_buf);
+                                                    continue;
+                                                };
+                                                offset += ack_len;
+                                            }
+                                        },
+                                        .send_ping_ack => |ping_data| {
+                                            const ping_len = http2.frame.generatePingAck(ping_data, write_buf[offset..]) catch |err| {
+                                                std.log.warn("Failed to generate PING ACK: {}", .{err});
+                                                // Use deinit to properly free owned ping_data
+                                                response_action.deinit(backing_allocator);
+                                                buffer_pool.releaseWrite(write_buf);
+                                                buffer_pool.releaseRead(read_buf);
+                                                continue;
+                                            };
+                                            offset += ping_len;
+                                            // Use deinit to properly free owned ping_data
+                                            response_action.deinit(backing_allocator);
+                                        },
+                                        .send_response => |resp| {
+                                            std.log.info("Generating HTTP/2 response for stream {}, body_len={}", .{ resp.stream_id, resp.body.len });
+                                            const resp_len = conn.http2_conn.?.generateResponse(resp.stream_id, resp.status, resp.headers, resp.body, write_buf[offset..]) catch |err| {
+                                                std.log.warn("Failed to generate HTTP/2 response: {}", .{err});
+                                                // Use deinit to properly free all owned resources (body, headers slice, and allocated header values)
+                                                response_action.deinit(backing_allocator);
+                                                buffer_pool.releaseWrite(write_buf);
+                                                buffer_pool.releaseRead(read_buf);
+                                                continue;
+                                            };
+                                            offset += resp_len;
+                                            std.log.info("Generated HTTP/2 response, {} bytes", .{resp_len});
+                                            // Use deinit to properly free all owned resources (body, headers slice, and allocated header values)
+                                            response_action.deinit(backing_allocator);
+                                        },
+                                        .send_goaway => |last_stream_id| {
+                                            const goaway_len = http2.frame.generateGoaway(@as(u31, @intCast(last_stream_id)), @intFromEnum(http2.frame.ErrorCode.no_error), write_buf[offset..]) catch |err| {
+                                                std.log.warn("Failed to generate GOAWAY: {}", .{err});
+                                                buffer_pool.releaseWrite(write_buf);
+                                                buffer_pool.releaseRead(read_buf);
+                                                continue;
+                                            };
+                                            offset += goaway_len;
+                                        },
+                                        .close_connection => {
+                                            buffer_pool.releaseWrite(write_buf);
+                                            buffer_pool.releaseRead(read_buf);
+                                            closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "GOAWAY received");
+                                            continue;
+                                        },
+                                    }
+                                    
+                                    // CRITICAL: Set response_len AFTER all frames are written to offset
+                                    // This ensures we include both SETTINGS ACK (if sent) AND the main response
+                                    // offset contains: ACK length (if needs_settings_ack) + response length (if any)
+                                    response_len = offset;
+                                    
+                                    // CRITICAL: If response_len is 0, we have nothing to send - this is an error
+                                    if (response_len == 0) {
+                                        std.log.warn("HTTP/2 response length is 0! needs_settings_ack={}, response_action={}", .{ needs_settings_ack, response_action });
+                                        buffer_pool.releaseWrite(write_buf);
+                                        buffer_pool.releaseRead(read_buf);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "HTTP/2 response length is 0");
+                                        continue;
+                                    }
+                                    
+                                    // Encrypt HTTP/2 response frame(s)
+                                    // CRITICAL: Clear any stale data from write_bio before encrypting new data
+                                    // This prevents "bad record mac" errors from leftover encrypted data
+                                    tls_conn.clearEncryptedOutput();
+                                    
+                                    // Verify write_bio is empty before encrypting
+                                    if (tls_conn.hasEncryptedOutput()) {
+                                        std.log.warn("Warning: write_bio still has data after clearEncryptedOutput()!", .{});
+                                        // Try clearing again
+                                        tls_conn.clearEncryptedOutput();
+                                    }
+                                    
+                                    std.log.info("Encrypting HTTP/2 response, {} bytes (ACK: {}, main: {})", .{ response_len, needs_settings_ack, response_action != .none });
+                                    
+                                    _ = tls_conn.write(write_buf[0..response_len]) catch |err| {
+                                        std.log.warn("Failed to encrypt HTTP/2 response: {}", .{err});
+                                        buffer_pool.releaseWrite(write_buf);
+                                        buffer_pool.releaseRead(read_buf);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
+                                        continue;
+                                    };
+                                    
+                                    // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                                    const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf) catch |err| {
+                                        std.log.warn("Failed to get encrypted HTTP/2 output: {}", .{err});
+                                        buffer_pool.releaseWrite(write_buf);
+                                        buffer_pool.releaseRead(read_buf);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS output failed");
+                                        continue;
+                                    };
+                                    
+                                    std.log.info("Encrypted HTTP/2 response, {} bytes (plaintext: {}), submitting write", .{ encrypted_len, response_len });
+                                    
+                                    // CRITICAL: If encrypted_len is 0, TLS write produced no output - this is an error
+                                    if (encrypted_len == 0) {
+                                        std.log.warn("TLS encryption produced no output for HTTP/2 response!", .{});
+                                        buffer_pool.releaseWrite(write_buf);
+                                        buffer_pool.releaseRead(read_buf);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no encrypted output");
+                                        continue;
+                                    }
+                                    
+                                    const sqe_opt_write = blitz_io_uring_get_sqe(&ring);
+                                    if (sqe_opt_write != null) {
+                                        const write_sqe = sqe_opt_write.?;
+                                        c.io_uring_prep_write(write_sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(encrypted_len)), 0);
+                                        setSqeData(write_sqe, encodeUserData(client_fd, .write));
                                         _ = c.io_uring_submit(&ring);
+                                        
+                                        // Only assign write_buffer after successfully obtaining SQE
+                                        if (connections.getPtr(client_fd)) |conn_ptr| {
+                                            conn_ptr.write_buffer = write_buf;
+                                        }
+                                    } else {
+                                        // Clear write_buffer before releasing to avoid double-free in closeConnection
+                                        if (connections.getPtr(client_fd)) |conn_ptr| {
+                                            if (conn_ptr.write_buffer) |buf| {
+                                                if (buf.ptr == write_buf.ptr) {
+                                                    conn_ptr.write_buffer = null;
+                                                }
+                                            }
+                                            // CRITICAL: Clear encrypted output before releasing buffer
+                                            if (conn_ptr.is_tls) {
+                                                if (conn_ptr.tls_conn) |*tls_connection| {
+                                                    tls_connection.clearEncryptedOutput();
+                                                }
+                                            }
+                                        }
+                                        buffer_pool.releaseWrite(write_buf);
+                                        buffer_pool.releaseRead(read_buf);
+                                        closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no SQE for write");
                                     }
                                     
                                     buffer_pool.releaseRead(read_buf);
-                                    // Connection will be closed after GOAWAY is sent (in write handler)
                                     continue;
                                 }
                                 
@@ -829,7 +1088,8 @@ pub fn runEchoServer(port: u16) !void {
                                 closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
                                 continue;
                             };
-                            const encrypted_len = tls_conn.getEncryptedOutput(write_buf) catch |err| {
+                            // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
+                            const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf) catch |err| {
                                 std.log.warn("Failed to get TLS encrypted output: {}", .{err});
                                 buffer_pool.releaseWrite(write_buf);
                                 closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "getEncryptedOutput failed");
@@ -912,11 +1172,6 @@ pub fn runEchoServer(port: u16) !void {
                     continue;
                 }
 
-                // Store write buffer in connection
-                if (connections.getPtr(client_fd)) |conn_ptr| {
-                    conn_ptr.write_buffer = write_buf;
-                }
-
                 // Submit write
                 const sqe_opt6 = blitz_io_uring_get_sqe(&ring);
                 if (sqe_opt6 == null) {
@@ -943,9 +1198,9 @@ pub fn runEchoServer(port: u16) !void {
                             continue;
                         };
                         
-                        // Get encrypted output from write_bio
-                        // Note: Encrypted data might be larger than plaintext, but write_buf should be large enough (BUFFER_SIZE)
-                        const encrypted_len = tls_conn.getEncryptedOutput(write_buf) catch |err| {
+                        // Get ALL encrypted output from write_bio
+                        // CRITICAL: Must read all data to prevent incomplete TLS records and "bad record mac" errors
+                        const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf) catch |err| {
                             std.log.warn("Failed to get TLS encrypted output: {}", .{err});
                             buffer_pool.releaseWrite(write_buf);
                             closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "getEncryptedOutput failed");
@@ -970,6 +1225,11 @@ pub fn runEchoServer(port: u16) !void {
                     c.io_uring_prep_write(sqe, client_fd, write_buf.ptr, @as(c_uint, @intCast(response_len)), 0);
                 }
                 
+                // Only assign write_buffer after successfully obtaining SQE and completing all preparation
+                if (connections.getPtr(client_fd)) |conn_ptr| {
+                    conn_ptr.write_buffer = write_buf;
+                }
+                
                 setSqeData(sqe, encodeUserData(client_fd, .write));
                 _ = c.io_uring_submit(&ring);
             },
@@ -986,7 +1246,16 @@ pub fn runEchoServer(port: u16) !void {
                 }
                 const conn = conn_opt.?;
 
-                // Release write buffer back to pool
+                // CRITICAL: For TLS connections, clear write BIO BEFORE releasing buffer
+                // This prevents "bad record mac" errors when buffers are reused
+                // OpenSSL's memory BIOs maintain pointers to the buffer - we must clear them first
+                if (conn.is_tls) {
+                    if (conn.tls_conn) |*tls_conn| {
+                        tls_conn.clearEncryptedOutput();
+                    }
+                }
+
+                // Release write buffer back to pool (after clearing encrypted output)
                 if (conn.write_buffer) |buf| {
                     buffer_pool.releaseWrite(buf);
                     conn.write_buffer = null;

@@ -14,6 +14,7 @@ const c = @cImport({
 // C wrapper functions
 extern fn blitz_openssl_init() c_int;
 extern fn blitz_ssl_ctx_new() ?*c.SSL_CTX;
+extern fn blitz_ssl_ctx_set_alpn(ctx: ?*c.SSL_CTX) void;
 extern fn blitz_ssl_ctx_use_certificate_file(ctx: ?*c.SSL_CTX, cert_file: [*c]const u8) c_int;
 extern fn blitz_ssl_ctx_use_privatekey_file(ctx: ?*c.SSL_CTX, key_file: [*c]const u8) c_int;
 extern fn blitz_ssl_new(ctx: ?*c.SSL_CTX) ?*c.SSL;
@@ -120,6 +121,42 @@ pub const TlsConnection = struct {
         return @intCast(bytes_read);
     }
     
+    // Get ALL encrypted output, ensuring we read everything from write_bio
+    // Returns the total bytes read. If the buffer is too small, returns error.BufferTooSmall
+    // This is critical to prevent "bad record mac" errors from incomplete TLS records
+    pub fn getAllEncryptedOutput(self: *TlsConnection, buf: []u8) !usize {
+        if (self.write_bio == null) {
+            return error.NoBio;
+        }
+        const total_pending = blitz_bio_ctrl_pending(self.write_bio);
+        if (total_pending == 0) {
+            return 0; // No data to read
+        }
+        
+        // Check if all data fits in the buffer
+        if (total_pending > buf.len) {
+            // Buffer too small - this should not happen with normal TLS records
+            // TLS records are typically < 16KB, and our buffer is 4KB
+            // But if it does happen, we need to handle it
+            return error.BufferTooSmall;
+        }
+        
+        // Read all pending data
+        const bytes_read = blitz_bio_read(self.write_bio, buf.ptr, @intCast(total_pending));
+        if (bytes_read < 0) {
+            return error.BioReadFailed;
+        }
+        
+        // Verify we read everything
+        const remaining = blitz_bio_ctrl_pending(self.write_bio);
+        if (remaining > 0) {
+            // This should not happen if we read correctly
+            std.log.warn("Warning: {} bytes still pending in write_bio after read", .{remaining});
+        }
+        
+        return @intCast(bytes_read);
+    }
+    
     // Check if read_bio has any pending data (should be empty after handshake)
     pub fn hasPendingReadData(self: *TlsConnection) bool {
         if (self.read_bio == null) {
@@ -134,6 +171,24 @@ pub const TlsConnection = struct {
             return false;
         }
         return blitz_bio_ctrl_pending(self.write_bio) > 0;
+    }
+    
+    // Clear encrypted output from write_bio (drain all pending data)
+    // CRITICAL: Call this after releasing write buffers to prevent BIO state issues
+    // This prevents "bad record mac" errors when buffers are reused
+    pub fn clearEncryptedOutput(self: *TlsConnection) void {
+        if (self.write_bio == null) {
+            return;
+        }
+        // Drain all pending data from write_bio into a temporary buffer
+        // This resets the BIO's internal pointers and prevents stale data issues
+        var temp_buf: [4096]u8 = undefined;
+        while (blitz_bio_ctrl_pending(self.write_bio) > 0) {
+            const bytes_read = blitz_bio_read(self.write_bio, &temp_buf, @intCast(temp_buf.len));
+            if (bytes_read <= 0) {
+                break; // No more data or error
+            }
+        }
     }
     
     // Perform TLS handshake (non-blocking)
@@ -261,6 +316,9 @@ pub const TlsContext = struct {
         if (ctx == null) {
             return error.SslCtxCreationFailed;
         }
+        
+        // Set ALPN callback for HTTP/2 negotiation
+        blitz_ssl_ctx_set_alpn(ctx);
         
         return TlsContext{ .ctx = ctx };
     }

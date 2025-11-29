@@ -92,11 +92,11 @@ jobs:
           # macOS builds
           - os: macos
             arch: x86_64
-            runner: macos-13
+            runner: macos-15-intel
             target: x86_64-macos
           - os: macos
             arch: aarch64
-            runner: macos-14
+            runner: macos-latest
             target: aarch64-macos
 
     steps:

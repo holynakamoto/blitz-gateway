@@ -1,0 +1,35 @@
+# This file defines code owners for automatic PR review requests
+# Each line is a file pattern followed by one or more owners
+# Order is important - the last matching pattern takes precedence
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global owners - these users will be requested for review on all PRs
+* @holynakamoto
+
+# Core source code
+/src/ @holynakamoto
+/src/**/*.zig @holynakamoto
+
+# Build configuration
+/build.zig @holynakamoto
+/build.zig.zon @holynakamoto
+
+# CI/CD and GitHub workflows
+/.github/workflows/ @holynakamoto
+/.github/CODEOWNERS @holynakamoto
+
+# Documentation
+/README.md @holynakamoto
+/CONTRIBUTING.md @holynakamoto
+/docs/ @holynakamoto
+
+# Docker and deployment
+/Dockerfile @holynakamoto
+/docker-compose.yml @holynakamoto
+
+# Scripts
+/scripts/ @holynakamoto
+
+# Benchmarks
+/benches/ @holynakamoto
+

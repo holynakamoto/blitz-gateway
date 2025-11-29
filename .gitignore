@@ -1,0 +1,30 @@
+# Zig build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+
+# Benchmark results
+benches/*.txt
+benches/*.png
+benches/*.svg
+!benches/COMPARISON.md
+!benches/benchmark-machine-spec.md
+!benches/*.sh
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

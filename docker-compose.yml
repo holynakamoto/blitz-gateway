@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  blitz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blitz
+    # Privileged mode required for:
+    # - CPU governor changes
+    # - THP disabling
+    # - System tuning
+    privileged: true
+    network_mode: host
+    # Mount /sys for CPU governor and THP
+    volumes:
+      - /sys:/sys:rw
+    # Increase file descriptor limits
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    # Keep container running
+    command: tail -f /dev/null
+    # Or run Blitz directly:
+    # command: ["./zig-out/bin/blitz"]
+

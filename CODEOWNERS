@@ -1,0 +1,24 @@
+# CODEOWNERS file for Blitz Edge Gateway
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Core maintainers - all code requires their approval
+* @blitz-gateway/core-team
+
+# Architecture and performance-critical code
+/src/io_uring.zig @blitz-gateway/core-team
+/src/http/ @blitz-gateway/core-team
+/src/tls/ @blitz-gateway/core-team
+/src/quic/ @blitz-gateway/core-team
+
+# Build system
+/build.zig @blitz-gateway/core-team
+/zig.mod @blitz-gateway/core-team
+
+# Documentation (less strict, but still reviewed)
+/docs/ @blitz-gateway/core-team
+*.md @blitz-gateway/core-team
+
+# Configuration files
+/.github/ @blitz-gateway/core-team
+/LICENSE @blitz-gateway/core-team
+

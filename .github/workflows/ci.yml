@@ -241,7 +241,7 @@ jobs:
           # You might need to use kcov or similar tools
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: ./coverage.lcov
           fail_ci_if_error: false

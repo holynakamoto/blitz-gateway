@@ -1,0 +1,19 @@
+# GitHub Linguist configuration to ensure Zig is the primary language
+
+# Treat shell scripts as vendored (don't count toward language stats)
+scripts/** linguist-vendored
+*.sh linguist-vendored
+
+# Documentation doesn't count toward language stats
+*.md linguist-documentation
+benches/** linguist-documentation
+
+# Ensure Zig files are fully detected
+*.zig linguist-detectable=true
+
+# Docker and config files don't count
+Dockerfile linguist-vendored
+docker-compose.yml linguist-vendored
+Vagrantfile linguist-vendored
+Makefile linguist-vendored
+

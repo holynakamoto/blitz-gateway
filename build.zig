@@ -95,4 +95,17 @@ pub fn build(b: *std.Build) void {
     const run_foundation_tests = b.addRunArtifact(foundation_tests);
     const foundation_test_step = b.step("test-foundation", "Run TLS/HTTP/2 foundation validation tests");
     foundation_test_step.dependOn(&run_foundation_tests.step);
+    
+    // Load balancer tests
+    const load_balancer_tests = b.addTest(.{
+        .root_source_file = b.path("src/load_balancer/test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    load_balancer_tests.linkLibC();
+
+    const run_load_balancer_tests = b.addRunArtifact(load_balancer_tests);
+    const load_balancer_test_step = b.step("test-load-balancer", "Run load balancer tests");
+    load_balancer_test_step.dependOn(&run_load_balancer_tests.step);
 }

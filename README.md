@@ -33,7 +33,7 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
                           ├─ HTTP/2 over TLS 1.3 ✅
                           ├─ QUIC/HTTP3 (pure Zig implementation) 🚧
                           ├─ Routing → Radix tree + eBPF map 🚧
-                          ├─ Backend pool → Connection reuse, health checks 🚧
+                          ├─ Backend pool → Connection reuse, health checks ✅
                           ├─ WASM runtime → wasmtime-zig fork, < 2 ms load 🚧
                           └─ Metrics → OTLP + Prometheus 🚧
 ```
@@ -49,14 +49,23 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
   - SETTINGS frame handling with ACK
   - HEADERS frame with HPACK encoding/decoding
   - DATA frame with proper END_STREAM flags
-  - Stream management and state tracking
+  - Stream multiplexing (multiple concurrent streams per connection)
+  - Flow control (WINDOW_UPDATE frame handling)
+  - GOAWAY frame for graceful shutdown
   - Full frame parsing and response generation
+- ✅ **Load Balancing Module** - **COMPLETE** ✅
+  - Backend pool management with round-robin selection
+  - Health checks with automatic failure detection
+  - Connection pooling with connection reuse
+  - Retry logic with exponential backoff
+  - Timeout handling for backend requests
 - ✅ **Security features** - Connection limits, timeouts, request validation
-- ✅ **Test suite** - 18/18 tests passing
+- ✅ **Test suite** - 18/18 core tests passing + load balancer tests
 - ✅ **Performance** - ~2,528 RPS (HTTP/2 over TLS, tested in VM)
 - ⚠️ **Known Issues** - Huffman decoding not fully implemented (minor path corruption)
 - 🚧 HTTP/3/QUIC support (planned)
-- 🚧 Routing and load balancing (planned)
+- 🚧 Load balancer integration into main server (module complete, integration pending)
+- 🚧 Configuration system (planned)
 - 🚧 WASM plugin system (planned)
 
 ### 🎉 Recent Achievements (December 2024)
@@ -64,8 +73,12 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
 - ✅ **HTTP/2 over TLS 1.3 COMPLETE** - Full end-to-end HTTP/2 implementation working
 - ✅ **HPACK Implementation** - Static and dynamic table support, encoding/decoding
 - ✅ **Frame Generation** - Proper SETTINGS, HEADERS, DATA frames with correct flags
+- ✅ **Stream Multiplexing** - Multiple concurrent streams per connection
+- ✅ **Flow Control** - WINDOW_UPDATE frame handling for proper flow control
+- ✅ **GOAWAY Support** - Graceful shutdown with proper error codes
 - ✅ **TLS Buffer Management** - Fixed write_bio handling to prevent "bad record mac" errors
 - ✅ **Stream Management** - Stream ID tracking and state management
+- ✅ **Load Balancing Module** - Complete implementation with backend pool, health checks, connection pooling, retry logic, and timeouts
 - ✅ **Production Ready** - Server responding correctly to HTTP/2 requests
 
 See [ROADMAP.md](ROADMAP.md) for detailed roadmap and next steps.
@@ -212,7 +225,7 @@ hey -n 100000 -c 1000 https://localhost:8080/hello
 | Quarter       | Milestone                                      | Key Deliverables                                                                 |
 |---------------|------------------------------------------------|----------------------------------------------------------------------------------|
 | Q4 2025       | MVP v0.1 (private alpha) ✅ **COMPLETE**       | HTTP/1.1 + TLS 1.3, io_uring, 5M RPS, basic routing, health checks               |
-| Q4 2025       | MVP v0.2 (private beta) 🚀 **IN PROGRESS**     | **HTTP/2 over TLS 1.3 COMPLETE**, load balancing, configuration system            |
+| Q4 2025       | MVP v0.2 (private beta) 🚀 **IN PROGRESS**     | **HTTP/2 over TLS 1.3 COMPLETE** ✅, **Load Balancing Module COMPLETE** ✅, configuration system            |
 | Q1 2026       | v0.5 (public beta)                             | Rate limiting, JWT auth, OpenTelemetry, hot reload, Docker image                 |
 | Q2 2026       | v1.0 GA (open source)                          | HTTP/3 (pure Zig QUIC), WASM plugins, enterprise WAF module                       |
 | Q3 2026       | v2.0 (enterprise + cloud launch)               | Managed global platform launch, marketplace, SLA 99.999%, SOC2                   |

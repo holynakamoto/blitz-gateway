@@ -96,13 +96,15 @@ fn createServerSocket(port: u16) !c_int {
     const opt: c_int = 1;
     _ = c.setsockopt(sockfd, c.SOL_SOCKET, c.SO_REUSEADDR, &opt, @sizeOf(c_int));
 
-    var addr: c.struct_sockaddr_in = undefined;
+    var addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in);
     addr.sin_family = c.AF_INET;
     addr.sin_addr.s_addr = c.INADDR_ANY;
     addr.sin_port = c.htons(port);
 
     // Use C wrapper to avoid Zig 0.12.0 union type issues
-    if (blitz_bind(sockfd, &addr) < 0) {
+    const bind_result = blitz_bind(sockfd, &addr);
+    if (bind_result < 0) {
+        std.log.err("bind() failed on port {}", .{port});
         _ = c.close(sockfd);
         return error.BindFailed;
     }
@@ -209,8 +211,9 @@ pub fn runEchoServer(port: u16) !void {
                     buffer_pool.releaseRead(read_buf);
                     _ = c.close(client_fd);
                 } else {
-                    c.io_uring_prep_read(sqe, client_fd, read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
-                    setSqeData(sqe, encodeUserData(client_fd, .read));
+                    const read_sqe = sqe_opt4.?;
+                    c.io_uring_prep_read(read_sqe, client_fd, read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
+                    setSqeData(read_sqe, encodeUserData(client_fd, .read));
                     _ = c.io_uring_submit(&ring);
                 }
 
@@ -402,9 +405,9 @@ pub fn runEchoServer(port: u16) !void {
                         _ = c.close(client_fd);
                         continue;
                     }
-                    sqe = sqe_opt2.?;
-                    c.io_uring_prep_read(sqe, client_fd, buf.ptr, BUFFER_SIZE, 0);
-                    setSqeData(sqe, encodeUserData(client_fd, .read));
+                    const read_sqe = sqe_opt2.?;
+                    c.io_uring_prep_read(read_sqe, client_fd, buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
+                    setSqeData(read_sqe, encodeUserData(client_fd, .read));
                     _ = c.io_uring_submit(&ring);
                 } else {
                     // No buffers available - close connection

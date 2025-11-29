@@ -600,7 +600,10 @@ pub fn runEchoServer(port: u16) !void {
                             
                             // Handshake complete - WAIT for next read event (encrypted HTTP request)
                             // Don't try to decrypt yet - client will send encrypted HTTP GET in next packet
-                            // Note: read_bio should be empty after handshake (all handshake data consumed by SSL_accept)
+                            // CRITICAL: Clear read_bio before releasing buffer to prevent "bad record mac" errors
+                            if (conn.tls_conn) |*tls_conn_ptr| {
+                                tls_conn_ptr.clearReadBio();
+                            }
                             buffer_pool.releaseRead(read_buf);
                             continue;
                         }
@@ -611,6 +614,8 @@ pub fn runEchoServer(port: u16) !void {
                                 // Feed encrypted data from io_uring to OpenSSL read_bio
                                 tls_conn.feedData(read_buf[0..bytes_read]) catch |err| {
                                     std.log.warn("Failed to feed TLS application data: {}", .{err});
+                                    // CRITICAL: Clear read_bio before releasing buffer
+                                    tls_conn.clearReadBio();
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS feedData failed");
                                     continue;
@@ -621,9 +626,11 @@ pub fn runEchoServer(port: u16) !void {
                                 // The encrypted data in read_buf is already fed to read_bio
                                 const tls_decrypted_len = tls_conn.read(read_buf) catch |err| {
                                     if (err == error.WantRead) {
-                                        // Need more data
+                                        // Need more data - don't clear read_bio yet, we'll need it for the next read
                                         const sqe_opt6 = blitz_io_uring_get_sqe(&ring);
                                         if (sqe_opt6 == null) {
+                                            // CRITICAL: Clear read_bio before releasing buffer
+                                            tls_conn.clearReadBio();
                                             buffer_pool.releaseRead(read_buf);
                                             _ = c.close(client_fd);
                                             continue;
@@ -635,6 +642,8 @@ pub fn runEchoServer(port: u16) !void {
                                         continue;
                                     } else {
                                         std.log.warn("TLS read failed: {}", .{err});
+                                        // CRITICAL: Clear read_bio before releasing buffer
+                                        tls_conn.clearReadBio();
                                         buffer_pool.releaseRead(read_buf);
                                         _ = c.close(client_fd);
                                         continue;
@@ -908,13 +917,20 @@ pub fn runEchoServer(port: u16) !void {
                                     // Encrypt HTTP/2 response frame(s)
                                     // CRITICAL: Clear any stale data from write_bio before encrypting new data
                                     // This prevents "bad record mac" errors from leftover encrypted data
+                                    // Clear multiple times to ensure BIO is completely empty (OpenSSL BIOs can have internal state)
                                     tls_conn.clearEncryptedOutput();
                                     
-                                    // Verify write_bio is empty before encrypting
-                                    if (tls_conn.hasEncryptedOutput()) {
-                                        std.log.warn("Warning: write_bio still has data after clearEncryptedOutput()!", .{});
-                                        // Try clearing again
+                                    // Verify write_bio is empty before encrypting - retry if needed
+                                    var clear_attempts: u32 = 0;
+                                    while (tls_conn.hasEncryptedOutput() and clear_attempts < 3) {
+                                        std.log.warn("Warning: write_bio still has data after clearEncryptedOutput() (attempt {})!", .{clear_attempts + 1});
                                         tls_conn.clearEncryptedOutput();
+                                        clear_attempts += 1;
+                                    }
+                                    
+                                    // Final check - if still not empty, log error but continue (might be a false positive)
+                                    if (tls_conn.hasEncryptedOutput()) {
+                                        std.log.err("ERROR: write_bio still has data after {} clear attempts! This may cause 'bad record mac' errors.", .{clear_attempts + 1});
                                     }
                                     
                                     std.log.info("Encrypting HTTP/2 response, {} bytes (ACK: {}, main: {})", .{ response_len, needs_settings_ack, response_action != .none });
@@ -974,10 +990,20 @@ pub fn runEchoServer(port: u16) !void {
                                             }
                                         }
                                         buffer_pool.releaseWrite(write_buf);
+                                        // CRITICAL: Clear read_bio before releasing read buffer
+                                        if (connections.getPtr(client_fd)) |conn_ptr| {
+                                            if (conn_ptr.is_tls) {
+                                                if (conn_ptr.tls_conn) |*tls_connection| {
+                                                    tls_connection.clearReadBio();
+                                                }
+                                            }
+                                        }
                                         buffer_pool.releaseRead(read_buf);
                                         closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "no SQE for write");
                                     }
                                     
+                                    // CRITICAL: Clear read_bio before releasing buffer
+                                    tls_conn.clearReadBio();
                                     buffer_pool.releaseRead(read_buf);
                                     continue;
                                 }
@@ -1264,6 +1290,11 @@ pub fn runEchoServer(port: u16) !void {
                 // For TLS connections, ensure read buffer is fresh (should already be null from read handler)
                 // For plain HTTP/1.1, we can reuse the read buffer
                 if (conn.is_tls) {
+                    // CRITICAL: Clear read_bio before getting a new read buffer
+                    // This prevents "bad record mac" errors from stale data in read_bio
+                    if (conn.tls_conn) |*tls_conn| {
+                        tls_conn.clearReadBio();
+                    }
                     // TLS: Always use a fresh read buffer for each request
                     // The previous read buffer was already released in the read handler
                     if (conn.read_buffer) |old_buf| {

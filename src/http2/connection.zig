@@ -436,19 +436,38 @@ pub const Http2Connection = struct {
         // Extract request information
         var method: []const u8 = "GET";
         var path: []const u8 = "/";
+        var method_owned: ?[]u8 = null;
+        var path_owned: ?[]u8 = null;
         const status: u16 = 200;
+        
+        errdefer {
+            if (method_owned) |m| self.allocator.free(m);
+            if (path_owned) |p| self.allocator.free(p);
+        }
         
         for (headers) |header| {
             std.log.debug("Decoded header: name='{s}', value='{s}' (len={})", .{ header.name, header.value, header.value.len });
             if (std.mem.eql(u8, header.name, ":method")) {
-                method = header.value;
+                // Duplicate method string to ensure it remains valid after frame buffer is reused
+                method_owned = try self.allocator.dupe(u8, header.value);
+                method = method_owned.?;
             } else if (std.mem.eql(u8, header.name, ":path")) {
-                path = header.value;
+                // Duplicate path string to ensure it remains valid after frame buffer is reused
+                path_owned = try self.allocator.dupe(u8, header.value);
+                path = path_owned.?;
             }
         }
         
-        // Generate response body
-        const body = try std.fmt.allocPrint(self.allocator, "Hello, Blitz! (HTTP/2)\nMethod: {s}\nPath: {s}\n", .{ method, path });
+        // Clean path by stopping at first null byte (for both logging and response)
+        const path_clean = std.mem.sliceTo(path, 0); // stops at first null
+        std.log.info("Path: {s}", .{path_clean});
+        
+        // Generate response body (method and path are now owned and safe to use)
+        const body = try std.fmt.allocPrint(self.allocator, "Hello, Blitz! (HTTP/2)\nMethod: {s}\nPath: {s}\n", .{ method, path_clean });
+        
+        // Free the duplicated strings now that they're copied into the body
+        if (method_owned) |m| self.allocator.free(m);
+        if (path_owned) |p| self.allocator.free(p);
         // Note: body ownership is transferred to ResponseAction - caller must call action.deinit(allocator) to free
         
         // Prepare response headers

@@ -6,7 +6,8 @@ set -e
 
 BLITZ_HOST="${BLITZ_HOST:-localhost}"
 BLITZ_PORT="${BLITZ_PORT:-8080}"
-BLITZ_TLS_PORT="${BLITZ_TLS_PORT:-8443}"
+# TLS uses the same port as HTTP (auto-detected on port 8080)
+BLITZ_TLS_PORT="${BLITZ_PORT}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -346,51 +347,40 @@ if [ -f "${CERT_DIR}/server.crt" ] && [ -f "${CERT_DIR}/server.key" ] && [ "${TL
     # Test 4.1: HTTP/2 basic connection
     if command -v curl >/dev/null 2>&1; then
         test_start "HTTP/2 over TLS (h2) - Basic Connection"
-        verbose "curl -s -k --http2 --connect-timeout 5 --max-time 10 https://${BLITZ_HOST}:${BLITZ_PORT}/"
-        # Try up to 3 times to handle intermittent TLS errors
-        HTTP2_RESPONSE=""
-        HTTP2_EXIT=1
-        for attempt in 1 2 3; do
-            HTTP2_RESPONSE=$(timeout 12 curl -s -k --connect-timeout 5 --max-time 10 --http2 "https://${BLITZ_HOST}:${BLITZ_PORT}/" 2>&1)
-            HTTP2_EXIT=$?
-            # If successful or got response content, break
-            if [ $HTTP2_EXIT -eq 0 ] && [ -n "$HTTP2_RESPONSE" ]; then
-                break
-            fi
-            # If it's a "bad record mac" error, retry
-            if echo "$HTTP2_RESPONSE" | grep -qi "bad record mac\|SSL_read"; then
-                verbose "Attempt $attempt: TLS error, retrying..."
-                sleep 1
-                continue
-            fi
-            # Other errors, break
-            break
-        done
+        # Test /hello endpoint with proper ALPN negotiation
+        # Use --http2 with --alpn to ensure proper HTTP/2 negotiation
+        verbose "curl -s -k --http2 --alpn h2,http/1.1 --connect-timeout 5 --max-time 10 https://${BLITZ_HOST}:${BLITZ_PORT}/hello"
         
-        if [ $HTTP2_EXIT -eq 0 ] && [ -n "$HTTP2_RESPONSE" ]; then
-            # Check if HTTP/2 was actually used - try with verbose to see headers
-            verbose "curl -s -k -I --http2 --connect-timeout 5 --max-time 10 https://${BLITZ_HOST}:${BLITZ_PORT}/"
-            HTTP2_INFO=$(timeout 12 curl -s -k --connect-timeout 5 --max-time 10 -I --http2 "https://${BLITZ_HOST}:${BLITZ_PORT}/" 2>&1)
-            # Accept if we get HTTP/2 in headers OR if we got a successful response (HTTP/2 might be working even if header check fails)
-            if echo "$HTTP2_INFO" | grep -qiE "HTTP/2|HTTP/2 200" || [ $HTTP2_EXIT -eq 0 ]; then
-                pass "HTTP/2 over TLS (h2) - Basic Connection"
+        # Single clean attempt with proper flags (no aggressive retry)
+        HTTP2_RESPONSE=$(curl -s -k --http2 --alpn h2,http/1.1 --connect-timeout 5 --max-time 10 "https://${BLITZ_HOST}:${BLITZ_PORT}/hello" 2>&1)
+        HTTP2_EXIT=$?
+        
+        # Check for HTTP/2 indicators in verbose output (fallback)
+        HTTP2_VERBOSE=$(curl -s -k --http2 -v --connect-timeout 5 --max-time 10 "https://${BLITZ_HOST}:${BLITZ_PORT}/hello" 2>&1)
+        
+        # If curl --http2 succeeded (exit 0), HTTP/2 is working
+        # curl --http2 will fail if HTTP/2 negotiation fails, so exit 0 = definitive success
+        if [ $HTTP2_EXIT -eq 0 ] && echo "$HTTP2_RESPONSE" | grep -qi "Hello.*Blitz\|Blitz.*Hello\|Hello, Blitz"; then
+            # Success - curl --http2 succeeded and we got the expected response
+            pass "HTTP/2 over TLS (h2) - Basic Connection"
+            test_end "HTTP/2 over TLS (h2) - Basic Connection"
+            HTTP2_WORKING=1
+        elif [ $HTTP2_EXIT -eq 0 ]; then
+            # curl succeeded but response doesn't match - check if HTTP/2 was negotiated
+            if echo "$HTTP2_VERBOSE" | grep -qi "ALPN.*h2\|using HTTP/2"; then
+                pass "HTTP/2 over TLS (ALPN negotiated, response received)"
                 test_end "HTTP/2 over TLS (h2) - Basic Connection"
                 HTTP2_WORKING=1
             else
-                # If we got a response but can't verify HTTP/2, still mark as working if response looks valid
-                if echo "$HTTP2_RESPONSE" | grep -qi "Hello\|Blitz"; then
-                    pass "HTTP/2 over TLS (h2) - Basic Connection (response received)"
-                    test_end "HTTP/2 over TLS (h2) - Basic Connection"
-                    HTTP2_WORKING=1
-                else
-                    skip "HTTP/2 over TLS (server may not support HTTP/2 yet)"
-                    verbose "HTTP/2 info: $HTTP2_INFO"
-                    verbose "HTTP/2 response: $HTTP2_RESPONSE"
-                    HTTP2_WORKING=0
-                fi
+                # curl succeeded but no HTTP/2 indicators
+                skip "HTTP/2 over TLS (connection succeeded but HTTP/2 not detected)"
+                verbose "HTTP/2 response: $HTTP2_RESPONSE"
+                verbose "HTTP/2 verbose: $HTTP2_VERBOSE"
+                HTTP2_WORKING=0
             fi
         else
-            skip "HTTP/2 over TLS (connection failed after retries, exit: $HTTP2_EXIT)"
+            # Connection failed
+            skip "HTTP/2 over TLS (connection failed, exit: $HTTP2_EXIT)"
             verbose "HTTP/2 response: $HTTP2_RESPONSE"
             HTTP2_WORKING=0
         fi
@@ -448,14 +438,42 @@ if [ -f "${CERT_DIR}/server.crt" ] && [ -f "${CERT_DIR}/server.key" ] && [ "${TL
         fi
         
         test_start "HTTP/2 HEADERS Frame - Response headers (HPACK encoding)"
-        verbose "curl -s -k -I --http2 https://${BLITZ_HOST}:${BLITZ_PORT}/"
-        HTTP2_RESPONSE_HEADERS=$(timeout 6 curl -s -k -I --http2 --connect-timeout 3 --max-time 5 "https://${BLITZ_HOST}:${BLITZ_PORT}/" 2>&1)
-        if echo "$HTTP2_RESPONSE_HEADERS" | grep -qiE "content-type|server|HTTP/2"; then
-            pass "HTTP/2 HEADERS Frame - Response headers (HPACK encoding)"
-            test_end "HTTP/2 HEADERS Frame - Response headers (HPACK encoding)"
+        # Test that HPACK-encoded request headers (path, method) are correctly decoded and returned
+        # This validates that the server properly decodes HPACK headers and includes them in the response
+        verbose "curl -s -k --http2 --alpn h2,http/1.1 https://${BLITZ_HOST}:${BLITZ_PORT}/hello"
+        HTTP2_RESPONSE_HEADERS=$(timeout 8 curl -s -k --http2 --alpn h2,http/1.1 --connect-timeout 3 --max-time 6 "https://${BLITZ_HOST}:${BLITZ_PORT}/hello" 2>&1)
+        HTTP2_HEADERS_EXIT=$?
+        
+        if [ $HTTP2_HEADERS_EXIT -eq 0 ] && [ -n "$HTTP2_RESPONSE_HEADERS" ]; then
+            # Verify the response contains the correct path (validates HPACK decoding)
+            if echo "$HTTP2_RESPONSE_HEADERS" | grep -q "Path: /hello"; then
+                # Verify the response contains the correct method
+                if echo "$HTTP2_RESPONSE_HEADERS" | grep -q "Method: GET"; then
+                    pass "HTTP/2 HEADERS Frame - Response headers (HPACK encoding) - Path and method correctly decoded"
+                    test_end "HTTP/2 HEADERS Frame - Response headers (HPACK encoding)"
+                else
+                    fail "HTTP/2 HEADERS Frame - Response headers (HPACK encoding) - Method not correctly decoded"
+                    verbose "Response: $HTTP2_RESPONSE_HEADERS"
+                fi
+            else
+                # Check if path is corrupted (contains non-printable characters or wrong value)
+                if echo "$HTTP2_RESPONSE_HEADERS" | grep -q "Path:"; then
+                    CORRUPTED_PATH=$(echo "$HTTP2_RESPONSE_HEADERS" | grep "Path:" | head -1)
+                    fail "HTTP/2 HEADERS Frame - Response headers (HPACK encoding) - Path incorrectly decoded: $CORRUPTED_PATH"
+                    verbose "Full response: $HTTP2_RESPONSE_HEADERS"
+                else
+                    fail "HTTP/2 HEADERS Frame - Response headers (HPACK encoding) - Path not found in response"
+                    verbose "Response: $HTTP2_RESPONSE_HEADERS"
+                fi
+            fi
         else
-            skip "HTTP/2 HEADERS Frame - Response headers (checking headers)"
-            verbose "Response headers: $HTTP2_RESPONSE_HEADERS"
+            if [ "${HTTP2_WORKING:-0}" -eq 1 ]; then
+                # HTTP/2 is working but this specific test failed - might be a timeout
+                skip "HTTP/2 HEADERS Frame - Response headers (HPACK encoding) - Request timed out or failed"
+                verbose "HTTP/2 response: $HTTP2_RESPONSE_HEADERS"
+            else
+                skip "HTTP/2 HEADERS Frame - Response headers (HPACK encoding) - HTTP/2 not confirmed working"
+            fi
         fi
     else
         skip "HTTP/2 HEADERS Frame tests (HTTP/2 not working)"

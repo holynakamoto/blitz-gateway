@@ -147,11 +147,18 @@ pub const TlsConnection = struct {
             return error.BioReadFailed;
         }
         
-        // Verify we read everything
+        // Verify we read everything we expected
+        if (@as(usize, @intCast(bytes_read)) != total_pending) {
+            std.log.err("ERROR: Expected to read {} bytes from write_bio, but only read {}", .{ total_pending, bytes_read });
+            return error.IncompleteRead;
+        }
+        
+        // Verify write_bio is now empty
         const remaining = blitz_bio_ctrl_pending(self.write_bio);
         if (remaining > 0) {
-            // This should not happen if we read correctly
-            std.log.warn("Warning: {} bytes still pending in write_bio after read", .{remaining});
+            // This should not happen if we read correctly - this could cause "bad record mac" errors
+            std.log.err("ERROR: {} bytes still pending in write_bio after reading {} bytes! This will cause 'bad record mac' errors.", .{ remaining, bytes_read });
+            return error.IncompleteRead;
         }
         
         return @intCast(bytes_read);
@@ -173,6 +180,44 @@ pub const TlsConnection = struct {
         return blitz_bio_ctrl_pending(self.write_bio) > 0;
     }
     
+    // Clear read_bio (drain all pending data)
+    // CRITICAL: Call this before reusing read buffers to prevent "bad record mac" errors
+    // OpenSSL's memory BIOs maintain pointers to buffers - we must clear them before reuse
+    pub fn clearReadBio(self: *TlsConnection) void {
+        if (self.read_bio == null) {
+            return;
+        }
+        // Drain all pending data from read_bio into a temporary buffer
+        var temp_buf: [8192]u8 = undefined;
+        var total_drained: usize = 0;
+        var iterations: u32 = 0;
+        const max_iterations: u32 = 10;
+        
+        while (iterations < max_iterations) {
+            const pending = blitz_bio_ctrl_pending(self.read_bio);
+            if (pending == 0) {
+                break;
+            }
+            
+            const bytes_read = blitz_bio_read(self.read_bio, &temp_buf, @intCast(@min(temp_buf.len, pending)));
+            if (bytes_read <= 0) {
+                break;
+            }
+            
+            total_drained += @intCast(bytes_read);
+            iterations += 1;
+            
+            if (@as(usize, @intCast(bytes_read)) < pending) {
+                continue;
+            }
+        }
+        
+        const remaining = blitz_bio_ctrl_pending(self.read_bio);
+        if (remaining > 0) {
+            std.log.warn("Warning: {} bytes still pending in read_bio after clearReadBio() (drained {} bytes)", .{ remaining, total_drained });
+        }
+    }
+    
     // Clear encrypted output from write_bio (drain all pending data)
     // CRITICAL: Call this after releasing write buffers to prevent BIO state issues
     // This prevents "bad record mac" errors when buffers are reused
@@ -182,12 +227,37 @@ pub const TlsConnection = struct {
         }
         // Drain all pending data from write_bio into a temporary buffer
         // This resets the BIO's internal pointers and prevents stale data issues
-        var temp_buf: [4096]u8 = undefined;
-        while (blitz_bio_ctrl_pending(self.write_bio) > 0) {
-            const bytes_read = blitz_bio_read(self.write_bio, &temp_buf, @intCast(temp_buf.len));
+        // Use a larger buffer to ensure we drain everything in one pass if possible
+        var temp_buf: [8192]u8 = undefined;
+        var total_drained: usize = 0;
+        var iterations: u32 = 0;
+        const max_iterations: u32 = 10; // Prevent infinite loops
+        
+        while (iterations < max_iterations) {
+            const pending = blitz_bio_ctrl_pending(self.write_bio);
+            if (pending == 0) {
+                break; // BIO is empty
+            }
+            
+            // Read as much as we can
+            const bytes_read = blitz_bio_read(self.write_bio, &temp_buf, @intCast(@min(temp_buf.len, pending)));
             if (bytes_read <= 0) {
                 break; // No more data or error
             }
+            
+            total_drained += @intCast(bytes_read);
+            iterations += 1;
+            
+            // If we read less than pending, there might be more, so continue
+            if (@as(usize, @intCast(bytes_read)) < pending) {
+                continue;
+            }
+        }
+        
+        // Verify BIO is actually empty
+        const remaining = blitz_bio_ctrl_pending(self.write_bio);
+        if (remaining > 0) {
+            std.log.warn("Warning: {} bytes still pending in write_bio after clearEncryptedOutput() (drained {} bytes)", .{ remaining, total_drained });
         }
     }
     

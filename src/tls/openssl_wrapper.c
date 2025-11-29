@@ -5,6 +5,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/conf.h>
+#include <openssl/bio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -86,9 +87,45 @@ SSL* blitz_ssl_new(SSL_CTX* ctx) {
     return SSL_new(ctx);
 }
 
-// Set file descriptor for SSL
+// Set file descriptor for SSL (socket BIO - deprecated for io_uring)
 int blitz_ssl_set_fd(SSL* ssl, int fd) {
     return SSL_set_fd(ssl, fd);
+}
+
+// Create memory BIOs for io_uring integration
+BIO* blitz_bio_new_mem_buf(const void* buf, int len) {
+    return BIO_new_mem_buf(buf, len);
+}
+
+BIO* blitz_bio_new(void) {
+    return BIO_new(BIO_s_mem());
+}
+
+// Set BIOs for SSL (replaces SSL_set_fd for memory BIOs)
+void blitz_ssl_set_bio(SSL* ssl, BIO* rbio, BIO* wbio) {
+    SSL_set_bio(ssl, rbio, wbio);
+}
+
+// Write data to memory BIO (feed encrypted data from io_uring)
+int blitz_bio_write(BIO* bio, const void* buf, int len) {
+    return BIO_write(bio, buf, len);
+}
+
+// Read data from memory BIO (extract encrypted data for io_uring)
+int blitz_bio_read(BIO* bio, void* buf, int len) {
+    return BIO_read(bio, buf, len);
+}
+
+// Get pending bytes in BIO
+int blitz_bio_ctrl_pending(BIO* bio) {
+    return BIO_ctrl_pending(bio);
+}
+
+// Free BIO
+void blitz_bio_free(BIO* bio) {
+    if (bio != NULL) {
+        BIO_free(bio);
+    }
 }
 
 // Accept TLS handshake (non-blocking)

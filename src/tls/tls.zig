@@ -17,7 +17,7 @@ extern fn blitz_ssl_ctx_new() ?*c.SSL_CTX;
 extern fn blitz_ssl_ctx_use_certificate_file(ctx: ?*c.SSL_CTX, cert_file: [*c]const u8) c_int;
 extern fn blitz_ssl_ctx_use_privatekey_file(ctx: ?*c.SSL_CTX, key_file: [*c]const u8) c_int;
 extern fn blitz_ssl_new(ctx: ?*c.SSL_CTX) ?*c.SSL;
-extern fn blitz_ssl_set_fd(ssl: ?*c.SSL, fd: c_int) c_int;
+extern fn blitz_ssl_set_fd(ssl: ?*c.SSL, fd: c_int) c_int; // Deprecated - use memory BIOs
 extern fn blitz_ssl_accept(ssl: ?*c.SSL) c_int;
 extern fn blitz_ssl_get_error(ssl: ?*c.SSL, ret: c_int) c_int;
 extern fn blitz_ssl_want_read(err: c_int) c_int;
@@ -28,6 +28,15 @@ extern fn blitz_ssl_get_alpn_selected(ssl: ?*c.SSL, data: *?*const u8, len: *c_u
 extern fn blitz_ssl_free(ssl: ?*c.SSL) void;
 extern fn blitz_ssl_ctx_free(ctx: ?*c.SSL_CTX) void;
 extern fn blitz_ssl_error_string() [*c]const u8;
+
+// Memory BIO functions for io_uring integration
+extern fn blitz_bio_new() ?*anyopaque; // Returns BIO*
+extern fn blitz_bio_new_mem_buf(buf: ?*const anyopaque, len: c_int) ?*anyopaque; // Returns BIO*
+extern fn blitz_ssl_set_bio(ssl: ?*c.SSL, rbio: ?*anyopaque, wbio: ?*anyopaque) void;
+extern fn blitz_bio_write(bio: ?*anyopaque, buf: ?*const anyopaque, len: c_int) c_int;
+extern fn blitz_bio_read(bio: ?*anyopaque, buf: ?*anyopaque, len: c_int) c_int;
+extern fn blitz_bio_ctrl_pending(bio: ?*anyopaque) c_int;
+extern fn blitz_bio_free(bio: ?*anyopaque) void;
 
 pub const Protocol = enum {
     http1_1,
@@ -47,23 +56,84 @@ pub const TlsConnection = struct {
     fd: c_int,
     state: TlsState,
     protocol: Protocol,
-    read_bio: ?*anyopaque = null, // BIO for reading encrypted data
-    write_bio: ?*anyopaque = null, // BIO for writing encrypted data
+    read_bio: ?*anyopaque = null, // Memory BIO for reading encrypted data from io_uring
+    write_bio: ?*anyopaque = null, // Memory BIO for writing encrypted data to io_uring
     
-    pub fn init(ssl: ?*c.SSL, fd: c_int) TlsConnection {
+    pub fn init(ssl: ?*c.SSL, fd: c_int) !TlsConnection {
+        // Create memory BIOs for io_uring integration
+        const rbio = blitz_bio_new() orelse return error.BioCreationFailed;
+        const wbio = blitz_bio_new() orelse {
+            blitz_bio_free(rbio);
+            return error.BioCreationFailed;
+        };
+        
+        // Set memory BIOs instead of socket BIO
+        blitz_ssl_set_bio(ssl, rbio, wbio);
+        
         return TlsConnection{
             .ssl = ssl,
             .fd = fd,
             .state = .handshake,
             .protocol = .unknown,
+            .read_bio = rbio,
+            .write_bio = wbio,
         };
     }
     
     pub fn deinit(self: *TlsConnection) void {
         if (self.ssl) |ssl| {
+            // SSL_free automatically frees the BIOs set with SSL_set_bio
+            // Do NOT call blitz_bio_free() separately - that would be a double-free!
             blitz_ssl_free(ssl);
         }
         self.ssl = null;
+        self.read_bio = null; // BIOs already freed by SSL_free
+        self.write_bio = null; // BIOs already freed by SSL_free
+    }
+    
+    // Feed encrypted data from io_uring to OpenSSL (for handshake and reading)
+    pub fn feedData(self: *TlsConnection, data: []const u8) !void {
+        if (self.read_bio == null) {
+            return error.NoBio;
+        }
+        const written = blitz_bio_write(self.read_bio, data.ptr, @intCast(data.len));
+        if (written != data.len) {
+            return error.BioWriteFailed;
+        }
+    }
+    
+    // Get encrypted output from OpenSSL for io_uring write
+    // Note: This drains the write_bio - call multiple times if needed to get all data
+    pub fn getEncryptedOutput(self: *TlsConnection, buf: []u8) !usize {
+        if (self.write_bio == null) {
+            return error.NoBio;
+        }
+        const pending = blitz_bio_ctrl_pending(self.write_bio);
+        if (pending == 0) {
+            return 0; // No data to read
+        }
+        const to_read = @min(@as(usize, @intCast(pending)), buf.len);
+        const bytes_read = blitz_bio_read(self.write_bio, buf.ptr, @intCast(to_read));
+        if (bytes_read < 0) {
+            return error.BioReadFailed;
+        }
+        return @intCast(bytes_read);
+    }
+    
+    // Check if read_bio has any pending data (should be empty after handshake)
+    pub fn hasPendingReadData(self: *TlsConnection) bool {
+        if (self.read_bio == null) {
+            return false;
+        }
+        return blitz_bio_ctrl_pending(self.read_bio) > 0;
+    }
+    
+    // Check if there's encrypted output pending
+    pub fn hasEncryptedOutput(self: *TlsConnection) bool {
+        if (self.write_bio == null) {
+            return false;
+        }
+        return blitz_bio_ctrl_pending(self.write_bio) > 0;
     }
     
     // Perform TLS handshake (non-blocking)
@@ -115,11 +185,12 @@ pub const TlsConnection = struct {
         } else {
             // Error
             self.state = .tls_error;
-            return error.HandshakeFailed;
+            return .tls_error;
         }
     }
     
     // Read decrypted data
+    // Note: Encrypted data must be fed to read_bio via feedData() before calling this
     pub fn read(self: *TlsConnection, buf: []u8) !usize {
         if (self.ssl == null) {
             return error.NoSsl;
@@ -146,7 +217,8 @@ pub const TlsConnection = struct {
         }
     }
     
-    // Write encrypted data
+    // Write plaintext data (encrypts and puts result in write_bio)
+    // Use getEncryptedOutput() to retrieve encrypted data for io_uring write
     pub fn write(self: *TlsConnection, buf: []const u8) !usize {
         if (self.ssl == null) {
             return error.NoSsl;
@@ -156,6 +228,7 @@ pub const TlsConnection = struct {
             return error.NotConnected;
         }
         
+        // SSL_write encrypts data and writes to write_bio (memory BIO)
         const ret = blitz_ssl_write(self.ssl, buf.ptr, @intCast(buf.len));
         if (ret > 0) {
             return @intCast(ret);
@@ -226,7 +299,7 @@ pub const TlsContext = struct {
         }
     }
     
-    // Create new TLS connection
+    // Create new TLS connection with memory BIOs for io_uring
     pub fn newConnection(self: *TlsContext, fd: c_int) !TlsConnection {
         if (self.ctx == null) {
             return error.NoContext;
@@ -237,11 +310,7 @@ pub const TlsContext = struct {
             return error.SslCreationFailed;
         }
         
-        if (blitz_ssl_set_fd(ssl, fd) != 1) {
-            blitz_ssl_free(ssl);
-            return error.SetFdFailed;
-        }
-        
+        // Use memory BIOs instead of socket BIO for io_uring integration
         return TlsConnection.init(ssl, fd);
     }
 };

@@ -4,6 +4,13 @@ const std = @import("std");
 // Zero-allocation parser that works on pre-allocated buffers
 // Optimized for speed - no heap allocations, SIMD-ready structure
 
+// Request validation limits (DoS protection)
+const MAX_REQUEST_SIZE: usize = 16 * 1024; // 16KB max request size
+const MAX_HEADERS: usize = 100; // Max 100 headers
+const MAX_PATH_LENGTH: usize = 8192; // 8KB max path length
+const MAX_HEADER_NAME_LENGTH: usize = 256; // Max header name length
+const MAX_HEADER_VALUE_LENGTH: usize = 8192; // Max header value length
+
 pub const Method = enum {
     GET,
     POST,
@@ -51,6 +58,11 @@ pub const Request = struct {
 // Returns parsed request or error
 // Zero-allocation: all slices point into the input buffer
 pub fn parseRequest(buffer: []const u8) !Request {
+    // Validate request size (DoS protection)
+    if (buffer.len > MAX_REQUEST_SIZE) {
+        return error.RequestTooLarge;
+    }
+    
     if (buffer.len == 0) {
         return error.EmptyRequest;
     }
@@ -77,10 +89,19 @@ pub fn parseRequest(buffer: []const u8) !Request {
     const method_str = request_line[0..method_end];
     request.method = parseMethod(method_str);
 
-    // Parse path
+    // Parse path (strip query string if present)
     const path_start = method_end + 1;
     const path_end = std.mem.indexOfScalarPos(u8, request_line, path_start, ' ') orelse return error.InvalidRequestLine;
-    request.path = request_line[path_start..path_end];
+    const full_path = request_line[path_start..path_end];
+    
+    // Validate path length (DoS protection)
+    if (full_path.len > MAX_PATH_LENGTH) {
+        return error.PathTooLong;
+    }
+    
+    // Strip query string (everything after '?')
+    const query_start = std.mem.indexOfScalar(u8, full_path, '?');
+    request.path = if (query_start) |qs| full_path[0..qs] else full_path;
 
     // Parse version
     const version_start = path_end + 1;
@@ -89,8 +110,7 @@ pub fn parseRequest(buffer: []const u8) !Request {
 
     // Parse headers
     var header_count: usize = 0;
-    const max_headers = 64; // Reasonable limit
-    var headers: [max_headers]Header = undefined;
+    var headers: [MAX_HEADERS]Header = undefined;
 
     while (pos < len) {
         // Check for end of headers (empty line)
@@ -110,12 +130,23 @@ pub fn parseRequest(buffer: []const u8) !Request {
         const value_start = colon_pos + 1;
         const value = std.mem.trim(u8, header_line[value_start..], " \t");
 
-        if (header_count < max_headers) {
+        // Validate header name and value lengths (DoS protection)
+        if (name.len > MAX_HEADER_NAME_LENGTH) {
+            return error.HeaderNameTooLong;
+        }
+        if (value.len > MAX_HEADER_VALUE_LENGTH) {
+            return error.HeaderValueTooLong;
+        }
+
+        if (header_count < MAX_HEADERS) {
             headers[header_count] = Header{
                 .name = name,
                 .value = value,
             };
             header_count += 1;
+        } else {
+            // Too many headers
+            return error.TooManyHeaders;
         }
     }
 
@@ -193,11 +224,11 @@ pub fn formatResponse(buffer: []u8, status_code: u16, status_text: []const u8, h
 // Pre-formatted common responses (zero-allocation)
 pub const CommonResponses = struct {
     // Optimized for benchmarking - minimal response
-    pub const HELLO = "HTTP/1.1 200 OK\r\nContent-Length: 13\r\nConnection: keep-alive\r\n\r\nHello, Blitz!";
-    pub const OK = "HTTP/1.1 200 OK\r\nContent-Length: 13\r\nConnection: keep-alive\r\n\r\nHello, Blitz!";
-    pub const NOT_FOUND = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
-    pub const BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
-    pub const INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
-    pub const METHOD_NOT_ALLOWED = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+    pub const HELLO = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: keep-alive\r\n\r\nHello, Blitz!";
+    pub const OK = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: keep-alive\r\n\r\nHello, Blitz!";
+    pub const NOT_FOUND = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+    pub const BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+    pub const INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+    pub const METHOD_NOT_ALLOWED = "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
 };
 

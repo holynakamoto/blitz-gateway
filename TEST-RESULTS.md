@@ -6,10 +6,10 @@
 - **Status**: ✅ WORKING
 - Simple GET requests: ✅ PASS
 - GET with path: ✅ PASS  
-- GET with query string: ❌ FAIL (needs parser fix)
+- GET with query string: ✅ PASS
 - POST requests: ✅ PASS
 - HTTP/1.1 protocol: ✅ PASS
-- Content-Type header: ❌ FAIL (needs response header fix)
+- Content-Type header: ✅ PASS
 
 ### ✅ Basic Connection Handling
 - **Status**: ✅ WORKING

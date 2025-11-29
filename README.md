@@ -37,15 +37,21 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
                           └─ Metrics → OTLP + Prometheus
 ```
 
-## 📦 Current Status: MVP v0.1 (Private Alpha)
+## 📦 Current Status: MVP v0.1 (Private Alpha) - COMPLETE ✅
 
 - ✅ HTTP/1.1 echo server with io_uring
-- ✅ Basic connection handling
-- 🚧 TLS 1.3 support (in progress)
-- 🚧 HTTP/2 support (planned)
+- ✅ Basic connection handling with keep-alive
+- ✅ **TLS 1.3 support** - Fully working with memory BIOs
+- ✅ **TLS auto-detection** - HTTP and HTTPS on same port
+- ✅ **ALPN negotiation** - Supports http/1.1 and h2
+- ✅ **Security features** - Connection limits, timeouts, request validation
+- ✅ **Test suite** - 18/18 tests passing
+- 🚧 HTTP/2 support (ALPN works, response generation pending)
 - 🚧 HTTP/3/QUIC support (planned)
 - 🚧 Routing and load balancing (planned)
 - 🚧 WASM plugin system (planned)
+
+See [ROADMAP.md](ROADMAP.md) for detailed roadmap and next steps.
 
 ## 🛠️ Building
 

@@ -55,3 +55,88 @@ test "isLongHeader detection" {
     try std.testing.expect(!packet.isLongHeader(0x00)); // Short header
 }
 
+// HTTP/3 Response Validation Tests
+test "HTTP/3 response generation" {
+    // Import the actual source modules since we're in a separate test module
+    const frame_mod = @import("../../src/http3/frame.zig");
+    const qpack_mod = @import("../../src/http3/qpack.zig");
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Create QPACK encoder
+    var encoder = qpack.QpackEncoder.init(allocator);
+    defer encoder.deinit();
+
+    // Test headers
+    const headers = [_]qpack.HeaderField{
+        .{ .name = ":status", .value = "200" },
+        .{ .name = "content-type", .value = "text/html" },
+        .{ .name = "content-length", .value = "47" },
+    };
+
+    // Generate HEADERS frame
+    var headers_buf: [512]u8 = undefined;
+    var headers_stream = std.io.fixedBufferStream(&headers_buf);
+    try frame.HeadersFrame.generateFromHeaders(headers_stream.writer(), &encoder, &headers);
+
+    // Verify frame type (HEADERS = 0x01)
+    try std.testing.expect(headers_buf[0] == 0x01);
+
+    // Generate DATA frame
+    const body = "<html><body><h1>Hello HTTP/3!</h1></body></html>";
+    var data_buf: [128]u8 = undefined;
+    var data_stream = std.io.fixedBufferStream(&data_buf);
+    try frame.DataFrame.generate(data_stream.writer(), body);
+
+    // Verify frame type (DATA = 0x00)
+    try std.testing.expect(data_buf[0] == 0x00);
+
+    std.debug.print("✅ HTTP/3 response generation test passed\n", .{});
+}
+
+test "QPACK header encoding/decoding" {
+    const qpack = @import("../../src/http3/qpack.zig");
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Create encoder and decoder
+    var encoder = qpack.QpackEncoder.init(allocator);
+    defer encoder.deinit();
+
+    var decoder = qpack.QpackDecoder.init(allocator);
+    defer decoder.deinit();
+
+    // Test headers
+    const original_headers = [_]qpack.HeaderField{
+        .{ .name = ":status", .value = "200" },
+        .{ .name = "content-type", .value = "text/html" },
+        .{ .name = "server", .value = "blitz-gateway" },
+    };
+
+    // Generate HEADERS frame
+    var buf: [1024]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try qpack.HeadersFrame.generateFromHeaders(stream.writer(), &encoder, &original_headers);
+
+    // Parse the frame back
+    var parse_stream = std.io.fixedBufferStream(buf[0..stream.pos]);
+    const headers_frame = try qpack.HeadersFrame.parse(parse_stream.reader());
+
+    // Decode headers
+    const decoded_headers = try headers_frame.decodeHeaders(&decoder);
+    defer allocator.free(decoded_headers);
+
+    // Verify we got the same headers back
+    try std.testing.expect(decoded_headers.len == 3);
+    try std.testing.expect(std.mem.eql(u8, decoded_headers[0].name, ":status"));
+    try std.testing.expect(std.mem.eql(u8, decoded_headers[0].value, "200"));
+    try std.testing.expect(std.mem.eql(u8, decoded_headers[1].name, "content-type"));
+    try std.testing.expect(std.mem.eql(u8, decoded_headers[1].value, "text/html"));
+
+    std.debug.print("✅ QPACK header encoding/decoding test passed\n", .{});
+}
+

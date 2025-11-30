@@ -248,6 +248,7 @@ fn readVarInt(data: []const u8) !VarIntResult {
                 .bytes_read = 8,
             };
         },
+        else => return error.InvalidVarInt,
     };
 }
 

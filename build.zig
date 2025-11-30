@@ -112,7 +112,7 @@ pub fn build(b: *std.Build) void {
 
     // Load balancer tests
     const load_balancer_root_module = b.addModule("load_balancer_root", .{
-        .root_source_file = b.path("src/load_balancer/test.zig"),
+        .root_source_file = b.path("tests/test.zig"),
         .target = target,
     });
     const load_balancer_tests = b.addTest(.{
@@ -127,7 +127,7 @@ pub fn build(b: *std.Build) void {
 
     // QUIC tests
     const quic_root_module = b.addModule("quic_root", .{
-        .root_source_file = b.path("src/quic/test.zig"),
+        .root_source_file = b.path("tests/quic/test.zig"),
         .target = target,
     });
     const quic_tests = b.addTest(.{
@@ -143,7 +143,7 @@ pub fn build(b: *std.Build) void {
     // QUIC frame tests
     const quic_frame_tests = b.addTest(.{
         .root_module = b.addModule("quic_frame_root", .{
-            .root_source_file = b.path("src/quic/frames_test.zig"),
+            .root_source_file = b.path("tests/quic/frames_test.zig"),
             .target = target,
         }),
     });
@@ -157,7 +157,7 @@ pub fn build(b: *std.Build) void {
     // QUIC packet generation tests
     const quic_packet_gen_tests = b.addTest(.{
         .root_module = b.addModule("quic_packet_gen_root", .{
-            .root_source_file = b.path("src/quic/packet_gen_test.zig"),
+            .root_source_file = b.path("tests/quic/packet_gen_test.zig"),
             .target = target,
         }),
     });
@@ -171,7 +171,7 @@ pub fn build(b: *std.Build) void {
     // Simple packet generation test
     const quic_packet_simple_tests = b.addTest(.{
         .root_module = b.addModule("quic_packet_simple_root", .{
-            .root_source_file = b.path("src/quic/packet_gen_simple_test.zig"),
+            .root_source_file = b.path("tests/quic/packet_gen_simple_test.zig"),
             .target = target,
         }),
     });
@@ -320,7 +320,7 @@ pub fn build(b: *std.Build) void {
     // Transport parameters tests
     const transport_params_tests = b.addTest(.{
         .root_module = b.addModule("transport_params_root", .{
-            .root_source_file = b.path("src/quic/transport_params_test.zig"),
+            .root_source_file = b.path("tests/quic/transport_params_test.zig"),
             .target = target,
         }),
     });
@@ -330,4 +330,18 @@ pub fn build(b: *std.Build) void {
     const run_transport_params_tests = b.addRunArtifact(transport_params_tests);
     const transport_params_test_step = b.step("test-transport-params", "Run transport parameters tests");
     transport_params_test_step.dependOn(&run_transport_params_tests.step);
+
+    // HTTP/3 integration tests
+    const http3_integration_tests = b.addTest(.{
+        .root_module = b.addModule("http3_integration_root", .{
+            .root_source_file = b.path("tests/integration/http3_test.zig"),
+            .target = target,
+        }),
+    });
+
+    http3_integration_tests.linkLibC();
+
+    const run_http3_integration_tests = b.addRunArtifact(http3_integration_tests);
+    const http3_integration_test_step = b.step("test-http3-integration", "Run HTTP/3 integration tests");
+    http3_integration_test_step.dependOn(&run_http3_integration_tests.step);
 }

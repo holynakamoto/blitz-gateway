@@ -6,8 +6,17 @@ name: CI
 on:
   push:
     branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'build.zig'
+      - 'deps/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'build.zig'
+      - 'deps/**'
 
 jobs:
   # Test on multiple platforms

@@ -11,6 +11,7 @@ on:
       - 'docker-compose.yml'
       - 'src/**'
       - 'deps/**'
+      - '.github/workflows/docker.yml'
   pull_request:
     branches: [ main, develop ]
     paths:

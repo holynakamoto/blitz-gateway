@@ -215,9 +215,6 @@ pub fn runEchoServer(port: u16) !void {
     // Try to load TLS certificates (non-fatal if they don't exist)
     tls_ctx = blk: {
         break :blk null; // TLS disabled for PicoTLS migration
-            std.log.warn("TLS initialization failed: {} (continuing without TLS)", .{err});
-            break :blk null;
-        };
     };
     
     if (tls_ctx) |*ctx| {

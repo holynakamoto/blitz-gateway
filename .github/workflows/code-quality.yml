@@ -6,8 +6,15 @@ name: Code Quality
 on:
   push:
     branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'build.zig'
+      - '.github/workflows/code-quality.yml'
   pull_request:
     branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'build.zig'
 
 jobs:
   # Format and lint Zig code

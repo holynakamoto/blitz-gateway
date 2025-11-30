@@ -6,6 +6,10 @@ name: Benchmark
 on:
   push:
     branches: [ main, benchmark ]
+    paths:
+      - 'src/**'
+      - 'scripts/bench/**'
+      - 'benches/**'
   pull_request:
     branches: [ main ]
     paths:

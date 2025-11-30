@@ -30,7 +30,7 @@ pub fn main() !void {
     var port: u16 = 8443;
     var is_load_balancer_mode = false;
     var config_path: ?[]const u8 = null;
-    var enable_graceful_reload = true;
+    const enable_graceful_reload = true;
 
     // Parse arguments
     while (args.next()) |arg| {
@@ -97,13 +97,27 @@ pub fn main() !void {
     // Initialize graceful reload if enabled
     var reload_manager = if (enable_graceful_reload and builtin.os.tag == .linux) blk: {
         std.debug.print("Initializing graceful reload support...\n", .{});
-        var gr = try graceful_reload.GracefulReload.init(allocator, current_config);
+        const gr = try graceful_reload.GracefulReload.init(allocator, current_config);
         current_config = config.Config.init(allocator); // Reset to empty since it's now owned by reload manager
         break :blk gr;
     } else blk: {
         std.debug.print("Graceful reload not available (requires Linux)\n", .{});
         break :blk null;
     };
+    // Initialize metrics if enabled
+    var blitz_metrics: ?metrics.BlitzMetrics = null;
+    var metrics_server: ?metrics.MetricsServer = null;
+    if (current_config.metrics.enabled) {
+        blitz_metrics = try metrics.BlitzMetrics.init(allocator);
+        metrics_server = metrics.MetricsServer.init(allocator, &blitz_metrics.?.registry);
+
+        if (current_config.metrics.prometheus_enabled) {
+            try metrics_server.?.start(current_config.metrics.port);
+            std.debug.print("Metrics server started on port {}\n", .{current_config.metrics.port});
+            std.debug.print("Prometheus metrics: http://localhost:{}/metrics\n", .{current_config.metrics.port});
+        }
+    }
+
     defer if (reload_manager) |*rm| rm.deinit();
     defer if (metrics_server) |*ms| ms.stop();
     defer if (blitz_metrics) |*bm| bm.deinit();
@@ -111,20 +125,6 @@ pub fn main() !void {
     // Set reload callback
     if (reload_manager) |*rm| {
         rm.setReloadCallback(&reloadCallback);
-    }
-
-    // Initialize metrics if enabled
-    var blitz_metrics: ?metrics.BlitzMetrics = null;
-    var metrics_server: ?metrics.MetricsServer = null;
-    if (cfg.metrics.enabled) {
-        blitz_metrics = try metrics.BlitzMetrics.init(allocator);
-        metrics_server = metrics.MetricsServer.init(allocator, &blitz_metrics.?.registry);
-
-        if (cfg.metrics.prometheus_enabled) {
-            try metrics_server.?.start(cfg.metrics.port);
-            std.debug.print("Metrics server started on port {}\n", .{cfg.metrics.port});
-            std.debug.print("Prometheus metrics: http://localhost:{}/metrics\n", .{cfg.metrics.port});
-        }
     }
 
     // Main server loop with reload support
@@ -188,7 +188,7 @@ fn reloadCallback(new_config: *config.Config) anyerror!void {
 }
 
 /// Run load balancer server
-fn runLoadBalancer(allocator: std.mem.Allocator, cfg: *const config.Config, blitz_metrics: ?*metrics.BlitzMetrics) !void {
+fn runLoadBalancer(allocator: std.mem.Allocator, cfg: *const config.Config, _: ?*metrics.BlitzMetrics) !void {
     std.debug.print("Starting QUIC/HTTP3 Load Balancer\n", .{});
     std.debug.print("Listen: {s}:{d}\n", .{cfg.listen_addr, cfg.listen_port});
     std.debug.print("Backends: {}\n", .{cfg.backends.items.len});

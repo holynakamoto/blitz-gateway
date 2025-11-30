@@ -114,7 +114,7 @@ pub const QuicHandshake = struct {
                 // Note: In QUIC, we use a dummy fd since we use memory BIOs
                 // TLS disabled for PicoTLS migration
                 // const tls_conn = try tls.TlsConnection.init(ssl, -1);
-                self.tls_conn = tls_conn;
+                // self.tls_conn = tls_conn;
                 self.state = .client_hello_sent;
             }
 

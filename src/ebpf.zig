@@ -102,7 +102,7 @@ pub const EbpfManager = struct {
     pub fn loadEbpfProgram(self: *EbpfManager, object_path: []const u8) !void {
         // Open the object file (compiled eBPF bytecode)
         self.object_fd = try std.fs.cwd().openFile(object_path, .{});
-        const fd = self.object_fd.?;
+        _ = self.object_fd.?; // File descriptor for future use
 
         // For now, we'll simulate loading - in a real implementation,
         // we would use libbpf or direct syscalls to load the eBPF program
@@ -157,6 +157,7 @@ pub const EbpfManager = struct {
 
     /// Load eBPF program
     pub fn loadProgram(self: *EbpfManager) !void {
+        _ = self; // Not used in simulation
         // TODO: Load actual eBPF program
         // This would use BPF_PROG_LOAD syscall
 
@@ -195,6 +196,7 @@ pub const EbpfManager = struct {
 
     /// Get rate limiting statistics
     pub fn getStats(self: *EbpfManager) !EbpfStats {
+        _ = self; // Not used in simulation
         // TODO: Query eBPF maps for statistics
         return EbpfStats{
             .packets_processed = 1000,

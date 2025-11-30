@@ -113,7 +113,7 @@ pub const MetricsHttpServer = struct {
         defer self.allocator.free(response);
 
         // Write response header
-        try stream.writeAll(response[0..std.mem.indexOf(u8, response, "{}").? + 1]);
+        try stream.writeAll(response[0 .. std.mem.indexOf(u8, response, "{}").? + 1]);
 
         // Write metrics data
         try stream.writeAll(metrics_data);
@@ -132,7 +132,7 @@ pub const MetricsHttpServer = struct {
             \\<p><a href="http://localhost:{}/grafana">Grafana Dashboard</a></p>
             \\<p><a href="http://localhost:{}/prometheus">Prometheus UI</a></p>
             \\</body></html>
-        , .{ std.fmt.count("{}{}", .{self.port + 1, self.port + 2}), self.port + 1, self.port + 2 }) catch "";
+        , .{ std.fmt.count("{}{}", .{ self.port + 1, self.port + 2 }), self.port + 1, self.port + 2 }) catch "";
 
         defer self.allocator.free(html);
 

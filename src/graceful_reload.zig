@@ -38,7 +38,7 @@ pub const GracefulReload = struct {
             return error.PipeCreationFailed;
         }
 
-        var gr = GracefulReload{
+        const gr = GracefulReload{
             .allocator = allocator,
             .current_config = initial_config,
             .signal_channel = SignalChannel{

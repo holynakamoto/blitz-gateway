@@ -10,6 +10,7 @@ const frames = @import("quic/frames.zig");
 const crypto = @import("quic/crypto.zig");
 const frame = @import("http3/frame.zig");
 const qpack = @import("http3/qpack.zig");
+const tls_session = @import("tls_session.zig");
 
 // picotls C API
 const c = @cImport({
@@ -150,8 +151,17 @@ const ConnectionState = struct {
     state: State,
     handshake_start_time: ?i64 = null,
 
+    // 0-RTT / Session Resumption state
+    session_ticket: ?*tls_session.SessionTicket = null,
+    early_data: ?tls_session.EarlyDataContext = null,
+    zero_rtt_enabled: bool = false,
+    zero_rtt_accepted: bool = false,
+    client_ip: u32 = 0,
+    client_port: u16 = 0,
+
     const State = enum {
         initial,
+        zero_rtt, // 0-RTT data received
         handshake,
         established,
         closed,
@@ -162,7 +172,26 @@ const ConnectionState = struct {
         return ConnectionState{
             .state = .initial,
             .handshake_start_time = null,
+            .session_ticket = null,
+            .early_data = null,
+            .zero_rtt_enabled = false,
+            .zero_rtt_accepted = false,
+            .client_ip = 0,
+            .client_port = 0,
         };
+    }
+
+    fn deinit(self: *ConnectionState, allocator: std.mem.Allocator) void {
+        if (self.session_ticket) |ticket| {
+            ticket.deinit(allocator);
+            allocator.destroy(ticket);
+            self.session_ticket = null;
+        }
+        if (self.early_data) |early| {
+            early.deinit();
+            allocator.destroy(early);
+            self.early_data = null;
+        }
     }
 
     fn startHandshake(self: *ConnectionState) void {
@@ -274,8 +303,22 @@ pub fn main() !void {
 
     // Connection state tracking (simple map for demo - in production use proper hashmap)
     var connections: std.AutoHashMap([20]u8, ConnectionState) = undefined;
-    defer connections.deinit();
+    defer {
+        // Clean up connection states
+        var it = connections.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.deinit(allocator);
+        }
+        connections.deinit();
+    }
     connections = std.AutoHashMap([20]u8, ConnectionState).init(allocator);
+
+    // Session and token caches for 0-RTT and resumption
+    var session_cache = tls_session.SessionCache.init(allocator);
+    defer session_cache.deinit();
+
+    var token_cache = tls_session.TokenCache.init(allocator);
+    defer token_cache.deinit();
 
     // Receive loop
     var buf: [1500]u8 = undefined;
@@ -314,6 +357,16 @@ pub fn main() !void {
             continue;
         }
 
+        // Extract client address information
+        var client_ip: u32 = 0;
+        var client_port: u16 = 0;
+
+        if (src_addr.family == std.posix.AF.INET) {
+            const addr_in = @as(*std.posix.sockaddr_in, @ptrCast(&src_addr));
+            client_ip = addr_in.addr;
+            client_port = std.mem.bigToNative(u16, addr_in.port);
+        }
+
         // Get or create connection state
         var dcid_key: [20]u8 = [_]u8{0} ** 20;
         @memcpy(dcid_key[0..dcid.len], dcid);
@@ -324,7 +377,9 @@ pub fn main() !void {
 
         if (!conn_state.found_existing) {
             conn_state.value_ptr.* = ConnectionState.init();
-            std.debug.print("[CONN] New connection established\n", .{});
+            conn_state.value_ptr.client_ip = client_ip;
+            conn_state.value_ptr.client_port = client_port;
+            std.debug.print("[CONN] New connection established from {}:{}\n", .{client_ip, client_port});
         }
 
         // Check for handshake timeout
@@ -335,7 +390,7 @@ pub fn main() !void {
         }
 
         // Process QUIC packet
-        const response_len = handleQuicPacket(allocator, buf[0..bytes], &response_buf, &conn_state.value_ptr) catch |err| {
+        const response_len = handleQuicPacket(allocator, buf[0..bytes], &response_buf, &conn_state.value_ptr, &session_cache, &token_cache) catch |err| {
             std.log.err("[QUIC] Packet handling error: {}", .{err});
 
             // On error, clean up connection state
@@ -417,7 +472,7 @@ fn initPicotls() !void {
     // The server will use NULL certificates for now
 }
 
-fn handleQuicPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, conn_state: *ConnectionState) !usize {
+fn handleQuicPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, conn_state: *ConnectionState, session_cache: *tls_session.SessionCache, token_cache: *tls_session.TokenCache) !usize {
     if (data.len < 7) {
         std.debug.print("[QUIC] Packet too short ({} bytes)\n", .{data.len});
         return 0;
@@ -454,7 +509,12 @@ fn handleQuicPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, co
     if (packet_type == 0) {
         // INITIAL packet - start handshake timeout
         conn_state.startHandshake();
-        return handleInitialPacket(allocator, data, response, conn_state);
+        return handleInitialPacket(allocator, data, response, conn_state, &session_cache, &token_cache);
+    } else if (packet_type == 1) {
+        // 0-RTT packet
+        std.debug.print("[QUIC] 0-RTT packet received\n", .{});
+        conn_state.state = .zero_rtt;
+        return handleZeroRttPacket(allocator, data, response, conn_state, &session_cache, &token_cache);
     } else if (packet_type == 2) {
         // HANDSHAKE packet
         std.debug.print("[QUIC] HANDSHAKE packet received - TODO\n", .{});
@@ -464,7 +524,7 @@ fn handleQuicPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, co
     return 0;
 }
 
-fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, conn_state: *ConnectionState) !usize {
+fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, conn_state: *ConnectionState, session_cache: *tls_session.SessionCache, token_cache: *tls_session.TokenCache) !usize {
     // Extract connection IDs
     const dcid_len = data[5];
     const dcid = data[6 .. 6 + dcid_len];
@@ -580,7 +640,7 @@ fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
                 std.debug.print("[TLS] ✅ Found ClientHello ({} bytes)\n", .{crypto_frame.data.len});
 
                 // Now we need to run TLS handshake
-                return processTlsHandshake(allocator, crypto_frame.data, dcid, scid, &secrets, response, conn_state);
+                return processTlsHandshake(allocator, crypto_frame.data, dcid, scid, &secrets, response, conn_state, session_cache, token_cache);
             } else {
                 std.debug.print("[TLS] CRYPTO frame content type: 0x{X:0>2}\n", .{crypto_frame.data[0]});
             }
@@ -611,9 +671,9 @@ fn processTlsHandshake(
     secrets: *const crypto.InitialSecrets,
     response: []u8,
     conn_state: *ConnectionState,
+    session_cache: *tls_session.SessionCache,
+    token_cache: *tls_session.TokenCache,
 ) !usize {
-    _ = allocator;
-
     if (ptls == null) {
         ptls = c.ptls_server_new(getContext());
     }
@@ -670,6 +730,19 @@ fn processTlsHandshake(
 
         // Mark connection as established
         conn_state.state = .established;
+
+        // Generate and store session ticket for 0-RTT resumption
+        std.debug.print("[TLS] Generating session ticket for 0-RTT...\n", .{});
+        const ticket = try generateSessionTicket(allocator, client_dcid, conn_state);
+        try session_cache.storeTicket(ticket);
+        std.debug.print("[TLS] ✅ Session ticket stored\n", .{});
+
+        // Generate QUIC token for address validation
+        std.debug.print("[QUIC] Generating address validation token...\n", .{});
+        const token_data = try generateQuicToken(allocator, client_dcid, conn_state.client_ip, conn_state.client_port);
+        const token = try tls_session.QuicToken.init(allocator, token_data, conn_state.client_ip, conn_state.client_port);
+        try token_cache.storeToken(token);
+        std.debug.print("[QUIC] ✅ Address validation token stored\n", .{});
 
         // Send HTTP/3 response over 1-RTT
         std.debug.print("[HTTP/3] Sending HTTP/3 response...\n", .{});
@@ -1116,4 +1189,191 @@ fn buildInitialResponse(
     std.debug.print("[SEND] Sending INITIAL (with ServerHello)\n", .{});
 
     return pkt_offset;
+}
+
+fn handleZeroRttPacket(allocator: std.mem.Allocator, data: []u8, response: []u8, conn_state: *ConnectionState, session_cache: *tls_session.SessionCache, token_cache: *tls_session.TokenCache) !usize {
+    // Extract connection IDs
+    const dcid_len = data[5];
+    const dcid = data[6 .. 6 + dcid_len];
+
+    const scid_offset = 6 + dcid_len;
+    const scid_len = data[scid_offset];
+    const scid = data[scid_offset + 1 .. scid_offset + 1 + scid_len];
+
+    std.debug.print("[0-RTT] DCID ({} bytes): ", .{dcid_len});
+    for (dcid) |b| std.debug.print("{x:0>2}", .{b});
+    std.debug.print("\n", .{});
+
+    std.debug.print("[0-RTT] SCID ({} bytes): ", .{scid_len});
+    for (scid) |b| std.debug.print("{x:0>2}", .{b});
+    std.debug.print("\n", .{});
+
+    // Parse token from 0-RTT packet
+    const token_offset = scid_offset + 1 + scid_len;
+    const token_len = std.mem.readInt(u32, data[token_offset..token_offset + 4], .big);
+    const token_data = data[token_offset + 4..token_offset + 4 + token_len];
+
+    std.debug.print("[0-RTT] Token length: {}\n", .{token_len});
+
+    // Validate token
+    const client_ip = conn_state.client_ip;
+    const client_port = conn_state.client_port;
+
+    if (token_cache.validateToken(token_data, client_ip, client_port)) |_| {
+        std.debug.print("[0-RTT] ✅ Token validated\n");
+
+        // Look up session ticket
+        const psk_identity = token_data; // In practice, this would be extracted from the token
+        if (session_cache.getTicket(psk_identity)) |ticket| {
+            std.debug.print("[0-RTT] ✅ Session ticket found\n");
+
+            // Store session ticket in connection state
+            conn_state.session_ticket = ticket;
+            conn_state.zero_rtt_enabled = true;
+
+            // Initialize early data context
+            conn_state.early_data = allocator.create(tls_session.EarlyDataContext) catch |err| {
+                std.log.err("[0-RTT] Failed to create early data context: {}", .{err});
+                return 0;
+            };
+            conn_state.early_data.?.* = tls_session.EarlyDataContext.init(allocator, ticket.max_early_data_size);
+
+            // Derive 0-RTT secrets from session ticket
+            // This is a simplified version - in practice, you'd use HKDF with the PSK
+            const zero_rtt_secrets = crypto.deriveZeroRttSecrets(dcid, ticket.psk_identity) catch |err| {
+                std.log.err("[0-RTT] Failed to derive 0-RTT secrets: {}", .{err});
+                return 0;
+            };
+
+            // Decrypt 0-RTT packet payload
+            const pn_offset = crypto.findPacketNumberOffset(data) catch |err| {
+                std.log.err("[0-RTT] Failed to find PN offset: {}", .{err});
+                return 0;
+            };
+
+            var decrypted_data: [1500]u8 = undefined;
+            const decrypted_len = crypto.decryptZeroRttPacket(
+                data,
+                pn_offset,
+                &zero_rtt_secrets,
+                &decrypted_data,
+            ) catch |err| {
+                std.log.err("[0-RTT] Failed to decrypt 0-RTT packet: {}", .{err});
+                return 0;
+            };
+
+            // Extract early data from decrypted payload
+            if (decrypted_len > 0) {
+                const early_data = decrypted_data[0..decrypted_len];
+                if (conn_state.early_data.?.addData(early_data)) {
+                    std.debug.print("[0-RTT] ✅ Early data accepted: {} bytes\n", .{early_data.len});
+                    conn_state.zero_rtt_accepted = true;
+
+                    // Process early data immediately if it's HTTP/3
+                    if (try processEarlyHttp3Data(allocator, early_data, response, conn_state)) |http_response_len| {
+                        std.debug.print("[0-RTT] ✅ Processed early HTTP/3 data: {} bytes response\n", .{http_response_len});
+                        return http_response_len;
+                    }
+                } else {
+                    std.debug.print("[0-RTT] ❌ Early data rejected (too large)\n");
+                }
+            }
+
+            // Send 0-RTT response (could be early HTTP/3 response or just ACK)
+            return buildZeroRttResponse(allocator, dcid, scid, response, conn_state);
+        } else {
+            std.debug.print("[0-RTT] ❌ No session ticket found for PSK identity\n");
+        }
+    } else {
+        std.debug.print("[0-RTT] ❌ Token validation failed\n");
+    }
+
+    // If 0-RTT fails, fall back to regular handshake
+    conn_state.state = .initial;
+    return handleInitialPacket(allocator, data, response, conn_state, session_cache, token_cache);
+}
+
+fn processEarlyHttp3Data(_: std.mem.Allocator, early_data: []const u8, response: []u8, _: *ConnectionState) !?usize {
+    // Check if early data contains HTTP/3 frames
+    if (early_data.len < 4) return null;
+
+    // Look for HTTP/3 frame type (simplified check)
+    const frame_type = std.mem.readInt(u32, early_data[0..4], .big);
+    if (frame_type == 0x00) { // HEADERS frame
+        std.debug.print("[0-RTT] HTTP/3 HEADERS frame detected in early data\n");
+
+        // Process as HTTP/3 request and generate immediate response
+        // This is a simplified version - real implementation would parse QPACK headers
+        const http_response = "HTTP/3 200 OK\r\ncontent-type: text/plain\r\n\r\nHello from 0-RTT!\n";
+        if (http_response.len <= response.len) {
+            @memcpy(response[0..http_response.len], http_response);
+            return http_response.len;
+        }
+    }
+
+    return null;
+}
+
+fn buildZeroRttResponse(_: std.mem.Allocator, dcid: []const u8, scid: []const u8, response: []u8, _: *ConnectionState) !usize {
+    // For now, just send a minimal response indicating 0-RTT acceptance
+    // In a full implementation, this would be an ACK or immediate HTTP response
+
+    var pkt_offset: usize = 0;
+
+    // 0-RTT packet header (for response, we might use 1-RTT or Handshake)
+    // For simplicity, we'll use a Handshake packet to continue the handshake
+    response[pkt_offset] = 0xE3; // Long header + Handshake + 4-byte PN
+    pkt_offset += 1;
+
+    // Version
+    std.mem.writeInt(u32, response[pkt_offset..][0..4], 0x00000001, .big);
+    pkt_offset += 4;
+
+    // DCID length + DCID
+    response[pkt_offset] = @intCast(dcid.len);
+    pkt_offset += 1;
+    @memcpy(response[pkt_offset .. pkt_offset + dcid.len], dcid);
+    pkt_offset += dcid.len;
+
+    // SCID length + SCID
+    response[pkt_offset] = @intCast(scid.len);
+    pkt_offset += 1;
+    @memcpy(response[pkt_offset .. pkt_offset + scid.len], scid);
+    pkt_offset += scid.len;
+
+    // Payload (minimal ACK or continue handshake)
+    const payload = "0-RTT ACCEPTED";
+    if (pkt_offset + payload.len + 16 <= response.len) { // +16 for auth tag
+        @memcpy(response[pkt_offset .. pkt_offset + payload.len], payload);
+        pkt_offset += payload.len;
+    }
+
+    std.debug.print("[0-RTT] Built 0-RTT response: {} bytes\n", .{pkt_offset});
+    return pkt_offset;
+}
+
+fn generateSessionTicket(allocator: std.mem.Allocator, dcid: []const u8, _: *ConnectionState) !*tls_session.SessionTicket {
+    // Generate a unique PSK identity (simplified - in practice use random bytes)
+    var psk_identity: [32]u8 = undefined;
+    std.crypto.random.bytes(&psk_identity);
+
+    // Create ticket data (simplified - in practice this would be encrypted TLS ticket)
+    var ticket_data: [64]u8 = undefined;
+    @memcpy(ticket_data[0..dcid.len], dcid);
+    std.crypto.random.bytes(ticket_data[dcid.len..]);
+
+    return tls_session.SessionTicket.init(allocator, &ticket_data, &psk_identity);
+}
+
+fn generateQuicToken(allocator: std.mem.Allocator, dcid: []const u8, client_ip: u32, client_port: u16) ![]u8 {
+    // Generate a simple token containing DCID, IP, and port
+    // In practice, this should be cryptographically signed
+    var token = try allocator.alloc(u8, dcid.len + 4 + 2);
+    errdefer allocator.free(token);
+
+    @memcpy(token[0..dcid.len], dcid);
+    std.mem.writeInt(u32, token[dcid.len..dcid.len + 4], client_ip, .big);
+    std.mem.writeInt(u16, token[dcid.len + 4..dcid.len + 6], client_port, .big);
+
+    return token;
 }

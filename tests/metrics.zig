@@ -259,7 +259,7 @@ pub const BlitzMetrics = struct {
     http_requests_total: Counter,
     http_requests_duration: Histogram,
     http_responses_total: Counter,
-    http_responses_by_status: std.AutoHashMap(u16, Counter),
+    http_responses_by_status: std.StringHashMap(Counter),
 
     // Connection metrics
     active_connections: Gauge,
@@ -294,7 +294,7 @@ pub const BlitzMetrics = struct {
             .http_requests_total = Counter.init("blitz_http_requests_total", "Total number of HTTP requests", "requests"),
             .http_requests_duration = try Histogram.init(allocator, "blitz_http_request_duration_seconds", "HTTP request duration", "seconds", &latency_buckets),
             .http_responses_total = Counter.init("blitz_http_responses_total", "Total number of HTTP responses", "responses"),
-            .http_responses_by_status = std.AutoHashMap(u16, Counter).init(allocator),
+            .http_responses_by_status = std.StringHashMap(Counter).init(allocator),
 
             // Connection metrics
             .active_connections = Gauge.init("blitz_active_connections", "Number of active connections", "connections"),
@@ -351,15 +351,18 @@ pub const BlitzMetrics = struct {
     pub fn recordHttpResponse(self: *BlitzMetrics, status_code: u16) void {
         self.http_responses_total.inc();
 
-        // Get or create status-specific counter
-        const status_key = status_code / 100 * 100; // Group by hundreds (2xx, 3xx, etc.)
-        const status_counter = self.http_responses_by_status.getOrPutValue(status_key, Counter.init(
-            std.fmt.allocPrint(self.allocator, "blitz_http_responses_{d}xx_total", .{status_key / 100}) catch "blitz_http_responses_unknown_total",
-            std.fmt.allocPrint(self.allocator, "HTTP {d}xx responses", .{status_key / 100}) catch "HTTP responses",
-            "responses"
-        )) catch return;
+    // Get or create status-specific counter
+    const status_key = status_code / 100 * 100; // Group by hundreds (2xx, 3xx, etc.)
+    const status_key_str = std.fmt.allocPrint(self.allocator, "{d}", .{status_key}) catch return;
+    defer self.allocator.free(status_key_str);
 
-        status_counter.value_ptr.inc();
+    const status_counter = self.http_responses_by_status.getOrPutValue(status_key_str, Counter.init(
+        std.fmt.allocPrint(self.allocator, "blitz_http_responses_{d}xx_total", .{status_key / 100}) catch "blitz_http_responses_unknown_total",
+        std.fmt.allocPrint(self.allocator, "HTTP {d}xx responses", .{status_key / 100}) catch "HTTP responses",
+        "responses"
+    )) catch return;
+
+    status_counter.value_ptr.inc();
     }
 
     // Connection metrics methods
@@ -423,7 +426,7 @@ pub const BlitzMetrics = struct {
 
     // Get Prometheus exposition format
     pub fn getPrometheusMetrics(self: *const BlitzMetrics, allocator: std.mem.Allocator) ![]u8 {
-        var buffer = std.ArrayList(u8).init(allocator);
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 1024);
         defer buffer.deinit();
 
         const exporter = PrometheusExporter.init(&self.registry);

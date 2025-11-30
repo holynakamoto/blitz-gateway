@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const metrics = @import("../src/metrics.zig");
+const metrics = @import("metrics.zig");
 
 test "Metrics: Counter basic functionality" {
     const allocator = std.testing.allocator;
@@ -130,7 +130,7 @@ test "Metrics: Prometheus exporter" {
     histogram.observe(5.0);   // bucket 2
 
     // Export to Prometheus format
-    var buffer = std.ArrayList(u8).init(allocator);
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 1024);
     defer buffer.deinit();
 
     const exporter = metrics.PrometheusExporter.init(&registry);
@@ -250,6 +250,7 @@ test "Metrics: Thread safety" {
     var threads: [num_threads]std.Thread = undefined;
 
     for (&threads, 0..) |*thread, i| {
+        _ = i; // Thread index not used
         thread.* = try std.Thread.spawn(.{}, struct {
             fn worker(c: *metrics.Counter, increments: usize) void {
                 var j: usize = 0;

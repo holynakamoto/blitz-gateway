@@ -303,3 +303,69 @@ pub fn findPacketNumberOffset(pkt: []const u8) !usize {
 
     return offset; // This is where packet number starts
 }
+
+// 0-RTT secrets structure
+pub const ZeroRttSecrets = struct {
+    client_key: [KEY_LEN]u8,
+    client_iv: [IV_LEN]u8,
+    client_hp: [HP_KEY_LEN]u8,
+    server_key: [KEY_LEN]u8,
+    server_iv: [IV_LEN]u8,
+    server_hp: [HP_KEY_LEN]u8,
+};
+
+// Derive 0-RTT secrets from DCID and PSK identity
+pub fn deriveZeroRttSecrets(dcid: []const u8, psk_identity: []const u8) !ZeroRttSecrets {
+    // For 0-RTT, we use a simplified key derivation
+    // In practice, this would use HKDF with the actual PSK from session resumption
+
+    // Use DCID + PSK identity as input keying material
+    var ikm: [64]u8 = undefined;
+    @memcpy(ikm[0..dcid.len], dcid);
+    @memcpy(ikm[dcid.len..dcid.len + psk_identity.len], psk_identity);
+
+    // Extract initial secret
+    var initial_secret: [32]u8 = undefined;
+    try hkdfExtract(&initial_secret, &QUIC_V1_INITIAL_SALT, ikm[0..dcid.len + psk_identity.len]);
+
+    // Derive client and server secrets
+    var client_secret: [32]u8 = undefined;
+    try hkdfExpandLabel(&client_secret, &initial_secret, "client 0rtt", "");
+
+    var server_secret: [32]u8 = undefined;
+    try hkdfExpandLabel(&server_secret, &initial_secret, "server 0rtt", "");
+
+    // Derive keys and IVs
+    var secrets = ZeroRttSecrets{
+        .client_key = undefined,
+        .client_iv = undefined,
+        .client_hp = undefined,
+        .server_key = undefined,
+        .server_iv = undefined,
+        .server_hp = undefined,
+    };
+
+    // Client key
+    try hkdfExpandLabel(&secrets.client_key, &client_secret, "quic key", "");
+    try hkdfExpandLabel(&secrets.client_iv, &client_secret, "quic iv", "");
+    try hkdfExpandLabel(&secrets.client_hp, &client_secret, "quic hp", "");
+
+    // Server key
+    try hkdfExpandLabel(&secrets.server_key, &server_secret, "quic key", "");
+    try hkdfExpandLabel(&secrets.server_iv, &server_secret, "quic iv", "");
+    try hkdfExpandLabel(&secrets.server_hp, &server_secret, "quic hp", "");
+
+    return secrets;
+}
+
+// Decrypt 0-RTT packet payload
+pub fn decryptZeroRttPacket(pkt: []const u8, pn_offset: usize, secrets: *const ZeroRttSecrets, out: []u8) !usize {
+    // For 0-RTT, we use the client secrets (since client sends 0-RTT)
+    return decryptPayload(pkt, pn_offset, &secrets.client_key, &secrets.client_iv, out);
+}
+
+// Encrypt 0-RTT packet payload (for server response)
+pub fn encryptZeroRttPacket(plaintext: []const u8, secrets: *const ZeroRttSecrets, packet_number: u32, header: []const u8, out: []u8) !usize {
+    // Server encrypts 0-RTT responses
+    return encryptPayload(plaintext, &secrets.server_key, &secrets.server_iv, packet_number, header, out);
+}

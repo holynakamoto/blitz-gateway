@@ -52,7 +52,7 @@ jobs:
           type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
 
     - name: Build and push production image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: ./Dockerfile
@@ -64,7 +64,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push development image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: ./Dockerfile
@@ -76,7 +76,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push minimal image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: ./Dockerfile

@@ -333,34 +333,101 @@ EOF
 success "Issue templates created"
 
 # ============================================================================
-# Step 7: Create docker-compose.yml
+# Step 7: Create infrastructure setup
 # ============================================================================
 
 echo ""
-info "Creating docker-compose.yml..."
+info "Setting up Docker infrastructure..."
 
-cat > docker-compose.yml <<'EOF'
-version: '3.9'
+# Create infrastructure directory
+mkdir -p infra/compose infra/env
+
+# Create common compose file
+cat > infra/compose/common.yml <<'EOF'
+version: '3.8'
 
 services:
-  blitz:
+  blitz-quic:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      - LOG_LEVEL=info
+      target: prod
+    privileged: true
+    cap_add:
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "nc", "-zu", "localhost", "8443"]
       interval: 30s
-      timeout: 3s
+      timeout: 10s
       retries: 3
       start_period: 5s
-    restart: unless-stopped
+    environment:
+      - QUIC_LOG=${QUIC_LOG:-info}
+      - ENV=${ENV:-production}
+    networks:
+      - blitz-network
+
+networks:
+  blitz-network:
+    driver: bridge
 EOF
 
-success "docker-compose.yml created"
+# Create development overrides
+cat > infra/compose/dev.yml <<'EOF'
+version: '3.8'
+
+services:
+  blitz-quic:
+    build:
+      target: dev
+    ports:
+      - "9443:8443/udp"
+      - "8080:8080/tcp"
+    volumes:
+      - ../../:/app
+      - ../../certs:/app/certs:ro
+    environment:
+      - QUIC_LOG=${QUIC_LOG:-debug}
+      - DEBUG=1
+EOF
+
+# Create wrapper script
+cat > infra/up.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV=${1:-dev}
+PROJECT="blitz-${ENV}"
+
+case "$ENV" in
+  dev)     COMPOSE_FILES=("common.yml" "dev.yml") ;;
+  staging) COMPOSE_FILES=("common.yml" "staging.yml") ;;
+  prod)    COMPOSE_FILES=("common.yml" "prod.yml") ;;
+  *) echo "Unknown env: $ENV" ; exit 1 ;;
+esac
+
+COMPOSE_ARGS=()
+for file in "${COMPOSE_FILES[@]}"; do
+  COMPOSE_ARGS+=(-f "$PWD/infra/compose/$file")
+done
+
+export COMPOSE_PROJECT_NAME="$PROJECT"
+exec docker compose "${COMPOSE_ARGS[@]}" "${@:2}"
+EOF
+
+chmod +x infra/up.sh
+
+# Create environment file
+cat > infra/env/env.dev <<'EOF'
+ENV=development
+DEBUG=1
+QUIC_LOG=debug
+EOF
+
+success "Infrastructure setup created (use: ./infra/up.sh dev up)"
 
 # ============================================================================
 # Step 8: Create Dependabot configuration
@@ -430,7 +497,7 @@ cat > .github/CODEOWNERS <<'EOF'
 
 # Docker and deployment
 /Dockerfile @yourusername
-/docker-compose.yml @yourusername
+/infra/ @yourusername
 
 # Scripts
 /scripts/ @yourusername
@@ -459,7 +526,7 @@ echo "   ✅ .github/CODEOWNERS (automatic PR reviews)"
 echo "   ✅ .github/dependabot.yml (automated dependency updates)"
 echo "   ✅ .github/pull_request_template.md (PR template)"
 echo "   ✅ Dockerfile (already exists)"
-echo "   ✅ docker-compose.yml (Docker Compose config)"
+echo "   ✅ infra/ (Production Docker infrastructure)"
 echo "   ✅ .gitignore (build artifacts, cache, etc.)"
 echo "   ✅ README.md (project documentation)"
 echo "   ✅ CONTRIBUTING.md (contribution guidelines)"

@@ -390,10 +390,7 @@ zig build -Doptimize=ReleaseFast
 # Build load balancer image
 docker build --target prod -t blitz-lb .
 
-# Run with backend services (legacy way)
-docker-compose --profile lb up
-
-# Or use the new infrastructure setup
+# Run with backend services
 make prod --profile with-backend up -d
 ```
 
@@ -408,7 +405,7 @@ Blitz includes comprehensive OpenTelemetry metrics with Prometheus/Grafana integ
 zig build run-quic -- --lb lb.example.toml
 
 # In another terminal, start monitoring stack
-docker-compose -f docker-compose.monitoring.yml up -d
+make monitoring up -d
 
 # Access dashboards:
 # - Grafana: http://localhost:3000 (admin/admin)
@@ -480,7 +477,7 @@ zig build -Doptimize=ReleaseFast
 ./zig-out/bin/blitz-quic -- --lb production.toml
 
 # Start monitoring stack
-docker-compose -f docker-compose.monitoring.yml up -d
+make monitoring up -d
 ```
 
 ## 📊 Benchmarking
@@ -493,14 +490,14 @@ docker-compose -f docker-compose.monitoring.yml up -d
 # Build and test production image
 docker build --target prod -t blitz:latest .
 
-# Run with Docker Compose (includes health checks)
-docker-compose up -d blitz-quic
+# Run with infrastructure setup (includes health checks)
+make dev up
 
 # Test HTTP/3 with curl (if HTTP/3 supported)
 curl --http3-only --insecure https://localhost:9443/
 
 # View logs
-docker-compose logs blitz-quic
+make dev logs blitz-quic
 ```
 
 ### Quick Start: Linux VM (Development Testing)
@@ -607,7 +604,7 @@ zig build test
 docker build --target prod -t blitz:latest .
 
 # Run development environment
-docker-compose --profile dev up blitz-quic-dev
+make dev up
 ```
 
 ### Repository Structure
@@ -771,20 +768,6 @@ curl http://localhost:8080/health
 - **Network policies**: Configure proper isolation
 - **Resource limits**: Set appropriate CPU/memory bounds
 - **Updates**: Rolling updates for zero downtime
-
-### 🏗️ Migration from Legacy Setup
-
-If you were using the old `docker-compose.yml`:
-
-```bash
-# Stop old setup
-docker-compose down
-
-# Start new infrastructure
-make dev up
-
-# The new setup is backward compatible but more powerful
-```
 
 See [infra/README.md](infra/README.md) for detailed infrastructure documentation.
 

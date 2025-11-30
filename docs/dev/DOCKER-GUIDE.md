@@ -55,9 +55,10 @@ Docker is the **recommended approach** for QUIC development and testing:
 ## Files
 
 - **`Dockerfile`** - Container image definition
-- **`docker-compose.yml`** - Multi-service orchestration
+- **`infra/compose/`** - Environment-specific Docker Compose files
+- **`infra/up.sh`** - Smart wrapper script for environment management
+- **`Makefile`** - Convenience shortcuts for common tasks
 - **`.dockerignore`** - Exclude unnecessary files from build
-- **`scripts/docker-quic.sh`** - Convenience script
 
 ## Development Workflow
 
@@ -76,7 +77,7 @@ curl --http3-only -k https://localhost:8443/hello
 
 ### Option 2: Volume Mount (Faster Iteration)
 
-Edit `docker-compose.yml`:
+Edit `infra/compose/dev.yml`:
 
 ```yaml
 volumes:
@@ -160,7 +161,7 @@ If you see:
 error: io_uring not available
 ```
 
-**Solution:** Ensure `privileged: true` in `docker-compose.yml`. Docker Desktop on macOS uses a Linux VM, so io_uring should work.
+**Solution:** The `privileged: true` setting is configured in `infra/compose/common.yml`. Docker Desktop on macOS uses a Linux VM, so io_uring should work.
 
 ### Port Already in Use
 
@@ -171,7 +172,7 @@ lsof -i :8443
 # Kill process
 kill -9 <PID>
 
-# Or use different port in docker-compose.yml
+# Or use different port in infra/compose/dev.yml
 ports:
   - "8444:8443/udp"
 ```

@@ -1,0 +1,77 @@
+# Blitz Gateway .deb Package Definition
+# Built with nfpm (goreleaser/nfpm) - zero bloat package builder
+
+name: blitz-gateway
+arch: amd64
+platform: linux
+version: "0.6.0"
+version_schema: semver
+section: utils
+priority: optional
+maintainer: "Blitz Gateway <team@blitzgateway.com>"
+description: |
+  High-performance edge API gateway and reverse proxy.
+  
+  Features:
+  - HTTP/1.1, HTTP/2, HTTP/3 (QUIC) support
+  - TLS 1.3 with zero-copy architecture
+  - Load balancing with health checks
+  - JWT authentication & authorization
+  - Rate limiting & DoS protection
+  - OpenTelemetry metrics
+  - WASM plugin system
+  
+  Target: 10M+ RPS, <50µs p99 latency.
+vendor: Blitz Gateway
+homepage: https://github.com/holynakamoto/blitz-gateway
+license: Apache-2.0
+
+contents:
+  # Main binary (blitz-quic is the production QUIC/HTTP/3 server)
+  - src: ./zig-out/bin/blitz-quic
+    dst: /usr/bin/blitz-gateway
+    type: binary
+    file_info:
+      mode: 0755
+  
+  # Systemd service
+  - src: ./packaging/systemd/blitz-gateway.service
+    dst: /lib/systemd/system/blitz-gateway.service
+    type: config|noreplace
+    file_info:
+      mode: 0644
+  
+  # Default configuration (protected, won't overwrite on upgrade)
+  - src: ./packaging/config/blitz-gateway.toml
+    dst: /etc/blitz-gateway/config.toml
+    type: config|noreplace
+    file_info:
+      mode: 0644
+  
+  # Directories
+  - dst: /etc/blitz-gateway
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/lib/blitz-gateway
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: /var/log/blitz-gateway
+    type: dir
+    file_info:
+      mode: 0755
+
+scripts:
+  preinstall: ./packaging/scripts/preinstall.sh
+  postinstall: ./packaging/scripts/postinstall.sh
+  preremove: ./packaging/scripts/preremove.sh
+  postremove: ./packaging/scripts/postremove.sh
+
+overrides:
+  deb:
+    depends:
+      - "liburing2 (>= 2.0)"
+      - "libssl3 (>= 3.0)"
+      - "libc6 (>= 2.35)"
+

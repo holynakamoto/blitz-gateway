@@ -1,0 +1,47 @@
+# Blitz Gateway Configuration
+# Edit this file to customize your deployment
+
+# Server mode: "origin" or "load_balancer"
+mode = "load_balancer"
+
+# Listen address and port
+listen = "0.0.0.0:8443"
+
+# TLS certificate paths (required for HTTPS/QUIC)
+# Generate with: openssl req -x509 -newkey rsa:2048 -keyout /etc/blitz-gateway/server.key -out /etc/blitz-gateway/server.crt -days 365 -nodes
+# tls_cert_path = "/etc/blitz-gateway/server.crt"
+# tls_key_path = "/etc/blitz-gateway/server.key"
+
+# Rate limiting configuration (DoS protection)
+rate_limit = "10000 req/s"
+rate_limit_per_ip = "1000 req/s"
+rate_limit_burst_multiplier = 2.0
+rate_limit_enable_ebpf = true
+
+# Metrics configuration (OpenTelemetry + Prometheus)
+metrics_enabled = true
+metrics_port = 9090
+metrics_prometheus_enabled = true
+metrics_otlp_endpoint = ""
+
+# JWT Authentication (optional)
+# [jwt_auth]
+# secret = "your-secret-key-here"
+# issuer = "blitz-gateway"
+# audience = "your-audience"
+# algorithm = "HS256"
+
+# Backend servers (for load balancer mode)
+# Example backends (uncomment and configure):
+# [backends.origin-1]
+# host = "127.0.0.1"
+# port = 8080
+# weight = 10
+# health_check_path = "/health"
+#
+# [backends.origin-2]
+# host = "127.0.0.1"
+# port = 8081
+# weight = 5
+# health_check_path = "/health"
+

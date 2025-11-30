@@ -1,0 +1,41 @@
+[Unit]
+Description=Blitz Edge Gateway - Ultra-Low-Latency API Gateway
+Documentation=https://github.com/holynakamoto/blitz-gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blitz-gateway
+Group=blitz-gateway
+ExecStart=/usr/bin/blitz-gateway --lb /etc/blitz-gateway/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/blitz-gateway /var/log/blitz-gateway
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Resource limits
+LimitNOFILE=1048576
+LimitNPROC=32768
+
+# Capabilities (for eBPF if needed)
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
+

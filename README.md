@@ -25,15 +25,24 @@ Blitz Gateway is an ultra-low-latency edge API gateway and reverse proxy written
 - **WASM plugins** for extensibility
 - **OpenTelemetry metrics** with Prometheus/Grafana integration
 
-## Quick Start
+## Installation
 
-### Prerequisites
+### One-Command Install (Ubuntu 22.04 / 24.04)
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/holynakamoto/blitz-gateway/main/install.sh | sudo bash
+```
+
+This installs Blitz Gateway as a systemd service with auto-updates via `apt upgrade`.
+
+### Build from Source
+
+**Prerequisites:**
 - Zig 0.15.2+
 - Linux 5.15+ (required for io_uring)
 - liburing development headers
 
-### Build & Run
+**Build & Run:**
 
 ```bash
 # Clone with dependencies

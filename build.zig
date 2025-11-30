@@ -2,14 +2,17 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    _ = b.standardOptimizeOption(.{}); // Optimize options are used via command line
 
-    const exe = b.addExecutable(.{
-        .name = "blitz",
+    const root_module = b.addModule("root", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = optimize,
     });
+    const exe = b.addExecutable(.{
+        .name = "blitz",
+        .root_module = root_module,
+    });
+    // Target and optimize are set via standardTargetOptions/standardOptimizeOption above
 
     // Link libc (required for C interop)
     exe.linkLibC();
@@ -62,10 +65,12 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Unit tests
-    const unit_tests = b.addTest(.{
+    const test_root_module = b.addModule("test_root", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = optimize,
+    });
+    const unit_tests = b.addTest(.{
+        .root_module = test_root_module,
     });
 
     unit_tests.linkLibC();
@@ -79,10 +84,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_unit_tests.step);
     
     // Foundation validation tests
-    const foundation_tests = b.addTest(.{
+    const foundation_root_module = b.addModule("foundation_root", .{
         .root_source_file = b.path("src/validate_foundation.zig"),
         .target = target,
-        .optimize = optimize,
+    });
+    const foundation_tests = b.addTest(.{
+        .root_module = foundation_root_module,
     });
 
     foundation_tests.linkLibC();
@@ -97,10 +104,12 @@ pub fn build(b: *std.Build) void {
     foundation_test_step.dependOn(&run_foundation_tests.step);
     
     // Load balancer tests
-    const load_balancer_tests = b.addTest(.{
+    const load_balancer_root_module = b.addModule("load_balancer_root", .{
         .root_source_file = b.path("src/load_balancer/test.zig"),
         .target = target,
-        .optimize = optimize,
+    });
+    const load_balancer_tests = b.addTest(.{
+        .root_module = load_balancer_root_module,
     });
 
     load_balancer_tests.linkLibC();
@@ -108,4 +117,61 @@ pub fn build(b: *std.Build) void {
     const run_load_balancer_tests = b.addRunArtifact(load_balancer_tests);
     const load_balancer_test_step = b.step("test-load-balancer", "Run load balancer tests");
     load_balancer_test_step.dependOn(&run_load_balancer_tests.step);
+    
+    // QUIC tests
+    const quic_root_module = b.addModule("quic_root", .{
+        .root_source_file = b.path("src/quic/test.zig"),
+        .target = target,
+    });
+    const quic_tests = b.addTest(.{
+        .root_module = quic_root_module,
+    });
+
+    quic_tests.linkLibC();
+
+    const run_quic_tests = b.addRunArtifact(quic_tests);
+    const quic_test_step = b.step("test-quic", "Run QUIC packet parsing tests");
+    quic_test_step.dependOn(&run_quic_tests.step);
+    
+    // QUIC frame tests
+    const quic_frame_tests = b.addTest(.{
+        .root_module = b.addModule("quic_frame_root", .{
+            .root_source_file = b.path("src/quic/frames_test.zig"),
+            .target = target,
+        }),
+    });
+
+    quic_frame_tests.linkLibC();
+
+    const run_quic_frame_tests = b.addRunArtifact(quic_frame_tests);
+    const quic_frame_test_step = b.step("test-quic-frames", "Run QUIC frame parsing tests");
+    quic_frame_test_step.dependOn(&run_quic_frame_tests.step);
+    
+    // QUIC packet generation tests
+    const quic_packet_gen_tests = b.addTest(.{
+        .root_module = b.addModule("quic_packet_gen_root", .{
+            .root_source_file = b.path("src/quic/packet_gen_test.zig"),
+            .target = target,
+        }),
+    });
+
+    quic_packet_gen_tests.linkLibC();
+
+    const run_quic_packet_gen_tests = b.addRunArtifact(quic_packet_gen_tests);
+    const quic_packet_gen_test_step = b.step("test-quic-packet-gen", "Run QUIC packet generation tests");
+    quic_packet_gen_test_step.dependOn(&run_quic_packet_gen_tests.step);
+    
+    // Simple packet generation test
+    const quic_packet_simple_tests = b.addTest(.{
+        .root_module = b.addModule("quic_packet_simple_root", .{
+            .root_source_file = b.path("src/quic/packet_gen_simple_test.zig"),
+            .target = target,
+        }),
+    });
+
+    quic_packet_simple_tests.linkLibC();
+
+    const run_quic_packet_simple_tests = b.addRunArtifact(quic_packet_simple_tests);
+    const quic_packet_simple_test_step = b.step("test-quic-packet-simple", "Run simple QUIC packet generation test");
+    quic_packet_simple_test_step.dependOn(&run_quic_packet_simple_tests.step);
 }

@@ -46,7 +46,50 @@ sudo systemctl start blitz-gateway
 sudo systemctl enable blitz-gateway
 ```
 
-### Build from Source
+### Manual APT Install
+
+```bash
+# Download .deb from GitHub Releases
+VERSION="0.6.0"
+wget https://github.com/holynakamoto/blitz-gateway/releases/download/v${VERSION}/blitz-gateway_${VERSION}_amd64.deb
+
+# Install
+sudo apt-get install ./blitz-gateway_${VERSION}_amd64.deb
+
+# Or install dependencies first if needed
+sudo apt-get install -y liburing2 libssl3
+sudo dpkg -i blitz-gateway_${VERSION}_amd64.deb
+```
+
+### Docker
+
+```bash
+# Pull latest image
+docker pull ghcr.io/holynakamoto/blitz-gateway:latest
+
+# Run production container
+docker run -d \
+  --name blitz-gateway \
+  -p 8443:8443/udp \
+  -v $(pwd)/config.toml:/etc/blitz-gateway/config.toml \
+  --restart unless-stopped \
+  ghcr.io/holynakamoto/blitz-gateway:latest
+
+# Or use Docker Compose
+git clone https://github.com/holynakamoto/blitz-gateway.git
+cd blitz-gateway
+
+# Development
+make dev up
+
+# Production
+make prod up -d
+
+# With monitoring
+make monitoring up -d
+```
+
+### Build from Source (Developers)
 
 **Prerequisites:**
 - Zig 0.15.2+
@@ -74,19 +117,6 @@ zig build run-quic
 
 # Run load balancer
 zig build run-quic -- --lb lb.example.toml
-```
-
-### Docker
-
-```bash
-# Development
-make dev up
-
-# Production
-make prod up -d
-
-# With monitoring
-make monitoring up -d
 ```
 
 ## Architecture

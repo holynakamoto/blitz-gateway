@@ -8,13 +8,12 @@ Vagrant.configure("2") do |config|
 
   # VM Hardware Configuration (scaled for development/testing)
   # In production: AMD EPYC 9754 (128c), 256GB RAM, 100Gbps networking
+  
+  # VirtualBox provider (if using VirtualBox)
   config.vm.provider "virtualbox" do |vb|
     # CPU and Memory (scaled down for VM but optimized)
     vb.cpus = 8    # 8 cores for development benchmarking
     vb.memory = "16384"  # 16GB RAM
-
-    # Storage
-    vb.customize ["modifyvm", :id, "--hdd", "50000"]  # 50GB disk
 
     # Network optimization for high throughput
     vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
@@ -34,6 +33,15 @@ Vagrant.configure("2") do |config|
     vb.name = "blitz-gateway-nuclear-bench"
   end
 
+  # UTM provider (for macOS - install: vagrant plugin install vagrant_utm)
+  config.vm.provider "utm" do |utm|
+    utm.memory = 16384  # 16GB RAM
+    utm.cpus = 8        # 8 cores
+    utm.arch = "x86_64" # x86_64 architecture
+    utm.machine_type = "pc"  # PC machine type
+    utm.accel = "tcg"   # TCG acceleration (or "hvf" for Apple Silicon)
+  end
+
   # Network configuration
   config.vm.network "private_network", type: "dhcp"
 
@@ -44,8 +52,8 @@ Vagrant.configure("2") do |config|
   config.vm.network "forwarded_port", guest: 9090, host: 19090, protocol: "tcp"  # Metrics -> 19090
   config.vm.network "forwarded_port", guest: 3000, host: 13000, protocol: "tcp"  # Grafana -> 13000
 
-  # Shared folder for code and results
-  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
+  # Shared folder for code and results (works with both VirtualBox and UTM)
+  config.vm.synced_folder ".", "/vagrant"
 
   # VM provisioning script
   config.vm.provision "shell", inline: <<-SHELL

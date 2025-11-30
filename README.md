@@ -4,20 +4,16 @@
 
 > Building the fastest edge proxy ever written. Target: 10M+ RPS, <50µs p99 latency.
 
-[![Stars](https://badgen.net/github/stars/holynakamoto/blitz-gateway)](https://github.com/holynakamoto/blitz-gateway/stargazers)
-[![Forks](https://badgen.net/github/forks/holynakamoto/blitz-gateway)](https://github.com/holynakamoto/blitz-gateway/network/members)
+[![Stars](https://img.shields.io/github/stars/holynakamoto/blitz-gateway?style=social)](https://github.com/holynakamoto/blitz-gateway/stargazers)
+[![Forks](https://img.shields.io/github/forks/holynakamoto/blitz-gateway?style=social)](https://github.com/holynakamoto/blitz-gateway/network/members)
 [![CI](https://github.com/holynakamoto/blitz-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/ci.yml)
-[![Docker](https://github.com/holynakamoto/blitz-gateway/actions/workflows/docker.yml/badge.svg)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/docker.yml)
+[![Docker Build](https://github.com/holynakamoto/blitz-gateway/actions/workflows/docker.yml/badge.svg)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/docker.yml)
 [![Code Quality](https://github.com/holynakamoto/blitz-gateway/actions/workflows/code-quality.yml/badge.svg)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/code-quality.yml)
-[![Codecov](https://codecov.io/gh/holynakamoto/blitz-gateway/graph/badge.svg)](https://codecov.io/gh/holynakamoto/blitz-gateway)
-[![License](https://img.shields.io/github/license/holynakamoto/blitz-gateway)](LICENSE)
+[![License](https://img.shields.io/github/license/holynakamoto/blitz-gateway?color=green)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/holynakamoto/blitz-gateway?include_prereleases&sort=semver)](https://github.com/holynakamoto/blitz-gateway/releases)
 [![Open Issues](https://img.shields.io/github/issues/holynakamoto/blitz-gateway)](https://github.com/holynakamoto/blitz-gateway/issues)
 [![Closed Issues](https://img.shields.io/github/issues-closed/holynakamoto/blitz-gateway?color=green)](https://github.com/holynakamoto/blitz-gateway/issues?q=is%3Aclosed)
-[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-orange)](https://ziglang.org/)
-[![Docker Pulls](https://img.shields.io/docker/pulls/blitzgateway/blitz-quic)](https://hub.docker.com/r/blitzgateway/blitz-quic)
-[![Docker Stars](https://img.shields.io/docker/stars/blitzgateway/blitz-quic)](https://hub.docker.com/r/blitzgateway/blitz-quic)
-[![GitHub Downloads](https://img.shields.io/github/downloads/holynakamoto/blitz-gateway/total)](https://github.com/holynakamoto/blitz-gateway/releases)
+[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-0.15.2-orange)](https://ziglang.org/)
 [![Built with love](https://img.shields.io/badge/built%20with-%E2%9D%A4-ff69b4)]()
 
 ## 🎯 Vision

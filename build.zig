@@ -372,4 +372,18 @@ pub fn build(b: *std.Build) void {
     const run_rate_limit_tests = b.addRunArtifact(rate_limit_tests);
     const rate_limit_test_step = b.step("test-rate-limit", "Run rate limiting tests");
     rate_limit_test_step.dependOn(&run_rate_limit_tests.step);
+
+    // Graceful reload tests
+    const graceful_reload_tests = b.addTest(.{
+        .root_module = b.addModule("graceful_reload_root", .{
+            .root_source_file = b.path("tests/graceful_reload_test.zig"),
+            .target = target,
+        }),
+    });
+
+    graceful_reload_tests.linkLibC();
+
+    const run_graceful_reload_tests = b.addRunArtifact(graceful_reload_tests);
+    const graceful_reload_test_step = b.step("test-graceful-reload", "Run graceful reload tests");
+    graceful_reload_test_step.dependOn(&run_graceful_reload_tests.step);
 }

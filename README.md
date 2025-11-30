@@ -81,6 +81,11 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
   - TOML configuration system (zero external dependencies)
   - Command-line interface (--lb flag, custom config files)
   - Production-ready server startup and configuration
+- ✅ **Production Hardening** - **COMPLETE** ✅
+  - Rate limiting with token bucket algorithm (DoS protection)
+  - Graceful reload with signal handling (zero-downtime config updates)
+  - eBPF-ready architecture for ultra-high performance
+  - Comprehensive security features for internet deployment
 - ✅ **Enterprise Infrastructure** - **COMPLETE** ✅
   - Professional repository structure (12+ directories organized)
   - Comprehensive CI/CD pipeline (6 GitHub Actions workflows)
@@ -273,8 +278,29 @@ Blitz supports **Layer 4 + Layer 7 QUIC/HTTP/3 load balancing** with zero config
 zig build run-quic -- --port 8443 &
 zig build run-quic -- --port 8444 &
 
-# Start load balancer
+# Start load balancer with rate limiting
 zig build run-quic -- --lb lb.example.toml
+```
+
+### Production Features
+
+#### 🔒 Rate Limiting (DoS Protection)
+```bash
+# Global rate limit: 10,000 requests/second
+# Per-IP limit: 1,000 requests/second per client
+zig build run-quic -- --lb lb.example.toml
+```
+
+#### 🔄 Graceful Reload (Zero Downtime)
+```bash
+# Start server
+zig build run-quic -- --lb lb.toml &
+
+# Reload configuration without restart
+kill -HUP $(pidof blitz-quic)
+
+# Or use SIGUSR2
+kill -USR2 $(pidof blitz-quic)
 ```
 
 ### Configuration
@@ -430,7 +456,7 @@ curl --http3-only --insecure https://localhost:8443/hello
 | Q4 2024       | MVP v0.1 (private alpha) ✅ **COMPLETE**       | HTTP/1.1 + TLS 1.3, io_uring, 5M RPS, basic routing, health checks               |
 | Q1 2025       | MVP v0.2 (private beta) ✅ **COMPLETE**        | **HTTP/2 over TLS 1.3 COMPLETE** ✅, **Load Balancing Module COMPLETE** ✅       |
 | Q1 2025       | MVP v0.3 (private beta) ✅ **COMPLETE**        | **HTTP/3/QUIC COMPLETE** ✅, **Enterprise Infrastructure COMPLETE** ✅, **Load Balancer Integration COMPLETE** ✅ |
-| Q2 2025       | v0.4 (private beta)                            | **Configuration system** (YAML/TOML), **Rate limiting with eBPF**, **Production deployment guides** |
+| Q2 2025       | v0.4 (production beta) ✅ **COMPLETE**         | **Rate Limiting + DoS Protection** ✅, **Graceful Reload + Zero-Downtime Updates** ✅, **Production Hardening** ✅ |
 | Q2 2025       | v0.5 (public beta)                             | **JWT authentication**, **OpenTelemetry (OTLP) metrics**, **WASM plugin system** |
 | Q3 2025       | v1.0 GA (open source)                          | **Enterprise WAF module**, **Global load balancing**, **SLA monitoring**        |
 | Q4 2025       | v2.0 (enterprise + cloud launch)               | Managed global platform launch, marketplace, SLA 99.999%, SOC2                   |

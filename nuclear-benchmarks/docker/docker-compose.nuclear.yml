@@ -1,0 +1,162 @@
+version: '3.8'
+
+# Nuclear Benchmark Environment
+# Complete setup for running HTTP proxy nuclear benchmarks
+
+services:
+  # Blitz Gateway - The proxy being benchmarked
+  blitz-gateway:
+    image: blitzgateway/blitz-quic:latest
+    container_name: blitz-gateway-nuclear
+    ports:
+      - "8080:8080"          # HTTP
+      - "8443:8443"          # HTTPS
+      - "8443:8443/udp"      # QUIC/HTTP3
+      - "9090:9090"          # Metrics
+    environment:
+      - ENV=production
+      - QUIC_LOG=error
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9090
+      - TLS_CERT_PATH=/app/certs/cert.pem
+      - TLS_KEY_PATH=/app/certs/key.pem
+    volumes:
+      - ./certs:/app/certs:ro
+    networks:
+      - nuclear-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '16.0'
+          memory: 32G
+        reservations:
+          cpus: '8.0'
+          memory: 16G
+
+  # Nuclear Benchmark Runner
+  nuclear-benchmarks:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.nuclear
+    container_name: nuclear-benchmarks
+    environment:
+      - BLITZ_HOST=blitz-gateway
+      - DURATION=30
+      - CONNECTIONS=50000
+      - THREADS=16
+    volumes:
+      - ./results:/nuclear-benchmarks/results
+      - ./scripts:/nuclear-benchmarks/scripts:ro
+    networks:
+      - nuclear-network
+    depends_on:
+      blitz-gateway:
+        condition: service_healthy
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          cpus: '16.0'
+          memory: 16G
+        reservations:
+          cpus: '8.0'
+          memory: 8G
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nuclear-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - nuclear-network
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nuclear-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=nuclear2025
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - nuclear-network
+    restart: unless-stopped
+
+  # Node Exporter for system metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: nuclear-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - nuclear-network
+    restart: unless-stopped
+
+  # cAdvisor for container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: nuclear-cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - nuclear-network
+    restart: unless-stopped
+    privileged: true
+
+# Nuclear-optimized network
+networks:
+  nuclear-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: nuclear-bridge
+
+# Persistent volumes for monitoring data
+volumes:
+  prometheus_data:
+  grafana_data:

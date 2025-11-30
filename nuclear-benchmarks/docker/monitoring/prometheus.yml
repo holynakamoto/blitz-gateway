@@ -1,0 +1,64 @@
+# Nuclear Benchmark Prometheus Configuration
+# Optimized for high-frequency HTTP proxy performance monitoring
+
+global:
+  scrape_interval: 5s      # Nuclear frequency for real-time monitoring
+  evaluation_interval: 5s
+  scrape_timeout: 2s
+
+rule_files:
+  - "nuclear_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # Add alertmanager if needed
+          # - alertmanager:9093
+
+# Nuclear scrape configurations
+scrape_configs:
+  # Blitz Gateway metrics
+  - job_name: 'blitz-gateway-nuclear'
+    static_configs:
+      - targets: ['blitz-gateway:9090']
+    scrape_interval: 1s     # Nuclear frequency
+    scrape_timeout: 1s
+    metrics_path: /metrics
+    params:
+      format: ['prometheus']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'nuclear-benchmark'
+
+  # Node Exporter (system metrics)
+  - job_name: 'nuclear-node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 5s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'nuclear-system'
+
+  # cAdvisor (container metrics)
+  - job_name: 'nuclear-cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 5s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'nuclear-containers'
+
+  # Benchmark runner metrics (if available)
+  - job_name: 'nuclear-benchmarks'
+    static_configs:
+      - targets: ['nuclear-benchmarks:9091']
+    scrape_interval: 5s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'nuclear-runner'

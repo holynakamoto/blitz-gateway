@@ -1,0 +1,176 @@
+# Nuclear Benchmark Configuration
+# World-record-setting HTTP proxy performance testing
+
+[benchmark]
+name = "nuclear-http-proxy-2025"
+description = "Ultimate HTTP proxy performance validation suite"
+version = "1.0.0"
+
+[targets]
+# Nuclear performance targets (world record territory)
+http1_rps_target = 10000000    # 10M+ RPS
+http2_rps_target = 8000000     # 8M+ RPS
+http3_rps_target = 6000000     # 6M+ RPS
+p95_latency_target_us = 100    # <100µs P95
+p99_latency_target_us = 200    # <200µs P99
+memory_target_mb = 200         # <200MB @ 5M RPS
+cpu_target_percent = 35        # <35% @ 5M RPS
+error_rate_target = 0.01       # <1% errors
+
+[hardware]
+# Required for nuclear benchmarks
+cpu_cores_min = 64
+memory_gb_min = 128
+network_gbps_min = 25
+
+# Optimal for world records
+cpu_cores_optimal = 128
+memory_gb_optimal = 256
+network_gbps_optimal = 100
+
+[phases]
+# Benchmark execution phases
+[phases.preparation]
+duration_minutes = 10
+description = "System optimization and warmup"
+
+[phases.http1_nuclear]
+duration_minutes = 30
+connections = 100000
+rate_rps = 10000000
+description = "HTTP/1.1 nuclear load test"
+
+[phases.http2_nuclear]
+duration_minutes = 30
+connections = 50000
+streams_per_connection = 1000
+rate_rps = 8000000
+description = "HTTP/2 nuclear multiplexed load test"
+
+[phases.http3_nuclear]
+duration_minutes = 30
+connections = 40000
+streams_per_connection = 1000
+rate_rps = 6000000
+description = "HTTP/3 QUIC nuclear load test"
+
+[phases.analysis]
+duration_minutes = 10
+description = "Results analysis and reporting"
+
+[tools]
+# Benchmark tool configurations
+
+[tools.wrk2]
+enabled = true
+binary_path = "/usr/local/bin/wrk2"
+threads = 128
+connections = 100000
+duration = 60
+rate = 10000000
+timeout = "10s"
+lua_script = "scripts/wrk_script.lua"
+
+[tools.h2load]
+enabled = true
+binary_path = "/usr/local/bin/h2load"
+connections = 50000
+streams = 1000
+requests = 30000000
+duration = 60
+rate = 8000000
+warmup = 10
+
+[tools.k6]
+enabled = true
+binary_path = "/usr/local/bin/k6"
+script = "scripts/k6-script.js"
+vus = 50000
+duration = "60s"
+output = "json"
+
+[monitoring]
+# Real-time monitoring during benchmarks
+
+[monitoring.prometheus]
+enabled = true
+port = 9090
+scrape_interval = "5s"
+
+[monitoring.grafana]
+enabled = true
+port = 3000
+dashboard = "nuclear-benchmark-dashboard.json"
+
+[monitoring.node_exporter]
+enabled = true
+port = 9100
+
+[reporting]
+# Results reporting and analysis
+
+[reporting.formats]
+json = true
+html = true
+markdown = true
+pdf = false
+
+[reporting.comparison]
+include_competitors = true
+nginx_version = "1.27"
+envoy_version = "1.32"
+caddy_version = "2.8"
+traefik_version = "3.1"
+
+[reporting.statistical]
+confidence_level = 0.95
+outlier_detection = true
+trend_analysis = true
+regression_detection = true
+
+[validation]
+# Result validation and sanity checks
+
+[validation.sanity]
+min_rps_threshold = 1000000     # Must achieve at least 1M RPS
+max_error_rate = 0.05          # Error rate must be <5%
+max_latency_us = 1000          # P95 must be <1ms
+
+[validation.hardware]
+check_cpu_governor = true
+check_kernel_params = true
+check_network_config = true
+validate_system_load = true
+
+[validation.competitive]
+verify_vs_nginx = true
+verify_vs_envoy = true
+calculate_multipliers = true
+generate_leaderboard = true
+
+[distribution]
+# How to share nuclear results
+
+[distribution.hackernews]
+enabled = true
+title_template = "Blitz Gateway: {rps} HTTP RPS on Single AMD EPYC - {multiplier}x Faster Than Nginx"
+include_methodology = true
+include_raw_data = true
+
+[distribution.github]
+enabled = true
+create_release = true
+attach_benchmark_data = true
+
+[distribution.blog]
+enabled = true
+generate_technical_post = true
+include_charts = true
+
+[metadata]
+author = "Blitz Gateway Team"
+organization = "Blitz Gateway"
+license = "Apache-2.0"
+repository = "https://github.com/blitz-gateway/blitz-gateway"
+documentation = "https://github.com/blitz-gateway/blitz-gateway/tree/main/nuclear-benchmarks"
+version = "2025-nuclear"

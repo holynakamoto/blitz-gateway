@@ -1,0 +1,24 @@
+# Nuclear Benchmark Grafana Data Sources
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus (Nuclear)
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 5s
+      queryTimeout: 60s
+      httpMethod: POST
+
+  # Additional data sources for comparison
+  - name: Node Exporter
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    editable: true
+    jsonData:
+      timeInterval: 15s

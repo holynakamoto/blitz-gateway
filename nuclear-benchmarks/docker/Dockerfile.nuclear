@@ -1,0 +1,378 @@
+# Nuclear Benchmark Environment
+# Optimized Docker image for running HTTP proxy nuclear benchmarks
+
+FROM ubuntu:22.04
+
+# Nuclear performance optimizations
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# Install system dependencies for nuclear benchmarks
+RUN apt-get update && apt-get install -y \
+    # Core system tools
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    git \
+    curl \
+    wget \
+    unzip \
+    software-properties-common \
+    # Network and system monitoring
+    iproute2 \
+    net-tools \
+    ethtool \
+    iputils-ping \
+    dnsutils \
+    htop \
+    iotop \
+    sysstat \
+    procps \
+    lsof \
+    strace \
+    perf-tools-unstable \
+    # Development libraries
+    libssl-dev \
+    liburing-dev \
+    libev-dev \
+    libevent-dev \
+    libxml2-dev \
+    zlib1g-dev \
+    liblz4-dev \
+    # Python for scripting
+    python3 \
+    python3-pip \
+    python3-dev \
+    # Go for additional tools
+    golang-go \
+    # Additional utilities
+    jq \
+    bc \
+    time \
+    numactl \
+    taskset \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust (needed for some benchmark tools)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Go tools
+RUN go install github.com/tsenart/vegeta@latest && \
+    go install github.com/grafana/xk6-quic@latest
+
+# Install WRK2 (nuclear HTTP/1.1 + HTTP/2 benchmarking)
+RUN cd /tmp && \
+    git clone https://github.com/giltene/wrk2.git && \
+    cd wrk2 && \
+    make && \
+    cp wrk /usr/local/bin/wrk2 && \
+    ln -sf /usr/local/bin/wrk2 /usr/local/bin/wrk
+
+# Install nghttp2 (h2load for HTTP/2 + HTTP/3)
+RUN cd /tmp && \
+    git clone https://github.com/nghttp2/nghttp2.git && \
+    cd nghttp2 && \
+    git checkout v1.59.0 && \
+    autoreconf -i && \
+    automake && \
+    autoconf && \
+    ./configure --enable-app --disable-hpack-tools --disable-examples && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Install hey (golang load tester)
+RUN wget -O /usr/local/bin/hey https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64 && \
+    chmod +x /usr/local/bin/hey
+
+# Install bombardier (golang load tester)
+RUN go install -ldflags="-s -w" github.com/codesenberg/bombardier@latest
+
+# Install k6 with xk6-quic for HTTP/3
+RUN cd /tmp && \
+    wget https://github.com/grafana/k6/releases/download/v0.51.0/k6-v0.51.0-linux-amd64.tar.gz && \
+    tar -xzf k6-v0.51.0-linux-amd64.tar.gz && \
+    cp k6-v0.51.0-linux-amd64/k6 /usr/local/bin/k6 && \
+    rm -rf k6-v0.51.0-linux-amd64*
+
+# Install additional Python tools for analysis
+RUN pip3 install \
+    numpy \
+    pandas \
+    matplotlib \
+    seaborn \
+    scipy \
+    requests \
+    aiohttp
+
+# Nuclear system optimizations
+RUN echo "export HISTSIZE=10000" >> /root/.bashrc && \
+    echo "export HISTFILESIZE=10000" >> /root/.bashrc && \
+    echo "alias ll='ls -alF'" >> /root/.bashrc && \
+    echo "alias la='ls -A'" >> /root/.bashrc && \
+    echo "alias l='ls -CF'" >> /root/.bashrc
+
+# Create nuclear benchmark directories
+RUN mkdir -p \
+    /nuclear-benchmarks \
+    /nuclear-benchmarks/scripts \
+    /nuclear-benchmarks/results \
+    /nuclear-benchmarks/config \
+    /nuclear-benchmarks/tools
+
+# Copy benchmark scripts and tools
+COPY scripts/ /nuclear-benchmarks/scripts/
+COPY docker/entrypoint.sh /nuclear-benchmarks/
+COPY config/ /nuclear-benchmarks/config/
+
+# Make scripts executable
+RUN find /nuclear-benchmarks/scripts -name "*.sh" -exec chmod +x {} \;
+
+# Nuclear kernel parameter setup script
+RUN cat > /nuclear-benchmarks/setup-kernel.sh << 'EOF'
+#!/bin/bash
+# Nuclear Kernel Parameter Setup
+
+echo "🔧 Setting nuclear kernel parameters..."
+
+# Network socket limits
+sysctl -w net.core.somaxconn=65536
+sysctl -w net.core.netdev_max_backlog=250000
+
+# TCP optimizations
+sysctl -w net.ipv4.tcp_max_syn_backlog=65536
+sysctl -w net.ipv4.tcp_tw_reuse=1
+sysctl -w net.ipv4.tcp_fin_timeout=10
+sysctl -w net.ipv4.tcp_keepalive_time=600
+sysctl -w net.ipv4.tcp_keepalive_intvl=60
+sysctl -w net.ipv4.tcp_keepalive_probes=20
+
+# TCP window scaling and timestamps
+sysctl -w net.ipv4.tcp_window_scaling=1
+sysctl -w net.ipv4.tcp_timestamps=1
+sysctl -w net.ipv4.tcp_sack=1
+sysctl -w net.ipv4.tcp_dsack=1
+sysctl -w net.ipv4.tcp_fack=1
+
+# TCP congestion control
+sysctl -w net.ipv4.tcp_congestion_control=bbr
+
+# Memory management
+sysctl -w net.ipv4.tcp_mem="786432 1048576 1572864"
+sysctl -w net.ipv4.tcp_rmem="4096 87380 4194304"
+sysctl -w net.ipv4.tcp_wmem="4096 65536 4194304"
+
+# UDP optimizations for QUIC
+sysctl -w net.core.rmem_max=25000000
+sysctl -w net.core.wmem_max=25000000
+
+# File descriptor limits
+sysctl -w fs.file-max=2097152
+sysctl -w fs.nr_open=2097152
+
+# Virtual memory optimizations
+sysctl -w vm.swappiness=10
+sysctl -w vm.dirty_ratio=20
+sysctl -w vm.dirty_background_ratio=5
+sysctl -w vm.dirty_expire_centisecs=1200
+
+echo "✅ Nuclear kernel parameters set"
+EOF
+
+RUN chmod +x /nuclear-benchmarks/setup-kernel.sh
+
+# Nuclear monitoring script
+RUN cat > /nuclear-benchmarks/monitor.sh << 'EOF'
+#!/bin/bash
+# Nuclear Benchmark Monitoring Script
+
+echo "=========================================="
+echo "NUCLEAR BENCHMARK MONITORING - $(date)"
+echo "=========================================="
+
+echo "CPU Usage (per core):"
+mpstat -P ALL 1 1 | tail -n +4
+
+echo ""
+echo "Memory Usage:"
+free -h
+
+echo ""
+echo "Network Statistics:"
+ss -tun | awk 'NR>1 {split($1,a,","); if(a[1]!="State") print $1}' | sort | uniq -c | sort -nr | head -10
+
+echo ""
+echo "Top Processes by CPU:"
+ps aux --sort=-%cpu | head -10
+
+echo ""
+echo "Top Processes by Memory:"
+ps aux --sort=-%mem | head -10
+
+echo ""
+echo "Disk I/O:"
+iostat -x 1 1 2>/dev/null || echo "iostat not available"
+
+echo ""
+echo "Load Average:"
+uptime
+
+echo ""
+echo "System Uptime:"
+uptime -p
+
+echo "=========================================="
+EOF
+
+RUN chmod +x /nuclear-benchmarks/monitor.sh
+
+# Nuclear benchmark runner script
+RUN cat > /nuclear-benchmarks/run-nuclear-suite.sh << 'EOF'
+#!/bin/bash
+# Nuclear Benchmark Suite Runner
+
+set -euo pipefail
+
+echo "=========================================="
+echo "🚀 NUCLEAR HTTP PROXY BENCHMARK SUITE"
+echo "=========================================="
+echo "Target: Prove Blitz Gateway is the fastest proxy ever"
+echo "Hardware: Nuclear-grade (64-128 core AMD EPYC/Ampere)"
+echo "=========================================="
+
+# Setup environment
+/nuclear-benchmarks/setup-kernel.sh
+
+# Create results directory with timestamp
+RESULTS_DIR="/nuclear-benchmarks/results/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$RESULTS_DIR"
+
+echo "📁 Results will be saved to: $RESULTS_DIR"
+echo ""
+
+# Test basic connectivity
+echo "🔍 Testing connectivity..."
+if curl -f -s --max-time 5 http://blitz-gateway:8080/health > /dev/null 2>&1; then
+    echo "✅ Blitz Gateway HTTP endpoint reachable"
+else
+    echo "❌ Blitz Gateway HTTP endpoint not reachable"
+    exit 1
+fi
+
+if curl -f -s --max-time 5 -k https://blitz-gateway:8443/health > /dev/null 2>&1; then
+    echo "✅ Blitz Gateway HTTPS endpoint reachable"
+else
+    echo "❌ Blitz Gateway HTTPS endpoint not reachable"
+fi
+
+echo ""
+
+# Nuclear Phase 1: HTTP/1.1 with WRK2
+echo "🔥 PHASE 1: HTTP/1.1 Nuclear Benchmark (WRK2)"
+echo "Target: 10M+ RPS, <100µs P95 latency"
+echo "----------------------------------------------"
+
+export DURATION=30
+export CONNECTIONS=50000
+export THREADS=64
+export PAYLOAD_SIZE=128
+
+echo "Running WRK2 nuclear benchmark..."
+/nuclear-benchmarks/scripts/nuclear-wrk2.sh > "$RESULTS_DIR/wrk2_nuclear.log" 2>&1 &
+WRK2_PID=$!
+
+# Monitor during test
+sleep 10
+/nuclear-benchmarks/monitor.sh > "$RESULTS_DIR/monitor_during_wrk2.log"
+
+# Wait for completion
+wait $WRK2_PID
+
+echo "✅ HTTP/1.1 nuclear benchmark complete"
+echo ""
+
+# Nuclear Phase 2: HTTP/2 with h2load
+echo "🔥 PHASE 2: HTTP/2 Nuclear Benchmark (h2load)"
+echo "Target: 8M+ RPS, <80µs P95 latency"
+echo "---------------------------------------------"
+
+echo "Running HTTP/2 nuclear benchmark..."
+PROTOCOL=h2 CONNECTIONS=25000 STREAMS=1000 DURATION=30 RATE=8000000 \
+/nuclear-benchmarks/scripts/nuclear-h2load.sh > "$RESULTS_DIR/h2load_http2.log" 2>&1 &
+H2_PID=$!
+
+# Monitor during HTTP/2 test
+sleep 10
+/nuclear-benchmarks/monitor.sh > "$RESULTS_DIR/monitor_during_h2.log"
+
+wait $H2_PID
+echo "✅ HTTP/2 nuclear benchmark complete"
+echo ""
+
+# Nuclear Phase 3: HTTP/3 with h2load
+echo "🔥 PHASE 3: HTTP/3 Nuclear Benchmark (h2load)"
+echo "Target: 6M+ RPS, <120µs P95 latency"
+echo "---------------------------------------------"
+
+echo "Running HTTP/3 nuclear benchmark..."
+PROTOCOL=h3 CONNECTIONS=20000 STREAMS=1000 DURATION=30 RATE=6000000 \
+/nuclear-benchmarks/scripts/nuclear-h2load.sh > "$RESULTS_DIR/h2load_http3.log" 2>&1 &
+H3_PID=$!
+
+# Monitor during HTTP/3 test
+sleep 10
+/nuclear-benchmarks/monitor.sh > "$RESULTS_DIR/monitor_during_h3.log"
+
+wait $H3_PID
+echo "✅ HTTP/3 nuclear benchmark complete"
+echo ""
+
+# Nuclear Phase 4: Real-browser simulation with K6
+echo "🔥 PHASE 4: Real-browser Nuclear Benchmark (K6)"
+echo "Target: Browser-like performance validation"
+echo "-----------------------------------------------"
+
+echo "Running K6 nuclear benchmark..."
+k6 run --out json="$RESULTS_DIR/k6_results.json" \
+       --tag test=nuclear \
+       /nuclear-benchmarks/scripts/k6-script.js > "$RESULTS_DIR/k6_nuclear.log" 2>&1
+
+echo "✅ Real-browser nuclear benchmark complete"
+echo ""
+
+# Generate comprehensive nuclear report
+echo "📊 Generating Nuclear Performance Report..."
+/nuclear-benchmarks/leaderboard/generate-leaderboard.sh
+
+# Final summary
+echo ""
+echo "=========================================="
+echo "🎯 NUCLEAR BENCHMARK SUITE COMPLETE!"
+echo "=========================================="
+echo ""
+echo "📁 Results saved to: $RESULTS_DIR"
+echo ""
+echo "🔥 Key Achievements Check:"
+echo "  • HTTP/1.1 RPS: $(grep "Requests/sec:" "$RESULTS_DIR"/*wrk2* 2>/dev/null | tail -1 | awk '{print $2}' | sed 's/,//g' || echo 'Check logs')"
+echo "  • HTTP/2 RPS: $(grep "req/s" "$RESULTS_DIR"/*http2* 2>/dev/null | tail -1 | awk '{print $1}' | sed 's/,//g' || echo 'Check logs')"
+echo "  • HTTP/3 RPS: $(grep "req/s" "$RESULTS_DIR"/*http3* 2>/dev/null | tail -1 | awk '{print $1}' | sed 's/,//g' || echo 'Check logs')"
+echo ""
+echo "If you hit 10M+ RPS, you've just proven Blitz Gateway"
+echo "is the fastest HTTP proxy in the world! 🏆"
+echo ""
+echo "Time to publish these numbers and change the industry! 🚀"
+EOF
+
+RUN chmod +x /nuclear-benchmarks/run-nuclear-suite.sh
+
+# Set working directory
+WORKDIR /nuclear-benchmarks
+
+# Expose ports for monitoring
+EXPOSE 9090
+
+# Default command
+CMD ["/nuclear-benchmarks/run-nuclear-suite.sh"]

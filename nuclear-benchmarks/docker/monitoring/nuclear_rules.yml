@@ -1,0 +1,181 @@
+# Nuclear Benchmark Alerting Rules
+# Performance regression detection for HTTP proxy nuclear benchmarks
+
+groups:
+  - name: nuclear_performance
+    rules:
+      # HTTP RPS Regression Alerts
+      - alert: NuclearHTTP1_RPS_Regression
+        expr: rate(blitz_http_requests_total[5m]) < 1000000
+        for: 30s
+        labels:
+          severity: critical
+          benchmark: nuclear
+          protocol: http1
+        annotations:
+          summary: "HTTP/1.1 RPS dropped below 1M - Nuclear regression detected"
+          description: "HTTP/1.1 requests/sec is {{ $value }} - should be >1M for nuclear performance"
+
+      - alert: NuclearHTTP2_RPS_Regression
+        expr: rate(blitz_http2_requests_total[5m]) < 800000
+        for: 30s
+        labels:
+          severity: critical
+          benchmark: nuclear
+          protocol: http2
+        annotations:
+          summary: "HTTP/2 RPS dropped below 800K - Nuclear regression detected"
+          description: "HTTP/2 requests/sec is {{ $value }} - should be >800K for nuclear performance"
+
+      # Latency Regression Alerts
+      - alert: NuclearHTTP1_Latency_Regression
+        expr: histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[5m])) > 0.0001
+        for: 30s
+        labels:
+          severity: critical
+          benchmark: nuclear
+          metric: latency
+        annotations:
+          summary: "HTTP/1.1 P95 latency >100µs - Nuclear regression detected"
+          description: "HTTP/1.1 P95 latency is {{ $value }}s - should be <100µs for nuclear performance"
+
+      - alert: NuclearHTTP2_Latency_Regression
+        expr: histogram_quantile(0.95, rate(blitz_http2_request_duration_seconds_bucket[5m])) > 0.00008
+        for: 30s
+        labels:
+          severity: critical
+          benchmark: nuclear
+          metric: latency
+        annotations:
+          summary: "HTTP/2 P95 latency >80µs - Nuclear regression detected"
+          description: "HTTP/2 P95 latency is {{ $value }}s - should be <80µs for nuclear performance"
+
+      # Error Rate Alerts
+      - alert: NuclearErrorRate_Spike
+        expr: rate(blitz_http_requests_total{status=~"5.."}[1m]) / rate(blitz_http_requests_total[1m]) > 0.01
+        for: 30s
+        labels:
+          severity: warning
+          benchmark: nuclear
+          metric: errors
+        annotations:
+          summary: "Error rate >1% - Nuclear stability issue"
+          description: "HTTP error rate is {{ $value | humanizePercentage }} - should be <1% for nuclear performance"
+
+      # Resource Usage Alerts
+      - alert: NuclearMemory_Usage_High
+        expr: process_resident_memory_bytes / 1024 / 1024 > 200
+        for: 1m
+        labels:
+          severity: warning
+          benchmark: nuclear
+          resource: memory
+        annotations:
+          summary: "Memory usage >200MB - Nuclear efficiency issue"
+          description: "Process memory usage is {{ $value }}MB - should be <200MB for nuclear performance"
+
+      - alert: NuclearCPU_Usage_High
+        expr: rate(process_cpu_user_seconds_total[1m]) / rate(process_cpu_seconds_total[1m]) > 0.35
+        for: 1m
+        labels:
+          severity: warning
+          benchmark: nuclear
+          resource: cpu
+        annotations:
+          summary: "CPU usage >35% - Nuclear efficiency issue"
+          description: "CPU usage is {{ $value | humanizePercentage }} - should be <35% for nuclear performance"
+
+      # System Resource Alerts
+      - alert: NuclearSystem_CPU_High
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 1m
+        labels:
+          severity: critical
+          benchmark: nuclear
+          resource: system_cpu
+        annotations:
+          summary: "System CPU usage >95% - Nuclear benchmark saturated"
+          description: "System CPU usage is {{ $value }}% - nuclear benchmarks require headroom"
+
+      - alert: NuclearSystem_Memory_Low
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          benchmark: nuclear
+          resource: system_memory
+        annotations:
+          summary: "System memory usage >95% - Nuclear benchmark saturated"
+          description: "System memory usage is {{ $value | humanizePercentage }} - nuclear benchmarks require headroom"
+
+  - name: nuclear_achievements
+    rules:
+      # Performance Achievement Metrics
+      - alert: NuclearHTTP1_WorldRecord
+        expr: rate(blitz_http_requests_total[1m]) > 10000000
+        for: 30s
+        labels:
+          severity: info
+          achievement: world_record
+          protocol: http1
+        annotations:
+          summary: "🎯 HTTP/1.1 WORLD RECORD: >10M RPS achieved!"
+          description: "HTTP/1.1 requests/sec reached {{ $value }} - this beats all known proxy benchmarks"
+
+      - alert: NuclearHTTP2_Excellence
+        expr: rate(blitz_http2_requests_total[1m]) > 8000000
+        for: 30s
+        labels:
+          severity: info
+          achievement: excellence
+          protocol: http2
+        annotations:
+          summary: "🚀 HTTP/2 EXCELLENCE: >8M RPS achieved!"
+          description: "HTTP/2 requests/sec reached {{ $value }} - leading HTTP/2 proxy performance"
+
+      - alert: NuclearLatency_Sub100us
+        expr: histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[1m])) < 0.0001
+        for: 30s
+        labels:
+          severity: info
+          achievement: sub_100us
+          metric: latency
+        annotations:
+          summary: "⚡ SUB-100µs LATENCY: Nuclear speed achieved!"
+          description: "P95 latency is {{ $value }}s - sub-millisecond performance confirmed"
+
+      - alert: NuclearEfficiency_Champion
+        expr: (process_resident_memory_bytes / 1024 / 1024 < 200) and (rate(process_cpu_user_seconds_total[1m]) / rate(process_cpu_seconds_total[1m]) < 0.35)
+        for: 1m
+        labels:
+          severity: info
+          achievement: efficiency
+          metric: resources
+        annotations:
+          summary: "💎 EFFICIENCY CHAMPION: <200MB RAM, <35% CPU"
+          description: "Nuclear efficiency achieved: {{ $value }}MB RAM, {{ $value }}% CPU"
+
+  - name: nuclear_regression_detection
+    rules:
+      # Statistical regression detection
+      - alert: NuclearPerformance_Regression_5Percent
+        expr: (rate(blitz_http_requests_total[5m]) - rate(blitz_http_requests_total[5m] offset 1h)) / rate(blitz_http_requests_total[5m] offset 1h) < -0.05
+        for: 5m
+        labels:
+          severity: warning
+          regression: "5_percent"
+          type: throughput
+        annotations:
+          summary: "Performance regression: >5% RPS drop detected"
+          description: "RPS dropped {{ $value | humanizePercentage }} vs 1 hour ago - investigate recent changes"
+
+      - alert: NuclearLatency_Regression_10Percent
+        expr: (histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[5m])) - histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[5m] offset 1h))) / histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[5m] offset 1h)) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          regression: "10_percent"
+          type: latency
+        annotations:
+          summary: "Latency regression: >10% increase detected"
+          description: "P95 latency increased {{ $value | humanizePercentage }} vs 1 hour ago - check for bottlenecks"

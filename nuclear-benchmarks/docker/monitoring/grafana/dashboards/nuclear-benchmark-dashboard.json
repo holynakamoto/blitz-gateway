@@ -1,0 +1,298 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "🚀 Nuclear HTTP Proxy Benchmarks 2025",
+    "tags": ["nuclear", "benchmark", "http", "proxy", "performance"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Nuclear RPS Achievements",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(blitz_http_requests_total[1m])",
+            "legendFormat": "HTTP/1.1 RPS"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "from": 10000000,
+                  "result": {
+                    "color": "green",
+                    "text": "🎯 WORLD RECORD!"
+                  },
+                  "to": 100000000
+                },
+                "type": "range"
+              },
+              {
+                "options": {
+                  "from": 5000000,
+                  "result": {
+                    "color": "blue",
+                    "text": "🚀 EXCELLENT"
+                  },
+                  "to": 10000000
+                },
+                "type": "range"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "orange",
+                  "value": 1000000
+                },
+                {
+                  "color": "yellow",
+                  "value": 5000000
+                },
+                {
+                  "color": "green",
+                  "value": 10000000
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "HTTP/1.1 Throughput (RPS)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_http_requests_total[5s])",
+            "legendFormat": "HTTP/1.1 RPS"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 16,
+          "x": 8,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Nuclear Latency Targets",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(blitz_http_request_duration_seconds_bucket[1m])) * 1000000",
+            "legendFormat": "P50 Latency (µs)"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[1m])) * 1000000",
+            "legendFormat": "P95 Latency (µs)"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(blitz_http_request_duration_seconds_bucket[1m])) * 1000000",
+            "legendFormat": "P99 Latency (µs)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "from": 0,
+                  "result": {
+                    "color": "green",
+                    "text": "✅ TARGET MET"
+                  },
+                  "to": 100
+                },
+                "type": "range"
+              },
+              {
+                "options": {
+                  "from": 100,
+                  "result": {
+                    "color": "red",
+                    "text": "❌ OVER TARGET"
+                  },
+                  "to": 1000000
+                },
+                "type": "range"
+              }
+            ]
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Resource Efficiency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes / 1024 / 1024",
+            "legendFormat": "Memory Usage (MB)"
+          },
+          {
+            "expr": "rate(process_cpu_user_seconds_total[1m]) * 100",
+            "legendFormat": "CPU Usage (%)"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 8,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "HTTP/2 vs HTTP/3 Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_http2_requests_total[5s])",
+            "legendFormat": "HTTP/2 RPS"
+          },
+          {
+            "expr": "rate(blitz_http3_requests_total[5s])",
+            "legendFormat": "HTTP/3 RPS"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 16,
+          "y": 8
+        }
+      },
+      {
+        "id": 6,
+        "title": "System Resources During Nuclear Load",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5s])) * 100)",
+            "legendFormat": "System CPU %"
+          },
+          {
+            "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+            "legendFormat": "System Memory %"
+          },
+          {
+            "expr": "rate(node_network_receive_bytes_total[5s]) * 8 / 1000000000",
+            "legendFormat": "Network RX (Gbps)"
+          },
+          {
+            "expr": "rate(node_network_transmit_bytes_total[5s]) * 8 / 1000000000",
+            "legendFormat": "Network TX (Gbps)"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 7,
+        "title": "Error Rate & Reliability",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_http_requests_total{status=~\"5..\"}[1m]) / rate(blitz_http_requests_total[1m]) * 100",
+            "legendFormat": "5xx Error Rate %"
+          },
+          {
+            "expr": "rate(blitz_http_requests_total{status=~\"4..\"}[1m]) / rate(blitz_http_requests_total[1m]) * 100",
+            "legendFormat": "4xx Error Rate %"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 16
+        }
+      },
+      {
+        "id": 8,
+        "title": "Nuclear Achievement Status",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "up{job=\"blitz-gateway-nuclear\"}",
+            "legendFormat": "Service Health"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "field",
+            "options": {
+              "fields": {
+                "__name__": {
+                  "mappings": []
+                },
+                "Time": {
+                  "mappings": []
+                }
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "❌ SERVICE DOWN",
+                    "color": "red"
+                  },
+                  "1": {
+                    "text": "✅ SERVICE UP",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 16
+        }
+      }
+    ],
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "timepicker": {},
+    "refresh": "5s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

@@ -414,4 +414,44 @@ pub fn build(b: *std.Build) void {
     const run_metrics_tests = b.addRunArtifact(metrics_tests);
     const metrics_test_step = b.step("test-metrics", "Run metrics tests");
     metrics_test_step.dependOn(&run_metrics_tests.step);
+
+    // JWT tests
+    const jwt_tests = b.addTest(.{
+        .root_module = b.addModule("jwt_root", .{
+            .root_source_file = b.path("src/jwt.zig"),
+            .target = target,
+        }),
+    });
+    jwt_tests.linkLibC();
+
+    const run_jwt_tests = b.addRunArtifact(jwt_tests);
+    const jwt_test_step = b.step("test-jwt", "Run JWT tests");
+    jwt_test_step.dependOn(&run_jwt_tests.step);
+
+    // HTTP server with JWT tests
+    const http_server_tests = b.addTest(.{
+        .root_module = b.addModule("http_server_root", .{
+            .root_source_file = b.path("src/http_server.zig"),
+            .target = target,
+        }),
+    });
+    http_server_tests.linkLibC();
+
+    const run_http_server_tests = b.addRunArtifact(http_server_tests);
+    const http_server_test_step = b.step("test-http-server", "Run HTTP server with JWT tests");
+    http_server_test_step.dependOn(&run_http_server_tests.step);
+
+    // HTTP server executable
+    const http_server_exe = b.addExecutable(.{
+        .name = "blitz-http-server",
+        .root_module = b.addModule("http_server", .{
+            .root_source_file = b.path("src/http_server.zig"),
+            .target = target,
+        }),
+    });
+    http_server_exe.linkLibC();
+
+    const run_http_server = b.addRunArtifact(http_server_exe);
+    const run_http_server_step = b.step("run-http-server", "Run HTTP server with JWT authentication demo");
+    run_http_server_step.dependOn(&run_http_server.step);
 }

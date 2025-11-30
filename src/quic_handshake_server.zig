@@ -11,6 +11,8 @@ const crypto = @import("quic/crypto.zig");
 const frame = @import("http3/frame.zig");
 const qpack = @import("http3/qpack.zig");
 const tls_session = @import("tls_session.zig");
+const jwt = @import("jwt.zig");
+const middleware = @import("middleware.zig");
 
 // picotls C API
 const c = @cImport({
@@ -379,7 +381,7 @@ pub fn main() !void {
             conn_state.value_ptr.* = ConnectionState.init();
             conn_state.value_ptr.client_ip = client_ip;
             conn_state.value_ptr.client_port = client_port;
-            std.debug.print("[CONN] New connection established from {}:{}\n", .{client_ip, client_port});
+            std.debug.print("[CONN] New connection established from {}:{}\n", .{ client_ip, client_port });
         }
 
         // Check for handshake timeout
@@ -746,7 +748,7 @@ fn processTlsHandshake(
 
         // Send HTTP/3 response over 1-RTT
         std.debug.print("[HTTP/3] Sending HTTP/3 response...\n", .{});
-        sent += try buildHttp3Response(response[sent..], client_scid, client_dcid);
+        sent += try buildHttp3Response(response[sent..], client_scid, client_dcid, null); // No request data for initial response
         std.debug.print("[HTTP/3] ✅ HTTP/3 response sent ({} total bytes)\n", .{sent});
     }
 
@@ -758,41 +760,46 @@ fn buildHttp3Response(
     out: []u8,
     dcid: []const u8,
     scid: []const u8,
+    request_data: ?[]const u8,
 ) !usize {
     _ = scid; // Not used in HTTP/3 response
-    std.debug.print("[HTTP/3] Building 200 OK response...\n", .{});
+    std.debug.print("[HTTP/3] Building response...\n", .{});
 
     // Get 1-RTT keys from picotls
     var rtt_keys: RttSecrets = undefined;
     try derive1RttKeysFromPicotls(&rtt_keys);
 
     // Create HTTP/3 response payload
-    var http3_payload: [1024]u8 = undefined;
+    var http3_payload: [2048]u8 = undefined;
     var http3_offset: usize = 0;
 
     // Create QPACK encoder
     var qpack_encoder = qpack.QpackEncoder.init(std.heap.page_allocator);
     defer qpack_encoder.deinit();
 
+    // Process request and generate response
+    var response_data = try generateHttp3ResponseContent(request_data);
+    defer std.heap.page_allocator.free(response_data.body);
+
     // HTTP response headers
-    const headers = [_]qpack.HeaderField{
-        .{ .name = ":status", .value = "200" },
-        .{ .name = "content-type", .value = "text/html" },
-        .{ .name = "content-length", .value = "47" },
-    };
+    var headers = std.ArrayList(qpack.HeaderField).init(std.heap.page_allocator);
+    defer headers.deinit();
+
+    try headers.append(.{ .name = ":status", .value = response_data.status });
+    try headers.append(.{ .name = "content-type", .value = response_data.content_type });
+
+    var content_length_buf: [32]u8 = undefined;
+    const content_length_str = try std.fmt.bufPrint(&content_length_buf, "{}", .{response_data.body.len});
+    try headers.append(.{ .name = "content-length", .value = content_length_str });
 
     // Generate HEADERS frame
     var headers_writer = std.io.fixedBufferStream(http3_payload[http3_offset..]);
-    try frame.HeadersFrame.generateFromHeaders(headers_writer.writer(), &qpack_encoder, &headers);
+    try frame.HeadersFrame.generateFromHeaders(headers_writer.writer(), &qpack_encoder, headers.items);
     http3_offset += headers_writer.pos;
 
-    // Simple HTML body
-    const body = "<html><body><h1>Hello HTTP/3!</h1></body></html>";
-    const body_bytes = body;
-
-    // Generate DATA frame
+    // Generate DATA frame with response body
     var data_writer = std.io.fixedBufferStream(http3_payload[http3_offset..]);
-    try frame.DataFrame.generate(data_writer.writer(), body_bytes);
+    try frame.DataFrame.generate(data_writer.writer(), response_data.body);
     http3_offset += data_writer.pos;
 
     // Build 1-RTT QUIC packet
@@ -1210,8 +1217,8 @@ fn handleZeroRttPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
 
     // Parse token from 0-RTT packet
     const token_offset = scid_offset + 1 + scid_len;
-    const token_len = std.mem.readInt(u32, data[token_offset..token_offset + 4], .big);
-    const token_data = data[token_offset + 4..token_offset + 4 + token_len];
+    const token_len = std.mem.readInt(u32, data[token_offset .. token_offset + 4], .big);
+    const token_data = data[token_offset + 4 .. token_offset + 4 + token_len];
 
     std.debug.print("[0-RTT] Token length: {}\n", .{token_len});
 
@@ -1352,6 +1359,39 @@ fn buildZeroRttResponse(_: std.mem.Allocator, dcid: []const u8, scid: []const u8
     return pkt_offset;
 }
 
+const Http3Response = struct {
+    status: []const u8,
+    content_type: []const u8,
+    body: []u8,
+};
+
+fn generateHttp3ResponseContent(request_data: ?[]const u8) !Http3Response {
+    // For now, return a simple response
+    // TODO: Parse HTTP/3 request headers and implement JWT authentication
+
+    if (request_data) |data| {
+        std.debug.print("[HTTP/3] Processing request data ({} bytes)\n", .{data.len});
+        // TODO: Parse QPACK headers and extract Authorization header
+        // TODO: Validate JWT token using middleware
+    }
+
+    // Default response for HTTP/3 handshake completion
+    const body = try std.fmt.allocPrint(std.heap.page_allocator,
+        \\{{
+        \\  "message": "HTTP/3 connection established successfully",
+        \\  "protocol": "h3",
+        \\  "features": ["quic", "qpack", "0rtt"],
+        \\  "timestamp": {}
+        \\}}
+    , .{std.time.timestamp()});
+
+    return Http3Response{
+        .status = "200",
+        .content_type = "application/json",
+        .body = body,
+    };
+}
+
 fn generateSessionTicket(allocator: std.mem.Allocator, dcid: []const u8, _: *ConnectionState) !*tls_session.SessionTicket {
     // Generate a unique PSK identity (simplified - in practice use random bytes)
     var psk_identity: [32]u8 = undefined;
@@ -1372,8 +1412,8 @@ fn generateQuicToken(allocator: std.mem.Allocator, dcid: []const u8, client_ip: 
     errdefer allocator.free(token);
 
     @memcpy(token[0..dcid.len], dcid);
-    std.mem.writeInt(u32, token[dcid.len..dcid.len + 4], client_ip, .big);
-    std.mem.writeInt(u16, token[dcid.len + 4..dcid.len + 6], client_port, .big);
+    std.mem.writeInt(u32, token[dcid.len .. dcid.len + 4], client_ip, .big);
+    std.mem.writeInt(u16, token[dcid.len + 4 .. dcid.len + 6], client_port, .big);
 
     return token;
 }

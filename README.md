@@ -40,6 +40,7 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
                           │   ├─ HTTP/3 framing & QPACK ✅
                           │   └─ End-to-end HTTP/3 responses ✅
                           ├─ Load Balancing → Backend pool, health checks ✅
+                          ├─ Authentication → JWT middleware + RBAC ✅
                           ├─ Routing → Radix tree + eBPF map 🚧
                           ├─ WASM runtime → wasmtime-zig fork, < 2 ms load 🚧
                           └─ Metrics → OTLP + Prometheus 🚧
@@ -78,6 +79,12 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
   - Health checks with automatic failure detection
   - Connection pooling with connection reuse
   - Retry logic with exponential backoff
+- ✅ **JWT Authentication & Authorization** - **COMPLETE** ✅
+  - HS256, RS256, ES256 signature algorithm support
+  - Token validation with issuer/audience claims
+  - Role-based access control (RBAC)
+  - Middleware system for HTTP/1.1, HTTP/2, HTTP/3
+  - Configurable unprotected paths
   - Timeout handling for backend requests
 - ✅ **Load Balancer Integration** - **COMPLETE** ✅
   - Unified binary (origin server OR load balancer mode)
@@ -205,6 +212,9 @@ zig build run-quic -- --lb lb.toml
 
 # QUIC/HTTP/3 Handshake Server (Linux only)
 zig build run-quic-handshake
+
+# HTTP/1.1 Server with JWT Authentication (demo)
+zig build run-http-server
 
 # Load balancer integration tests
 zig build test-lb-integration

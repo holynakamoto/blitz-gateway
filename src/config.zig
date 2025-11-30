@@ -62,6 +62,69 @@ pub const MetricsConfig = struct {
     collection_interval_seconds: u32 = 10,
 };
 
+/// JWT authentication configuration
+pub const JwtConfig = struct {
+    /// Enable JWT authentication
+    enabled: bool = false,
+
+    /// JWT algorithm (HS256, RS256, ES256)
+    algorithm: []const u8 = "HS256",
+
+    /// Secret key for HS256 (required for HS256)
+    secret: ?[]const u8 = null,
+
+    /// RSA/ECDSA public key for RS256/ES256 (PEM format)
+    public_key: ?[]const u8 = null,
+
+    /// Expected issuer (optional validation)
+    issuer: ?[]const u8 = null,
+
+    /// Expected audience (optional validation)
+    audience: ?[]const u8 = null,
+
+    /// Clock skew tolerance in seconds
+    leeway_seconds: i64 = 0,
+
+    /// Authorization header name
+    header_name: []const u8 = "Authorization",
+
+    /// Authorization scheme
+    scheme: []const u8 = "Bearer",
+
+    /// Paths that don't require authentication
+    unprotected_paths: std.ArrayList([]const u8) = undefined,
+
+    pub fn init(allocator: std.mem.Allocator) JwtConfig {
+        return .{
+            .unprotected_paths = std.ArrayList([]const u8).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *JwtConfig, allocator: std.mem.Allocator) void {
+        if (self.secret) |s| allocator.free(s);
+        if (self.public_key) |pk| allocator.free(pk);
+        if (self.issuer) |iss| allocator.free(iss);
+        if (self.audience) |aud| allocator.free(aud);
+        allocator.free(self.header_name);
+        allocator.free(self.scheme);
+
+        for (self.unprotected_paths.items) |path| {
+            allocator.free(path);
+        }
+        self.unprotected_paths.deinit();
+    }
+
+    /// Check if a path requires authentication
+    pub fn requiresAuth(self: *const JwtConfig, path: []const u8) bool {
+        for (self.unprotected_paths.items) |unprotected| {
+            if (std.mem.eql(u8, path, unprotected)) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
 /// Main configuration structure
 pub const Config = struct {
     /// Server mode
@@ -82,6 +145,9 @@ pub const Config = struct {
     /// Metrics configuration
     metrics: MetricsConfig = .{},
 
+    /// JWT authentication configuration
+    jwt: JwtConfig = .{},
+
     /// Memory allocator
     allocator: std.mem.Allocator,
 
@@ -93,6 +159,7 @@ pub const Config = struct {
     pub fn init(allocator: std.mem.Allocator) Config {
         return Config{
             .backends = std.ArrayList(Backend).init(allocator),
+            .jwt = JwtConfig.init(allocator),
             .allocator = allocator,
         };
     }

@@ -5,16 +5,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod  # Use production target (default)
+      args:
+        BUILD_TYPE: Release
     container_name: blitz-quic-server
     ports:
       - "9443:8443/udp"  # QUIC (mapped to avoid port conflict)
-      - "8080:8080/tcp"  # HTTP
-      - "8444:8444/tcp"  # HTTPS
     volumes:
       # Mount certificates (read-only)
       - ./certs:/app/certs:ro
-      # Optional: Mount for development (uncomment for live reload)
-      # - .:/app
     # Required for io_uring
     privileged: true
     cap_add:
@@ -23,17 +22,17 @@ services:
       - NET_RAW
     # Restart policy
     restart: unless-stopped
-    # Health check (optional)
+    # Health check
     healthcheck:
       test: ["CMD", "nc", "-zu", "localhost", "8443"]
-      interval: 10s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 3
-      start_period: 10s
-    # Environment variables (if needed)
+      start_period: 5s
+    # Environment variables
     environment:
       - QUIC_LOG=trace
-    # Resource limits (optional)
+    # Resource limits
     deploy:
       resources:
         limits:
@@ -42,6 +41,35 @@ services:
         reservations:
           cpus: '2'
           memory: 1G
+    networks:
+      - blitz-network
+
+  # Development variant with extra tools
+  blitz-quic-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev  # Use development target with extra tools
+      args:
+        BUILD_TYPE: Debug
+    container_name: blitz-quic-dev-server
+    ports:
+      - "9444:8443/udp"  # QUIC on different port
+      - "8081:8080/tcp"  # HTTP on different port
+      - "8445:8444/tcp"  # HTTPS on different port
+    volumes:
+      # Mount source for development
+      - .:/app
+      - ./certs:/app/certs:ro
+    # Required for io_uring
+    privileged: true
+    cap_add:
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - NET_RAW
+    # Development profile
+    profiles:
+      - dev
     networks:
       - blitz-network
 

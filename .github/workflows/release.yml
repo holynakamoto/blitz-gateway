@@ -48,24 +48,38 @@ jobs:
           type=ref,event=tag
           type=raw,value=latest,enable={{is_default_branch}}
 
-    - name: Build and push main image
+    - name: Build and push production image
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile
+        target: prod
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Build and push QUIC image
+    - name: Build and push development image
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./Dockerfile.quic
+        file: ./Dockerfile
+        target: dev
         push: true
-        tags: ${{ steps.meta.outputs.tags }}-quic
+        tags: ${{ steps.meta.outputs.tags }}-dev
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push minimal image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: minimal
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}-minimal
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max

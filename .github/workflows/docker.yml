@@ -33,23 +33,36 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image (main)
+    - name: Build production image
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile
+        target: prod
         push: false
-        tags: blitz-gateway:test
+        tags: blitz-gateway:prod
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Build Docker image (QUIC)
+    - name: Build development image
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./Dockerfile.quic
+        file: ./Dockerfile
+        target: dev
         push: false
-        tags: blitz-gateway:quic-test
+        tags: blitz-gateway:dev
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build minimal image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: minimal
+        push: false
+        tags: blitz-gateway:minimal
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -97,7 +110,7 @@ jobs:
         timeout 10 curl -f http://localhost:8080/ || echo "HTTP test skipped - server may not be ready"
 
     - name: Cleanup
-      run: docker-compose down -v
+      run: docker-compose --profile dev down -v
 
   # Test QUIC functionality in container
   quic-integration-test:
@@ -117,11 +130,12 @@ jobs:
           -days 1 -nodes \
           -subj "/C=US/ST=Test/L=Test/O=Blitz/CN=localhost"
 
-    - name: Start QUIC server in container
+    - name: Start QUIC server in container (dev target)
       run: |
-        docker-compose up -d blitz-quic
+        # Use dev profile for testing (has more tools)
+        docker-compose --profile dev up -d blitz-quic-dev
         # Wait for server to start
-        sleep 10
+        sleep 15
 
     - name: Check QUIC server is running
       run: |
@@ -150,4 +164,4 @@ jobs:
         fi
 
     - name: Cleanup
-      run: docker-compose down -v
+      run: docker-compose --profile dev down -v

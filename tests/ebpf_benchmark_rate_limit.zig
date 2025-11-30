@@ -210,8 +210,7 @@ pub const RateLimiter = struct {
         // at the network interface level. This function would typically
         // be used for statistics and fallback logic.
 
-        _ = client_ip;
-        _ = manager;
+        _ = manager; // Not used in simulation
 
         // For benchmarking purposes, we'll do a lightweight check
         // In production, this would query eBPF map statistics
@@ -276,13 +275,6 @@ pub const RateLimiter = struct {
         return manager;
     }
 
-    /// Deinitialize eBPF context
-    fn deinitEbpf(ctx: *EbpfContext) void {
-        _ = ctx;
-
-        // TODO: Implement eBPF cleanup
-        // Close FDs, detach XDP program, etc.
-    }
 
     /// Get current statistics
     pub fn getStats(self: *const RateLimiter) RateLimitStats {

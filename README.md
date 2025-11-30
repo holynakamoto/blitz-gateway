@@ -84,7 +84,7 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
 - ✅ **Production Hardening** - **COMPLETE** ✅
   - Rate limiting with token bucket algorithm (DoS protection)
   - Graceful reload with signal handling (zero-downtime config updates)
-  - eBPF-ready architecture for ultra-high performance
+  - eBPF rate limiting architecture for ultra-high performance
   - Comprehensive security features for internet deployment
 - ✅ **Enterprise Infrastructure** - **COMPLETE** ✅
   - Professional repository structure (12+ directories organized)
@@ -97,7 +97,6 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
 - ✅ **Performance** - ~2,528 RPS (HTTP/2 over TLS, tested in VM)
 - ⚠️ **Known Issues** - Huffman decoding optimization pending (minor impact)
 - 🚧 **Next Up** (in order):
-  - Rate limiting with eBPF
   - JWT authentication
   - OpenTelemetry (OTLP) metrics
   - WASM plugin system

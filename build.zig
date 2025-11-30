@@ -373,6 +373,20 @@ pub fn build(b: *std.Build) void {
     const rate_limit_test_step = b.step("test-rate-limit", "Run rate limiting tests");
     rate_limit_test_step.dependOn(&run_rate_limit_tests.step);
 
+    // eBPF benchmark tests
+    const ebpf_benchmark_tests = b.addTest(.{
+        .root_module = b.addModule("ebpf_benchmark_root", .{
+            .root_source_file = b.path("tests/ebpf_benchmark_test.zig"),
+            .target = target,
+        }),
+    });
+
+    ebpf_benchmark_tests.linkLibC();
+
+    const run_ebpf_benchmark_tests = b.addRunArtifact(ebpf_benchmark_tests);
+    const ebpf_benchmark_test_step = b.step("test-ebpf-benchmark", "Run eBPF benchmark tests");
+    ebpf_benchmark_test_step.dependOn(&run_ebpf_benchmark_tests.step);
+
     // Graceful reload tests
     const graceful_reload_tests = b.addTest(.{
         .root_module = b.addModule("graceful_reload_root", .{

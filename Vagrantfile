@@ -241,6 +241,12 @@ EOF
     echo "🚀 Setting up Blitz Gateway project..."
     cd /vagrant
 
+    # Install nfpm for package building
+    echo "Installing nfpm for .deb package building..."
+    curl -sSfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb -o /tmp/nfpm.deb
+    dpkg -i /tmp/nfpm.deb 2>/dev/null || apt-get install -yf
+    rm -f /tmp/nfpm.deb
+
     # Create results directory
     mkdir -p nuclear-benchmarks/results
 
@@ -265,11 +271,14 @@ echo "4. Nuclear Docker environment:"
 echo "   cd /vagrant/nuclear-benchmarks/docker"
 echo "   docker-compose -f docker-compose.nuclear.yml up -d"
 echo ""
-echo "5. Build and test server:"
-echo "   cd /vagrant && zig build -Doptimize=ReleaseFast"
-echo "   ./zig-out/bin/blitz"
-echo ""
-echo "=========================================="
+    echo "5. Build and test server:"
+    echo "   cd /vagrant && zig build -Doptimize=ReleaseFast"
+    echo "   ./zig-out/bin/blitz"
+    echo ""
+    echo "6. Test install script:"
+    echo "   cd /vagrant && ./scripts/vm/test-install-in-vm.sh"
+    echo ""
+    echo "=========================================="
 EOF
 
     chmod +x /home/vagrant/run-benchmarks.sh

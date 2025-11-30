@@ -169,7 +169,6 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
         if (std.mem.eql(u8, key, "host")) {
             const backend = Backend{
                 .host = try config.allocator.dupe(u8, value),
-                .port = 8080, // Default, will be overridden
             };
             try config.addBackend(backend);
         } else if (std.mem.eql(u8, key, "port")) {

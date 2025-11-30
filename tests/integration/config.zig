@@ -37,7 +37,7 @@ pub const Config = struct {
     listen_port: u16 = 4433,
 
     /// Backend servers (for load balancer mode)
-    backends: std.ArrayList(Backend),
+    backends: std.ArrayListUnmanaged(Backend),
 
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -49,7 +49,7 @@ pub const Config = struct {
 
     pub fn init(allocator: std.mem.Allocator) Config {
         return Config{
-            .backends = std.ArrayList(Backend).init(allocator),
+            .backends = std.ArrayListUnmanaged(Backend){},
             .allocator = allocator,
         };
     }
@@ -61,7 +61,7 @@ pub const Config = struct {
                 self.allocator.free(path);
             }
         }
-        self.backends.deinit();
+        self.backends.deinit(self.allocator);
     }
 
     pub fn addBackend(self: *Config, backend: Backend) !void {
@@ -81,7 +81,7 @@ pub const Config = struct {
             .health_check_path = health_path,
         };
 
-        try self.backends.append(owned_backend);
+        try self.backends.append(self.allocator, owned_backend);
     }
 
     pub fn validate(self: *const Config) !void {
@@ -111,7 +111,7 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
     var config = Config.init(allocator);
     errdefer config.deinit();
 
-    var lines = std.mem.split(u8, content, "\n");
+    var lines = std.mem.splitSequence(u8, content, "\n");
     var current_section: ?[]const u8 = null;
 
     while (lines.next()) |line| {
@@ -169,7 +169,7 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
         if (std.mem.eql(u8, key, "host")) {
             const backend = Backend{
                 .host = try config.allocator.dupe(u8, value),
-                .port = 8080, // Default, will be overridden
+                .port = 8080, // Default port, will be overridden by port setting
             };
             try config.addBackend(backend);
         } else if (std.mem.eql(u8, key, "port")) {

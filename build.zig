@@ -344,4 +344,18 @@ pub fn build(b: *std.Build) void {
     const run_http3_integration_tests = b.addRunArtifact(http3_integration_tests);
     const http3_integration_test_step = b.step("test-http3-integration", "Run HTTP/3 integration tests");
     http3_integration_test_step.dependOn(&run_http3_integration_tests.step);
+
+    // Load balancer integration tests
+    const lb_integration_tests = b.addTest(.{
+        .root_module = b.addModule("lb_integration_root", .{
+            .root_source_file = b.path("tests/integration/load_balancer_integration_test.zig"),
+            .target = target,
+        }),
+    });
+
+    lb_integration_tests.linkLibC();
+
+    const run_lb_integration_tests = b.addRunArtifact(lb_integration_tests);
+    const lb_integration_test_step = b.step("test-lb-integration", "Run load balancer integration tests");
+    lb_integration_test_step.dependOn(&run_lb_integration_tests.step);
 }

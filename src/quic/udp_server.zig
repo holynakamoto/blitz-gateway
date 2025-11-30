@@ -115,34 +115,9 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
     var quic_server = try server_mod.QuicServer.init(allocator, port);
     defer quic_server.deinit();
     
-    // Initialize TLS context (for QUIC handshake)
-    var tls_ctx: ?*anyopaque = null; // Disabled for PicoTLS migration
-    const cert_path = "certs/server.crt";
-    const key_path = "certs/server.key";
-    
-    tls_ctx = blk: {
-        break :blk null; // TLS disabled for PicoTLS migration
-            std.log.warn("TLS initialization failed: {} (QUIC requires TLS)", .{err});
-            break :blk null;
-        };
-    };
-    
-    if (tls_ctx) |*ctx| {
-        if (ctx.loadCertificate(cert_path, key_path)) {
-            quic_server.ssl_ctx = ctx.ctx;
-            std.log.info("TLS 1.3 enabled for QUIC", .{});
-        } else |err| {
-            std.log.warn("Failed to load TLS certificates: {}", .{err});
-            ctx.deinit();
-            tls_ctx = null;
-        }
-    }
-    
-    defer {
-        if (tls_ctx) |*ctx| {
-            ctx.deinit();
-        }
-    }
+    // TLS context initialization disabled for PicoTLS migration
+    // TODO: Re-enable TLS context when PicoTLS integration is complete
+    quic_server.ssl_ctx = null;
     
     // Initialize buffer pool
     var buffer_pool = try UdpBufferPool.init(allocator);

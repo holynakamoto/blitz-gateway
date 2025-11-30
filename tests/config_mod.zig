@@ -2,6 +2,7 @@
 //! Supports both origin server and load balancer modes
 
 const std = @import("std");
+const rate_limit = @import("rate_limit.zig");
 
 /// Backend server configuration for load balancer mode
 pub const Backend = struct {
@@ -25,6 +26,24 @@ pub const Backend = struct {
     }
 };
 
+/// Rate limiting configuration
+pub const RateLimitConfig = struct {
+    /// Global rate limit (requests per second across all clients)
+    global_rps: ?u32 = null,
+
+    /// Per-IP rate limit (requests per second per client IP)
+    per_ip_rps: ?u32 = null,
+
+    /// Burst allowance multiplier (how many seconds of burst to allow)
+    burst_multiplier: f32 = 2.0,
+
+    /// Whether to use eBPF acceleration (Linux only)
+    enable_ebpf: bool = true,
+
+    /// Cleanup interval for expired entries (seconds)
+    cleanup_interval_seconds: u32 = 60,
+};
+
 /// Main configuration structure
 pub const Config = struct {
     /// Server mode
@@ -39,6 +58,9 @@ pub const Config = struct {
     /// Backend servers (for load balancer mode)
     backends: std.ArrayList(Backend),
 
+    /// Rate limiting configuration
+    rate_limit: RateLimitConfig = .{},
+
     /// Memory allocator
     allocator: std.mem.Allocator,
 
@@ -49,7 +71,7 @@ pub const Config = struct {
 
     pub fn init(allocator: std.mem.Allocator) Config {
         return Config{
-            .backends = std.ArrayList(Backend).init(allocator),
+            .backends = std.ArrayListUnmanaged(Backend){},
             .allocator = allocator,
         };
     }
@@ -61,7 +83,7 @@ pub const Config = struct {
                 self.allocator.free(path);
             }
         }
-        self.backends.deinit();
+        self.backends.deinit(self.allocator);
     }
 
     pub fn addBackend(self: *Config, backend: Backend) !void {
@@ -81,7 +103,7 @@ pub const Config = struct {
             .health_check_path = health_path,
         };
 
-        try self.backends.append(owned_backend);
+        try self.backends.append(self.allocator, owned_backend);
     }
 
     pub fn validate(self: *const Config) !void {
@@ -111,7 +133,7 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
     var config = Config.init(allocator);
     errdefer config.deinit();
 
-    var lines = std.mem.split(u8, content, "\n");
+    var lines = std.mem.splitSequence(u8, content, "\n");
     var current_section: ?[]const u8 = null;
 
     while (lines.next()) |line| {
@@ -153,15 +175,37 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
             } else {
                 return error.InvalidListenFormat;
             }
-        } else if (std.mem.eql(u8, key, "mode")) {
-            if (std.mem.eql(u8, value, "load_balancer") or std.mem.eql(u8, value, "lb")) {
-                config.mode = .load_balancer;
-            } else if (std.mem.eql(u8, value, "origin")) {
-                config.mode = .origin;
-            } else {
-                return error.InvalidMode;
+        } else             if (std.mem.eql(u8, key, "mode")) {
+                if (std.mem.eql(u8, value, "load_balancer") or std.mem.eql(u8, value, "lb")) {
+                    config.mode = .load_balancer;
+                } else if (std.mem.eql(u8, value, "origin")) {
+                    config.mode = .origin;
+                } else {
+                    return error.InvalidMode;
+                }
+            } else if (std.mem.eql(u8, key, "rate_limit")) {
+                // Parse rate limit as "1000 req/s" format
+                if (std.mem.indexOf(u8, value, "req/s")) |pos| {
+                    const rate_str = value[0..pos];
+                    const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
+                    config.rate_limit.global_rps = rate;
+                } else {
+                    return error.InvalidRateLimitFormat;
+                }
+            } else if (std.mem.eql(u8, key, "rate_limit_per_ip")) {
+                // Parse per-IP rate limit as "100 req/s" format
+                if (std.mem.indexOf(u8, value, "req/s")) |pos| {
+                    const rate_str = value[0..pos];
+                    const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
+                    config.rate_limit.per_ip_rps = rate;
+                } else {
+                    return error.InvalidRateLimitFormat;
+                }
+            } else if (std.mem.eql(u8, key, "rate_limit_burst_multiplier")) {
+                config.rate_limit.burst_multiplier = try std.fmt.parseFloat(f32, value);
+            } else if (std.mem.eql(u8, key, "rate_limit_enable_ebpf")) {
+                config.rate_limit.enable_ebpf = std.mem.eql(u8, value, "true");
             }
-        }
     } else if (std.mem.startsWith(u8, section.?, "backends.")) {
         // Backend configuration
         // For simplicity, we'll just add all backends in order
@@ -169,6 +213,7 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
         if (std.mem.eql(u8, key, "host")) {
             const backend = Backend{
                 .host = try config.allocator.dupe(u8, value),
+                .port = 8080, // Default, will be overridden
             };
             try config.addBackend(backend);
         } else if (std.mem.eql(u8, key, "port")) {
@@ -205,6 +250,7 @@ pub const ConfigError = error{
     InvalidBackendHost,
     InvalidBackendPort,
     InvalidBackendWeight,
+    InvalidRateLimitFormat,
     FileNotFound,
     ParseError,
 };

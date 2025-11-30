@@ -2,6 +2,7 @@
 //! Supports both origin server and load balancer modes
 
 const std = @import("std");
+const rate_limit = @import("rate_limit.zig");
 
 /// Backend server configuration for load balancer mode
 pub const Backend = struct {
@@ -25,6 +26,24 @@ pub const Backend = struct {
     }
 };
 
+/// Rate limiting configuration
+pub const RateLimitConfig = struct {
+    /// Global rate limit (requests per second across all clients)
+    global_rps: ?u32 = null,
+
+    /// Per-IP rate limit (requests per second per client IP)
+    per_ip_rps: ?u32 = null,
+
+    /// Burst allowance multiplier (how many seconds of burst to allow)
+    burst_multiplier: f32 = 2.0,
+
+    /// Whether to use eBPF acceleration (Linux only)
+    enable_ebpf: bool = true,
+
+    /// Cleanup interval for expired entries (seconds)
+    cleanup_interval_seconds: u32 = 60,
+};
+
 /// Main configuration structure
 pub const Config = struct {
     /// Server mode
@@ -38,6 +57,9 @@ pub const Config = struct {
 
     /// Backend servers (for load balancer mode)
     backends: std.ArrayList(Backend),
+
+    /// Rate limiting configuration
+    rate_limit: RateLimitConfig = .{},
 
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -153,15 +175,37 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
             } else {
                 return error.InvalidListenFormat;
             }
-        } else if (std.mem.eql(u8, key, "mode")) {
-            if (std.mem.eql(u8, value, "load_balancer") or std.mem.eql(u8, value, "lb")) {
-                config.mode = .load_balancer;
-            } else if (std.mem.eql(u8, value, "origin")) {
-                config.mode = .origin;
-            } else {
-                return error.InvalidMode;
+        } else             if (std.mem.eql(u8, key, "mode")) {
+                if (std.mem.eql(u8, value, "load_balancer") or std.mem.eql(u8, value, "lb")) {
+                    config.mode = .load_balancer;
+                } else if (std.mem.eql(u8, value, "origin")) {
+                    config.mode = .origin;
+                } else {
+                    return error.InvalidMode;
+                }
+            } else if (std.mem.eql(u8, key, "rate_limit")) {
+                // Parse rate limit as "1000 req/s" format
+                if (std.mem.indexOf(u8, value, "req/s")) |pos| {
+                    const rate_str = value[0..pos];
+                    const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
+                    config.rate_limit.global_rps = rate;
+                } else {
+                    return error.InvalidRateLimitFormat;
+                }
+            } else if (std.mem.eql(u8, key, "rate_limit_per_ip")) {
+                // Parse per-IP rate limit as "100 req/s" format
+                if (std.mem.indexOf(u8, value, "req/s")) |pos| {
+                    const rate_str = value[0..pos];
+                    const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
+                    config.rate_limit.per_ip_rps = rate;
+                } else {
+                    return error.InvalidRateLimitFormat;
+                }
+            } else if (std.mem.eql(u8, key, "rate_limit_burst_multiplier")) {
+                config.rate_limit.burst_multiplier = try std.fmt.parseFloat(f32, value);
+            } else if (std.mem.eql(u8, key, "rate_limit_enable_ebpf")) {
+                config.rate_limit.enable_ebpf = std.mem.eql(u8, value, "true");
             }
-        }
     } else if (std.mem.startsWith(u8, section.?, "backends.")) {
         // Backend configuration
         // For simplicity, we'll just add all backends in order
@@ -206,6 +250,7 @@ pub const ConfigError = error{
     InvalidBackendHost,
     InvalidBackendPort,
     InvalidBackendWeight,
+    InvalidRateLimitFormat,
     FileNotFound,
     ParseError,
 };

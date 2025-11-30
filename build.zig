@@ -358,4 +358,18 @@ pub fn build(b: *std.Build) void {
     const run_lb_integration_tests = b.addRunArtifact(lb_integration_tests);
     const lb_integration_test_step = b.step("test-lb-integration", "Run load balancer integration tests");
     lb_integration_test_step.dependOn(&run_lb_integration_tests.step);
+
+    // Rate limiting tests
+    const rate_limit_tests = b.addTest(.{
+        .root_module = b.addModule("rate_limit_root", .{
+            .root_source_file = b.path("tests/rate_limit_test.zig"),
+            .target = target,
+        }),
+    });
+
+    rate_limit_tests.linkLibC();
+
+    const run_rate_limit_tests = b.addRunArtifact(rate_limit_tests);
+    const rate_limit_test_step = b.step("test-rate-limit", "Run rate limiting tests");
+    rate_limit_test_step.dependOn(&run_rate_limit_tests.step);
 }

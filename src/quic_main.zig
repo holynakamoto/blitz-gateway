@@ -8,6 +8,7 @@ const io_uring = @import("io_uring.zig");
 const udp_server = @import("quic/udp_server.zig");
 const config = @import("config.zig");
 const load_balancer = @import("load_balancer/load_balancer.zig");
+const rate_limit = @import("rate_limit.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -96,6 +97,28 @@ pub fn main() !void {
 
         var lb = try load_balancer.LoadBalancer.initFromConfig(allocator, cfg);
         defer lb.deinit();
+
+        // Initialize rate limiter if configured
+        var rate_limiter = if (cfg.rate_limit.global_rps != null or cfg.rate_limit.per_ip_rps != null)
+            try rate_limit.RateLimiter.init(allocator, cfg.rate_limit)
+        else
+            null;
+        defer if (rate_limiter) |*rl| rl.deinit();
+
+        if (rate_limiter) |*rl| {
+            const stats = rl.getStats();
+            std.debug.print("Rate limiting enabled: ", .{});
+            if (cfg.rate_limit.global_rps) |rps| {
+                std.debug.print("global={} RPS ", .{rps});
+            }
+            if (cfg.rate_limit.per_ip_rps) |rps| {
+                std.debug.print("per-ip={} RPS ", .{rps});
+            }
+            if (cfg.rate_limit.enable_ebpf) {
+                std.debug.print("(eBPF accelerated)", .{});
+            }
+            std.debug.print("\n", .{});
+        }
 
         std.log.info("Load balancer started successfully", .{});
         try lb.serve(cfg.listen_addr, cfg.listen_port);

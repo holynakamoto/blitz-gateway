@@ -7,6 +7,12 @@ mode = "load_balancer"
 # Listen address and port for the load balancer
 listen = "0.0.0.0:4433"
 
+# Rate limiting configuration (DoS protection)
+rate_limit = "10000 req/s"           # Global rate limit across all clients
+rate_limit_per_ip = "1000 req/s"     # Per-IP rate limit
+rate_limit_burst_multiplier = 2.0    # Allow 2x burst capacity
+rate_limit_enable_ebpf = true        # Use eBPF acceleration (Linux only)
+
 # Backend server configurations
 # Each backend can have different weights for load distribution
 

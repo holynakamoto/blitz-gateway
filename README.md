@@ -6,9 +6,11 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Zig](https://img.shields.io/badge/zig-0.15.2-orange.svg)](https://ziglang.org/)
-[![CI](https://github.com/blitz-gateway/blitz-gateway/workflows/CI/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
-[![Docker](https://github.com/blitz-gateway/blitz-gateway/workflows/Docker/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
-[![Code Quality](https://github.com/blitz-gateway/blitz-gateway/workflows/Code%20Quality/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
+[![CI](https://github.com/blitz-gateway/blitz-gateway/workflows/ci/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/ci.yml)
+[![Docker](https://github.com/blitz-gateway/blitz-gateway/workflows/docker/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/docker.yml)
+[![Code Quality](https://github.com/blitz-gateway/blitz-gateway/workflows/code-quality/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/code-quality.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/blitzgateway/blitz-quic.svg)](https://hub.docker.com/r/blitzgateway/blitz-quic)
+[![GitHub release](https://img.shields.io/github/release/blitz-gateway/blitz-gateway.svg)](https://github.com/blitz-gateway/blitz-gateway/releases)
 
 ## 🎯 Vision
 

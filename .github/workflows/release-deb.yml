@@ -72,7 +72,7 @@ jobs:
         ls -lah dist/
     
     - name: Upload .deb as artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: blitz-gateway-deb
         path: dist/*.deb

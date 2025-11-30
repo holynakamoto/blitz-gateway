@@ -4,17 +4,8 @@
 
 > Building the fastest edge proxy ever written. Target: 10M+ RPS, <50µs p99 latency.
 
-[![Stars](https://img.shields.io/github/stars/holynakamoto/blitz-gateway?style=social)](https://github.com/holynakamoto/blitz-gateway/stargazers)
-[![Forks](https://img.shields.io/github/forks/holynakamoto/blitz-gateway?style=social)](https://github.com/holynakamoto/blitz-gateway/network/members)
-[![CI](https://github.com/holynakamoto/blitz-gateway/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/ci.yml)
-[![Docker Build](https://github.com/holynakamoto/blitz-gateway/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/docker.yml)
-[![Code Quality](https://github.com/holynakamoto/blitz-gateway/actions/workflows/code-quality.yml/badge.svg?branch=main)](https://github.com/holynakamoto/blitz-gateway/actions/workflows/code-quality.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Latest Release](https://img.shields.io/github/v/release/holynakamoto/blitz-gateway?include_prereleases&sort=semver)](https://github.com/holynakamoto/blitz-gateway/releases)
-[![Open Issues](https://img.shields.io/github/issues/holynakamoto/blitz-gateway)](https://github.com/holynakamoto/blitz-gateway/issues)
-[![Closed Issues](https://img.shields.io/github/issues-closed/holynakamoto/blitz-gateway?color=green)](https://github.com/holynakamoto/blitz-gateway/issues?q=is%3Aclosed)
-[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-0.15.2-orange)](https://ziglang.org/)
-[![Built with love](https://img.shields.io/badge/built%20with-%E2%9D%A4-ff69b4)]()
+[![Zig](https://img.shields.io/badge/Zig-0.15.2-orange)](https://ziglang.org/)
 
 ## 🎯 Vision
 

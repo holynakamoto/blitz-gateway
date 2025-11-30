@@ -2,23 +2,27 @@
 
 ## Problem
 
-VirtualBox doesn't support x86_64 VMs on Apple Silicon. You need to use **UTM** instead.
+VirtualBox doesn't support x86_64 VMs on Apple Silicon. Also, standard Vagrant boxes don't have UTM provider support.
 
-## Quick Fix
+## ✅ Recommended Solution: UTM Direct
 
-```bash
-# 1. Destroy the VirtualBox VM (already done)
-vagrant destroy -f
+Use UTM directly (no Vagrant needed) - it's actually simpler and more reliable!
 
-# 2. Start with UTM provider
-vagrant up --provider=utm
-```
+**See: [UTM-DIRECT-SETUP.md](UTM-DIRECT-SETUP.md)** for step-by-step guide.
 
-## Prerequisites
+Quick workflow:
+1. Create VM in UTM GUI
+2. Install Ubuntu 22.04
+3. Copy project to VM
+4. Test install script
 
-✅ **Already installed:**
-- Vagrant (2.4.9)
-- vagrant_utm plugin (0.1.5)
+## Alternative: Vagrant with UTM (if boxes available)
+
+If you want to use Vagrant, you'll need to find or create a UTM-compatible box.
+
+**Prerequisites:**
+- Vagrant (2.4.9) ✅
+- vagrant_utm plugin (0.1.5) ✅
 - UTM app (needed - install if missing)
 
 ## First Time Setup

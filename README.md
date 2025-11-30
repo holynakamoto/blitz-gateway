@@ -46,7 +46,7 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
                           └─ Metrics → OTLP + Prometheus 🚧
 ```
 
-## 📦 Current Status: MVP v0.4 (Private Beta) - ADVANCING 🚀
+## 📦 Current Status: MVP v0.6 (Security Beta) - ADVANCING 🚀
 
 - ✅ HTTP/1.1 echo server with io_uring
 - ✅ Basic connection handling with keep-alive
@@ -108,14 +108,14 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
   - Automated testing, security scanning, performance monitoring
   - Git submodule dependency management (95% size reduction)
 - ✅ **Security features** - Connection limits, timeouts, request validation
-- ✅ **Test suite** - 18/18 core tests passing + QUIC + load balancer + integration tests
+- ✅ **Test suite** - 18/18 core tests passing + QUIC + load balancer + JWT + integration tests
 - ✅ **Performance** - ~2,528 RPS (HTTP/2 over TLS, tested in VM)
 - ⚠️ **Known Issues** - Huffman decoding optimization pending (minor impact)
 - 🚧 **Next Up** (in order):
-  - JWT authentication
-  - OpenTelemetry (OTLP) metrics
   - WASM plugin system
   - Production deployment guides
+  - Enterprise WAF module
+  - Global load balancing
 
 ### 🎉 Recent Achievements (December 2024 - January 2025)
 
@@ -137,8 +137,16 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
 - ✅ **HTTP/2 over TLS 1.3 COMPLETE** - Full end-to-end HTTP/2 implementation
 - ✅ **HPACK Implementation** - Static and dynamic table support, encoding/decoding
 - ✅ **Load Balancing Module** - Backend pool, health checks, connection pooling, retry logic, timeouts
-- ✅ **Security Features** - Connection limits, timeouts, request validation
+- ✅ **JWT Authentication & Authorization** - HS256/RS256/ES256, RBAC, middleware system, configurable paths
+- ✅ **Security Features** - Connection limits, timeouts, request validation, JWT middleware
 - ✅ **Performance** - ~2.5K RPS (HTTP/2 over TLS), ready for 10M+ RPS target
+
+#### 🔐 **JWT Authentication COMPLETE**
+- ✅ **Complete JWT Implementation** - HS256, RS256, ES256 signature algorithms with proper validation
+- ✅ **Role-Based Access Control** - Custom claims parsing, middleware integration, configurable auth paths
+- ✅ **Production HTTP Server Demo** - Full middleware system with Bearer token extraction and validation
+- ✅ **Comprehensive Test Suite** - JWT token creation/validation, middleware testing, integration tests
+- ✅ **Security Hardening** - Proper error handling, timing-safe comparisons, configurable leeway
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed roadmap and next steps.
 
@@ -216,6 +224,9 @@ zig build run-quic-handshake
 # HTTP/1.1 Server with JWT Authentication (demo)
 zig build run-http-server
 
+# JWT token generator (for testing)
+zig run src/jwt_demo.zig
+
 # Load balancer integration tests
 zig build test-lb-integration
 
@@ -272,6 +283,12 @@ zig build test-http3-integration
 
 # Metrics tests
 zig build test-metrics
+
+# JWT authentication tests
+zig build test-jwt
+
+# HTTP server with JWT tests
+zig build test-http-server
 
 # Run all tests with verbose output
 zig build test --verbose
@@ -564,6 +581,7 @@ curl --http3-only --insecure https://localhost:8443/hello
 | Q1 2025       | MVP v0.3 (private beta) ✅ **COMPLETE**        | **HTTP/3/QUIC COMPLETE** ✅, **Enterprise Infrastructure COMPLETE** ✅, **Load Balancer Integration COMPLETE** ✅ |
 | Q2 2025       | v0.4 (production beta) ✅ **COMPLETE**         | **Rate Limiting + DoS Protection** ✅, **Graceful Reload + Zero-Downtime Updates** ✅, **Production Hardening** ✅ |
 | Q2 2025       | v0.5 (observability beta) ✅ **COMPLETE**       | **OpenTelemetry Metrics + Prometheus/Grafana Dashboard** ✅, **Comprehensive Monitoring** ✅ |
+| Q3 2025       | v0.6 (security beta) ✅ **COMPLETE**             | **JWT Authentication & Authorization** ✅, **RBAC Middleware** ✅, **Security Hardening** ✅ |
 | Q3 2025       | v1.0 GA (open source)                          | **Enterprise WAF module**, **Global load balancing**, **SLA monitoring**        |
 | Q4 2025       | v2.0 (enterprise + cloud launch)               | Managed global platform launch, marketplace, SLA 99.999%, SOC2                   |
 | Q1 2026       | Exit event                                     | Acquisition term sheet (target $100M+)                                           |

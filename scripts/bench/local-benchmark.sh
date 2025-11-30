@@ -14,7 +14,12 @@ CONFIG_FILE="$BENCH_DIR/config.toml"
 # Default values
 DURATION="${DURATION:-30}"
 CONNECTIONS="${CONNECTIONS:-100}"
-THREADS="${THREADS:-$(nproc)}"
+# Detect CPU cores (Linux/macOS compatible)
+if command -v nproc &> /dev/null; then
+    THREADS="${THREADS:-$(nproc)}"
+else
+    THREADS="${THREADS:-$(sysctl -n hw.ncpu)}"
+fi
 HOST="${HOST:-localhost}"
 PORT="${PORT:-8080}"
 PROTOCOL="${PROTOCOL:-http}"
@@ -361,15 +366,35 @@ collect_system_metrics() {
         echo ""
 
         echo "=== CPU Information ==="
-        lscpu | head -10
+        if command -v lscpu &> /dev/null; then
+            lscpu | head -10
+        else
+            # macOS system info
+            sysctl -n machdep.cpu.brand_string
+            echo "CPU Cores: $(sysctl -n hw.ncpu)"
+            echo "Physical CPUs: $(sysctl -n hw.physicalcpu)"
+            echo "Logical CPUs: $(sysctl -n hw.logicalcpu)"
+        fi
         echo ""
 
         echo "=== Memory Information ==="
-        free -h
+        if command -v free &> /dev/null; then
+            free -h
+        else
+            # macOS memory info
+            vm_stat
+            echo ""
+            echo "Total Memory: $(sysctl -n hw.memsize | awk '{print $0/1024/1024/1024 "GB"}')"
+        fi
         echo ""
 
         echo "=== Network Information ==="
-        ip addr show | grep -E "(inet|inet6)" | head -5
+        if command -v ip &> /dev/null; then
+            ip addr show | grep -E "(inet|inet6)" | head -5
+        else
+            # macOS network info
+            ifconfig | grep -E "(inet|inet6)" | head -5
+        fi
         echo ""
 
         echo "=== Disk Information ==="
@@ -377,7 +402,7 @@ collect_system_metrics() {
         echo ""
 
         echo "=== Process Information ==="
-        ps aux --sort=-%cpu | head -10
+        ps aux -r | head -10  # macOS uses -r for sorting by CPU
         echo ""
 
     } > "$metrics_file"

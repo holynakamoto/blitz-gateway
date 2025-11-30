@@ -778,7 +778,7 @@ fn buildHttp3Response(
     defer qpack_encoder.deinit();
 
     // Process request and generate response
-    var response_data = try generateHttp3ResponseContent(request_data);
+    const response_data = try generateHttp3ResponseContent(request_data);
     defer std.heap.page_allocator.free(response_data.body);
 
     // HTTP response headers

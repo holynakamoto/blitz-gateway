@@ -32,7 +32,6 @@ RUN apt-get update && apt-get install -y \
     procps \
     lsof \
     strace \
-    perf-tools-unstable \
     # Development libraries
     libssl-dev \
     liburing-dev \
@@ -52,16 +51,13 @@ RUN apt-get update && apt-get install -y \
     bc \
     time \
     numactl \
-    taskset \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust (needed for some benchmark tools)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Go tools
-RUN go install github.com/tsenart/vegeta@latest && \
-    go install github.com/grafana/xk6-quic@latest
+# Skip Go tools for now - using pre-compiled binaries instead
 
 # Install WRK2 (nuclear HTTP/1.1 + HTTP/2 benchmarking)
 RUN cd /tmp && \
@@ -124,9 +120,9 @@ RUN mkdir -p \
     /nuclear-benchmarks/tools
 
 # Copy benchmark scripts and tools
-COPY scripts/ /nuclear-benchmarks/scripts/
-COPY docker/entrypoint.sh /nuclear-benchmarks/
-COPY config/ /nuclear-benchmarks/config/
+COPY nuclear-benchmarks/scripts/ /nuclear-benchmarks/scripts/
+COPY nuclear-benchmarks/docker/entrypoint.sh /nuclear-benchmarks/
+COPY nuclear-benchmarks/config.toml /nuclear-benchmarks/config/
 
 # Make scripts executable
 RUN find /nuclear-benchmarks/scripts -name "*.sh" -exec chmod +x {} \;

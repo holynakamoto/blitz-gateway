@@ -248,27 +248,9 @@ pub const JWTAuthMiddleware = struct {
 
 /// Authorization middleware factory
 pub fn requireRole(required_role: []const u8) MiddlewareHandler {
-    const Handler = struct {
-        role: []const u8,
-
-        fn handler(self: *const Handler, req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
-            if (!req.hasRole(self.role)) {
-                res.setStatus(403);
-                try res.setHeader("Content-Type", "application/json");
-                try res.write("{\"error\":\"Forbidden\",\"message\":\"Insufficient permissions\",\"required_role\":\"");
-                try res.write(self.role);
-                try res.write("\"}");
-                return .respond;
-            }
-            return .next;
-        }
-    };
-
-    // This is a simplified approach - in a real implementation, you'd need to manage the lifetime
-    // of the Handler instance. For now, we'll use a global or find another way.
-    return struct {
-        fn handler(req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
-            // For demo purposes, hardcode role check
+    // Simplified implementation that captures the required_role
+    const RoleHandler = struct {
+        pub fn handler(req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
             if (!req.hasRole(required_role)) {
                 res.setStatus(403);
                 try res.setHeader("Content-Type", "application/json");
@@ -277,7 +259,9 @@ pub fn requireRole(required_role: []const u8) MiddlewareHandler {
             }
             return .next;
         }
-    }.handler;
+    };
+
+    return RoleHandler.handler;
 }
 
 /// CORS middleware

@@ -37,12 +37,12 @@ Vagrant.configure("2") do |config|
   # Network configuration
   config.vm.network "private_network", type: "dhcp"
 
-  # Port forwarding for benchmarking
-  config.vm.network "forwarded_port", guest: 8080, host: 8080, protocol: "tcp"  # HTTP
-  config.vm.network "forwarded_port", guest: 8443, host: 8443, protocol: "tcp"  # HTTPS
-  config.vm.network "forwarded_port", guest: 8443, host: 8443, protocol: "udp"  # QUIC
-  config.vm.network "forwarded_port", guest: 9090, host: 9090, protocol: "tcp"  # Metrics
-  config.vm.network "forwarded_port", guest: 3000, host: 3000, protocol: "tcp"  # Grafana
+  # Port forwarding for benchmarking (using non-standard host ports to avoid conflicts)
+  config.vm.network "forwarded_port", guest: 8080, host: 18080, protocol: "tcp"  # HTTP -> 18080
+  config.vm.network "forwarded_port", guest: 8443, host: 18443, protocol: "tcp"  # HTTPS -> 18443
+  config.vm.network "forwarded_port", guest: 8443, host: 18443, protocol: "udp"  # QUIC -> 18443
+  config.vm.network "forwarded_port", guest: 9090, host: 19090, protocol: "tcp"  # Metrics -> 19090
+  config.vm.network "forwarded_port", guest: 3000, host: 13000, protocol: "tcp"  # Grafana -> 13000
 
   # Shared folder for code and results
   config.vm.synced_folder ".", "/vagrant", type: "virtualbox"

@@ -1,21 +1,21 @@
 #!/bin/bash
-# Nuclear WRK2 Benchmark - HTTP/1.1 Keep-Alive RPS Testing
-# Targets: 10M+ RPS on 128-core AMD EPYC / Ampere Altra
+# Nuclear WRK2 Benchmark - macOS Compatible
+# Demonstrates HTTP/1.1 performance testing
 
 set -euo pipefail
 
-# Configuration - Nuclear Settings
+# Configuration - macOS compatible settings
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
-RESULTS_DIR="$PROJECT_ROOT/nuclear-benchmarks/results/$(date +%Y%m%d_%H%M%S)_wrk2"
+RESULTS_DIR="/tmp/blitz-benchmarks/$(date +%Y%m%d_%H%M%S)_wrk"
 CONFIG_FILE="$PROJECT_ROOT/nuclear-benchmarks/config.toml"
 
-# Nuclear benchmark parameters
-DURATION="${DURATION:-60}"
-CONNECTIONS="${CONNECTIONS:-100000}"  # 100k concurrent connections
-RATE="${RATE:-1000000}"              # 1M RPS target rate
-THREADS="${THREADS:-128}"            # Match CPU cores
-HOST="${HOST:-[::1]}"
+# macOS-compatible benchmark parameters
+DURATION="${DURATION:-10}"
+CONNECTIONS="${CONNECTIONS:-50}"      # Lower for macOS
+RATE="${RATE:-1000}"                  # Conservative rate for macOS
+THREADS="${THREADS:-$(sysctl -n hw.ncpu)}"  # Use macOS CPU detection
+HOST="${HOST:-localhost}"
 PORT="${PORT:-8080}"
 PAYLOAD_SIZE="${PAYLOAD_SIZE:-128}"  # 128 bytes = sweet spot
 
@@ -50,94 +50,50 @@ log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
-# System validation for nuclear benchmarks
+# System validation for benchmarks (macOS compatible)
 validate_system() {
-    log_nuclear "🔍 Validating system for nuclear benchmarking..."
+    log_nuclear "🔍 Validating system for benchmarking..."
 
     # Check CPU cores
     local cpu_cores
-    cpu_cores=$(nproc)
-    if [ "$cpu_cores" -lt 64 ]; then
-        log_warning "⚠️  System has only $cpu_cores cores. Nuclear benchmarks need 64+ cores for accurate results."
-        log_warning "   Recommended: AMD EPYC 9754 (128c) or Ampere Altra (128c)"
-    else
-        log_success "✅ $cpu_cores CPU cores detected - suitable for nuclear benchmarks"
-    fi
+    cpu_cores=$(sysctl -n hw.ncpu)
+    log_info "✅ $cpu_cores CPU cores detected"
 
     # Check memory
     local total_mem_gb
-    total_mem_gb=$(free -g | awk 'NR==2{printf "%.0f", $2}')
-    if [ "$total_mem_gb" -lt 256 ]; then
-        log_warning "⚠️  System has only ${total_mem_gb}GB RAM. Nuclear benchmarks need 256GB+ for 100k connections."
-    else
-        log_success "✅ ${total_mem_gb}GB RAM detected - suitable for nuclear benchmarks"
+    total_mem_gb=$(echo "$(sysctl -n hw.memsize) / 1024 / 1024 / 1024" | bc)
+    log_info "✅ ${total_mem_gb}GB RAM detected"
+
+    # Check if wrk is available
+    if ! command -v wrk &> /dev/null; then
+        log_error "❌ WRK not found. Install with: brew install wrk"
+        exit 1
     fi
 
-    # Check network
-    if ! command -v ethtool &> /dev/null; then
-        log_warning "⚠️  ethtool not available - cannot validate network settings"
-    else
-        local iface
-        iface=$(ip route | grep default | awk '{print $5}' | head -1)
-        if [ -n "$iface" ]; then
-            local speed
-            speed=$(ethtool "$iface" 2>/dev/null | grep -i speed | awk '{print $2}' || echo "unknown")
-            log_info "Network interface $iface speed: $speed"
-        fi
-    fi
-
-    # Check kernel parameters
-    local somaxconn
-    somaxconn=$(sysctl -n net.core.somaxconn 2>/dev/null || echo "unknown")
-    if [ "$somaxconn" != "unknown" ] && [ "$somaxconn" -lt 65536 ]; then
-        log_warning "⚠️  net.core.somaxconn is $somaxconn, should be >= 65536 for nuclear benchmarks"
-        log_info "   Run: sudo sysctl -w net.core.somaxconn=65536"
-    fi
-
-    local max_syn_backlog
-    max_syn_backlog=$(sysctl -n net.ipv4.tcp_max_syn_backlog 2>/dev/null || echo "unknown")
-    if [ "$max_syn_backlog" != "unknown" ] && [ "$max_syn_backlog" -lt 65536 ]; then
-        log_warning "⚠️  net.ipv4.tcp_max_syn_backlog is $max_syn_backlog, should be >= 65536"
-        log_info "   Run: sudo sysctl -w net.ipv4.tcp_max_syn_backlog=65536"
-    fi
+    log_success "✅ System validation complete"
 }
 
-# Install wrk2 if not present
-install_wrk2() {
-    if command -v wrk &> /dev/null && wrk --version 2>&1 | grep -q "wrk2"; then
-        log_success "✅ WRK2 already installed"
+# Check wrk installation (macOS uses Homebrew)
+check_wrk() {
+    if command -v wrk &> /dev/null; then
+        log_success "✅ WRK already installed via Homebrew"
         return
     fi
 
-    log_nuclear "📦 Installing WRK2 (nuclear-grade HTTP benchmarking tool)..."
-
-    # Install dependencies
-    sudo apt-get update
-    sudo apt-get install -y build-essential libssl-dev git
-
-    # Clone and build wrk2
-    cd /tmp
-    git clone https://github.com/giltene/wrk2.git
-    cd wrk2
-    make
-
-    # Install
-    sudo cp wrk /usr/local/bin/wrk2
-    sudo ln -sf /usr/local/bin/wrk2 /usr/local/bin/wrk
-
-    log_success "✅ WRK2 installed successfully"
+    log_error "❌ WRK not found. Install with: brew install wrk"
+    exit 1
 }
 
-# Setup environment for nuclear benchmarks
+# Setup environment for benchmarks (macOS)
 setup_environment() {
-    log_nuclear "🔧 Setting up nuclear benchmark environment..."
+    log_nuclear "🔧 Setting up benchmark environment..."
 
     # Create results directory
     mkdir -p "$RESULTS_DIR"
 
     # Save configuration
     cat > "$RESULTS_DIR/config.txt" << EOF
-Nuclear WRK2 Benchmark Configuration
+Blitz Gateway Benchmark Configuration
 ====================================
 Date: $(date)
 Host: $HOST:$PORT
@@ -148,32 +104,19 @@ Threads: $THREADS
 Payload Size: ${PAYLOAD_SIZE} bytes
 
 System Info:
-- CPU Cores: $(nproc)
-- Memory: $(free -h | awk 'NR==2{print $2}')
+- CPU Cores: $(sysctl -n hw.ncpu)
+- Memory: $(echo "$(sysctl -n hw.memsize) / 1024 / 1024 / 1024" | bc)GB
 - Kernel: $(uname -r)
-- OS: $(lsb_release -d 2>/dev/null | cut -f2 || uname -s)
-
-Network Settings:
-- somaxconn: $(sysctl -n net.core.somaxconn 2>/dev/null || echo "unknown")
-- tcp_max_syn_backlog: $(sysctl -n net.ipv4.tcp_max_syn_backlog 2>/dev/null || echo "unknown")
-- file-max: $(sysctl -n fs.file-max 2>/dev/null || echo "unknown")
+- OS: macOS $(sw_vers -productVersion 2>/dev/null || uname -s)
 EOF
 
-    # Optimize system for benchmarks
-    log_info "Optimizing system for nuclear benchmarks..."
+    # Basic optimizations for macOS
+    log_info "Applying basic optimizations..."
 
-    # Increase file descriptors
-    ulimit -n 1048576 2>/dev/null || true
+    # Increase file descriptors (macOS limit)
+    ulimit -n 4096 2>/dev/null || true
 
-    # Disable swap for consistent results
-    sudo swapoff -a 2>/dev/null || true
-
-    # Set CPU governor to performance
-    for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-        echo performance | sudo tee "$cpu" 2>/dev/null || true
-    done
-
-    log_success "✅ Environment optimized for nuclear benchmarks"
+    log_success "✅ Environment setup complete"
 }
 
 # Generate payload of specified size
@@ -416,47 +359,36 @@ EOF
     log_success "✅ Comparison report generated: $comparison_file"
 }
 
-# Main function
+# Main function (macOS compatible)
 main() {
-    log_nuclear "💥 INITIALIZING NUCLEAR BENCHMARK SUITE 💥"
-    log_nuclear "Target: 10M+ RPS - Prove Blitz Gateway is the fastest proxy ever written"
+    log_nuclear "🚀 BLITZ GATEWAY BENCHMARK SUITE (macOS)"
+    log_nuclear "Demonstrating HTTP proxy performance testing"
     echo ""
 
     # Validate system
     validate_system
     echo ""
 
-    # Install tools
-    install_wrk2
+    # Check tools
+    check_wrk
     echo ""
 
     # Setup environment
     setup_environment
     echo ""
 
-    # Run nuclear benchmarks for different payload sizes
-    local payload_sizes=(1 128 16384 262144)  # 1B, 128B, 16KB, 256KB
-
-    for size in "${payload_sizes[@]}"; do
-        log_nuclear "🔥 Testing payload size: ${size} bytes"
-        PAYLOAD_SIZE="$size" run_wrk2_benchmark "$size"
-        echo ""
-        sleep 5  # Cool down between tests
-    done
-
-    # Generate comparison report
-    generate_comparison
+    # Run basic benchmark
+    log_nuclear "🔥 Running HTTP benchmark"
+    run_wrk2_benchmark "$PAYLOAD_SIZE"
+    echo ""
 
     # Final summary
-    log_nuclear "🎯 NUCLEAR BENCHMARK COMPLETE!"
+    log_nuclear "✅ BENCHMARK COMPLETE!"
     log_success "Results saved to: $RESULTS_DIR"
-    log_info "Summary: $RESULTS_DIR/comparison.md"
-    log_info "Analysis: $RESULTS_DIR/*_analysis.txt"
 
     echo ""
-    echo "🚀 If you hit 10M+ RPS, you've just proven Blitz Gateway beats"
-    echo "   every commercial and open-source proxy on the planet!"
-    echo "   Time to publish these numbers and change the industry! 🔥"
+    echo "🚀 Benchmark demonstrates Blitz Gateway performance testing infrastructure!"
+    echo "   For nuclear benchmarks (10M+ RPS), deploy to Linux with 128+ cores."
 }
 
 # Run main function

@@ -1,14 +1,24 @@
-# Blitz Edge Gateway
+# Blitz Edge Gateway 🚀
 
 **Ultra-Low-Latency Edge API Gateway & Reverse Proxy written in Zig**
 
 > Building the fastest edge proxy ever written. Target: 10M+ RPS, <50µs p99 latency.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Zig](https://img.shields.io/badge/zig-0.15.2-orange.svg)](https://ziglang.org/)
-[![CI](https://github.com/blitz-gateway/blitz-gateway/workflows/CI/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
-[![Docker](https://github.com/blitz-gateway/blitz-gateway/workflows/Docker/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
-[![Code Quality](https://github.com/blitz-gateway/blitz-gateway/workflows/Code%20Quality/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
+[![Stars](https://badgen.net/github/stars/blitz-gateway/blitz-gateway)](https://github.com/blitz-gateway/blitz-gateway/stargazers)
+[![Forks](https://badgen.net/github/forks/blitz-gateway/blitz-gateway)](https://github.com/blitz-gateway/blitz-gateway/network/members)
+[![CI](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/ci.yml)
+[![Docker](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/docker.yml/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/docker.yml)
+[![Code Quality](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/code-quality.yml/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/code-quality.yml)
+[![Codecov](https://codecov.io/gh/blitz-gateway/blitz-gateway/graph/badge.svg)](https://codecov.io/gh/blitz-gateway/blitz-gateway)
+[![License](https://img.shields.io/github/license/blitz-gateway/blitz-gateway)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/blitz-gateway/blitz-gateway?include_prereleases&sort=semver)](https://github.com/blitz-gateway/blitz-gateway/releases)
+[![Open Issues](https://img.shields.io/github/issues/blitz-gateway/blitz-gateway)](https://github.com/blitz-gateway/blitz-gateway/issues)
+[![Closed Issues](https://img.shields.io/github/issues-closed/blitz-gateway/blitz-gateway?color=green)](https://github.com/blitz-gateway/blitz-gateway/issues?q=is%3Aclosed)
+[![Built with Zig](https://img.shields.io/badge/built%20with-Zig-orange)](https://ziglang.org/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/blitzgateway/blitz-quic)](https://hub.docker.com/r/blitzgateway/blitz-quic)
+[![Docker Stars](https://img.shields.io/docker/stars/blitzgateway/blitz-quic)](https://hub.docker.com/r/blitzgateway/blitz-quic)
+[![GitHub Downloads](https://img.shields.io/github/downloads/blitz-gateway/blitz-gateway/total)](https://github.com/blitz-gateway/blitz-gateway/releases)
+[![Built with love](https://img.shields.io/badge/built%20with-%E2%9D%A4-ff69b4)]()
 
 ## 🎯 Vision
 
@@ -771,6 +781,24 @@ sudo apt-get install wrk hey
 - **System Monitoring**: CPU, memory, network resource tracking
 
 📊 **Complete Benchmark Guide**: [docs/benchmark/README.md](docs/benchmark/README.md)
+
+### 🖥️ VM Benchmarking Environment
+
+For accurate performance testing (not suitable on local Mac):
+
+```bash
+# Quick VM benchmark setup
+./run-vm-benchmarks.sh
+
+# Choose from:
+# 1) Basic HTTP benchmarks (validation)
+# 2) Nuclear WRK2 benchmarks (10M+ RPS target)
+# 3) Docker nuclear environment (full suite)
+```
+
+**VM Environment**: Ubuntu 22.04, 8 cores, 16GB RAM, nuclear kernel tuning
+
+📖 **VM Benchmarking Guide**: [BENCHMARKING-VM.md](BENCHMARKING-VM.md)
 
 ### 🔧 Advanced Configuration
 

@@ -1,0 +1,108 @@
+# Blitz Gateway Plugin Configuration
+# This file defines plugin settings and routing rules
+
+[plugins.request_logger]
+id = "request_logger"
+name = "Request Logger Plugin"
+description = "Logs all incoming HTTP requests"
+version = "1.0.0"
+type = "request_preprocess"
+wasm_path = "request_logger.wasm"
+priority = 10
+enabled = true
+timeout_ms = 1000
+memory_limit = 1048576  # 1MB
+
+[plugins.request_logger.config]
+log_level = "info"
+include_headers = ["User-Agent", "X-Forwarded-For"]
+exclude_paths = ["/health", "/metrics"]
+
+[plugins.auth_custom]
+id = "auth_custom"
+name = "Custom Authentication Plugin"
+description = "Custom authentication beyond JWT"
+version = "1.0.0"
+type = "auth"
+wasm_path = "auth_custom.wasm"
+priority = 20
+enabled = true
+timeout_ms = 2000
+memory_limit = 2097152  # 2MB
+
+[plugins.auth_custom.config]
+allowed_domains = ["company.com", "trusted.org"]
+require_mfa = true
+session_timeout = 3600
+
+[plugins.rate_limiter]
+id = "rate_limiter"
+name = "Custom Rate Limiter Plugin"
+description = "Advanced rate limiting with custom logic"
+version = "1.0.0"
+type = "request_preprocess"
+wasm_path = "rate_limiter.wasm"
+priority = 5  # Run before other plugins
+enabled = true
+timeout_ms = 500
+memory_limit = 1048576  # 1MB
+
+[plugins.rate_limiter.config]
+requests_per_minute = 1000
+burst_limit = 100
+ban_duration_seconds = 300
+whitelist = ["192.168.1.0/24"]
+blacklist = ["10.0.0.0/8"]
+
+[plugins.response_transformer]
+id = "response_transformer"
+name = "Response Transformer Plugin"
+description = "Modifies response content and headers"
+version = "1.0.0"
+type = "response_transform"
+wasm_path = "response_transformer.wasm"
+priority = 50
+enabled = true
+timeout_ms = 1500
+memory_limit = 2097152  # 2MB
+
+[plugins.response_transformer.config]
+add_cors_headers = true
+compress_responses = true
+cache_control_max_age = 3600
+custom_headers = { "X-Powered-By" = "Blitz Gateway" }
+
+[plugins.metrics_custom]
+id = "metrics_custom"
+name = "Custom Metrics Plugin"
+description = "Collects custom application metrics"
+version = "1.0.0"
+type = "observability"
+wasm_path = "metrics_custom.wasm"
+priority = 100
+enabled = true
+timeout_ms = 2000
+memory_limit = 1048576  # 1MB
+
+[plugins.metrics_custom.config]
+metrics_prefix = "blitz_custom"
+collect_request_duration = true
+collect_error_rates = true
+custom_counters = ["api_calls", "cache_hits", "db_queries"]
+
+# Plugin routing rules
+[routing]
+# Route specific paths to specific plugins
+"/api/admin" = ["auth_custom", "rate_limiter"]
+"/api/public" = ["request_logger"]
+"/health" = []  # No plugins for health checks
+
+# Global plugin execution order (by priority, lower numbers first)
+[global]
+enabled_plugins = [
+    "rate_limiter",      # Priority 5
+    "request_logger",    # Priority 10
+    "auth_custom",       # Priority 20
+    "response_transformer", # Priority 50
+    "metrics_custom"     # Priority 100
+]

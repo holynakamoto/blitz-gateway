@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 const net = std.net;
 const http = @import("http/parser.zig");
 const jwt = @import("jwt.zig");
+const wasm = @import("wasm/manager.zig");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -26,6 +27,24 @@ pub fn main() !void {
     // Create JWT validator
     var jwt_validator = jwt.Validator.init(allocator, jwt_config);
     defer jwt_validator.deinit();
+
+    // Create WASM plugin manager
+    const plugin_config = wasm.PluginManager.PluginManagerConfig{
+        .plugin_dir = "../../plugins", // Relative to infra/compose
+        .hot_reload = true,
+        .memory_limit = 2 * 1024 * 1024, // 2MB
+        .timeout_ms = 3000,
+    };
+
+    var plugin_manager = try wasm.PluginManager.init(allocator, plugin_config);
+    defer plugin_manager.deinit();
+
+    // Load plugins from directory if it exists
+    if (plugin_config.plugin_dir) |dir| {
+        plugin_manager.loadPluginsFromDir(dir) catch |err| {
+            std.log.warn("Failed to load plugins from {s}: {}", .{ dir, err });
+        };
+    }
 
     // Start HTTP server
     const address = try net.Address.parseIp("127.0.0.1", 8080);
@@ -101,14 +120,35 @@ fn handleConnection(allocator: std.mem.Allocator, stream: net.Stream, jwt_valida
     }
 
     // Handle request with JWT authentication
-    try handleSimpleRequest(allocator, method, path, &headers, &jwt_validator, stream);
+    try handleSimpleRequest(allocator, method, path, &headers, &jwt_validator, &plugin_manager, stream);
 }
 
 
-fn handleSimpleRequest(allocator: std.mem.Allocator, _: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8), jwt_validator: *jwt.Validator, stream: net.Stream) !void {
+fn handleSimpleRequest(allocator: std.mem.Allocator, _: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8), jwt_validator: *jwt.Validator, plugin_manager: *wasm.PluginManager, stream: net.Stream) !void {
     var status_code: u16 = 200;
     var response_body: []const u8 = "";
     var allocated_response: ?[]u8 = null;
+
+    // Create plugin context
+    var plugin_ctx = wasm.types.PluginContext.init(allocator, "http-handler", std.time.timestamp());
+    defer plugin_ctx.deinit();
+
+    // Execute request preprocessing plugins
+    const preprocess_result = plugin_manager.executePlugins(
+        .request_preprocess,
+        &plugin_ctx,
+        null, // No parsed request yet
+        null, // No response yet
+    ) catch |err| {
+        std.log.err("Plugin preprocessing failed: {}", .{err});
+        status_code = 500;
+        response_body = "Internal server error";
+    };
+
+    if (preprocess_result.status == .error) {
+        status_code = preprocess_result.http_status_code orelse 500;
+        response_body = preprocess_result.error_message orelse "Plugin preprocessing failed";
+    }
 
     // Check if authentication is required
     const requires_auth = !std.mem.eql(u8, path, "/health");
@@ -180,6 +220,18 @@ fn handleSimpleRequest(allocator: std.mem.Allocator, _: []const u8, path: []cons
             status_code = 404;
             response_body = "{\"error\":\"Not found\"}";
         }
+    }
+
+    // Execute response postprocessing plugins
+    if (status_code < 500) { // Only for successful responses
+        _ = plugin_manager.executePlugins(
+            .response_postprocess,
+            &plugin_ctx,
+            null,
+            null,
+        ) catch |err| {
+            std.log.warn("Plugin response postprocessing failed: {}", .{err});
+        };
     }
 
     // Send HTTP response

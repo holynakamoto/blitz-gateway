@@ -428,6 +428,19 @@ pub fn build(b: *std.Build) void {
     const jwt_test_step = b.step("test-jwt", "Run JWT tests");
     jwt_test_step.dependOn(&run_jwt_tests.step);
 
+    // WASM plugin tests
+    const wasm_tests = b.addTest(.{
+        .root_module = b.addModule("wasm_root", .{
+            .root_source_file = b.path("src/wasm/types.zig"),
+            .target = target,
+        }),
+    });
+    wasm_tests.linkLibC();
+
+    const run_wasm_tests = b.addRunArtifact(wasm_tests);
+    const wasm_test_step = b.step("test-wasm", "Run WASM plugin tests");
+    wasm_test_step.dependOn(&run_wasm_tests.step);
+
     // HTTP server with JWT tests
     const http_server_tests = b.addTest(.{
         .root_module = b.addModule("http_server_root", .{

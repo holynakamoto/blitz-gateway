@@ -5,7 +5,7 @@ const std = @import("std");
 const testing = std.testing;
 
 // Import our modules
-const tls = @import("tls/tls.zig");
+// const tls = @import("tls/tls.zig"); // Temporarily disabled for picotls migration
 const frame = @import("http2/frame.zig");
 const hpack = @import("http2/hpack.zig");
 

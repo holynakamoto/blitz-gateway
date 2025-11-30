@@ -207,8 +207,9 @@ fn writeVarInt(buf: []u8, value: u64) !usize {
 // Note: This function is now in handshake.zig for proper allocator management
 // Keeping this for backward compatibility, but prefer handshake.extractCryptoFrames
 pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(CryptoFrame) {
-    var frames = std.ArrayList(CryptoFrame).init(allocator);
-    errdefer frames.deinit();
+    // Zig 0.15.2: Use initCapacity for managed ArrayList
+    var frames = std.ArrayList(CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
+    errdefer frames.deinit(allocator);
     
     var offset: usize = 0;
     
@@ -217,7 +218,8 @@ pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !s
         if (payload[offset] == @intFromEnum(FrameType.crypto)) {
             // Parse CRYPTO frame
             const frame = try CryptoFrame.parseFromPayload(payload[offset..]);
-            try frames.append(frame);
+            // Zig 0.15.2: append requires allocator
+            try frames.append(allocator, frame);
             
             // Move offset past this frame
             // Frame type (1) + offset VarInt + length VarInt + data

@@ -1,0 +1,43 @@
+# Build artifacts
+zig-cache/
+zig-out/
+.zig-cache/
+
+# Git
+.git/
+# .gitignore - needed by Dockerfile.quic
+
+# Documentation
+*.md
+docs/
+!README.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# MacOS
+.DS_Store
+Thumbs.db
+
+# Vagrant
+.vagrant/
+Vagrantfile
+
+# Logs
+*.log
+
+# Test files
+test-*.txt
+bench-*.txt
+
+# Certificates (will be mounted)
+# certs/*
+
+# Docker files themselves
+Dockerfile*
+docker-compose*.yml
+.dockerignore

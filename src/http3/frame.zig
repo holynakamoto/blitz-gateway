@@ -1,7 +1,11 @@
 // HTTP/3 Frame parsing and generation (RFC 9114)
 // Phase 2: HTTP/3 framing on top of QUIC streams
+//
+// IMPORTANT: HTTP/3 uses QPACK for header compression, NOT HPACK!
+// RFC 9114 §4.2: "The use of HPACK with HTTP/3 is not supported"
 
 const std = @import("std");
+pub const qpack = @import("qpack.zig");
 
 // HTTP/3 Frame Types (RFC 9114 Section 7.2)
 pub const FrameType = enum(u64) {
@@ -77,6 +81,24 @@ pub const HeadersFrame = struct {
         // Write QPACK-encoded header block
         try writer.writeAll(header_block);
     }
+
+    // Generate HEADERS frame from header fields using QPACK encoding
+    // This is the correct way to send headers in HTTP/3
+    pub fn generateFromHeaders(writer: anytype, encoder: *qpack.QpackEncoder, headers: []const qpack.HeaderField) !void {
+        // Encode headers with QPACK
+        const encoded = try encoder.encode(headers);
+        defer encoder.allocator.free(encoded);
+        
+        // Write frame type (0x01 = HEADERS)
+        _ = try writeVarInt(writer, @intFromEnum(FrameType.headers));
+        // Write QPACK-encoded header block
+        try writer.writeAll(encoded);
+    }
+
+    // Decode HEADERS frame content into header fields using QPACK
+    pub fn decodeHeaders(self: HeadersFrame, decoder: *qpack.QpackDecoder) ![]qpack.HeaderField {
+        return decoder.decode(self.header_block);
+    }
 };
 
 // SETTINGS Frame (RFC 9114 Section 7.2.4)
@@ -91,13 +113,15 @@ pub const SettingsFrame = struct {
     
     pub fn init(allocator: std.mem.Allocator) SettingsFrame {
         return SettingsFrame{
-            .settings = std.ArrayList(Setting).init(allocator),
+            // Zig 0.15.2: Use initCapacity
+            .settings = std.ArrayList(Setting).initCapacity(allocator, 8) catch @panic("Failed to init settings"),
             .allocator = allocator,
         };
     }
     
     pub fn deinit(self: *SettingsFrame) void {
-        self.settings.deinit();
+        // Zig 0.15.2: deinit requires allocator
+        self.settings.deinit(self.allocator);
     }
     
     pub fn parse(data: []const u8, allocator: std.mem.Allocator) !SettingsFrame {
@@ -122,7 +146,8 @@ pub const SettingsFrame = struct {
             const value_result = try readVarInt(data[offset..]);
             offset += value_result.bytes_read;
             
-            try frame.settings.append(Setting{
+            // Zig 0.15.2: append requires allocator
+            try frame.settings.append(allocator, Setting{
                 .identifier = id_result.value,
                 .value = value_result.value,
             });

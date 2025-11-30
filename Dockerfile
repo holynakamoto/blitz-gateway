@@ -1,77 +1,95 @@
-# Blitz Dockerfile for testing
-# Uses Ubuntu 24.04 LTS Minimal for maximum io_uring performance
-FROM ubuntu:24.04
+# --------------------------
+# Stage 1: Build Stage
+# --------------------------
+FROM ubuntu:22.04 AS builder
 
-# Install dependencies
+# --------------------------
+# Install build dependencies
+# --------------------------
 RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    git \
     build-essential \
-    lsb-release \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Zig 0.13.0 (better liburing support) - detect architecture
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        ZIG_ARCH="x86_64"; \
-        ZIG_VERSION="0.12.0"; \
-    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
-        ZIG_ARCH="aarch64"; \
-        ZIG_VERSION="0.12.0"; \
-    else \
-        echo "Unsupported architecture: $ARCH" && exit 1; \
-    fi && \
-    echo "Installing Zig ${ZIG_VERSION} for ${ZIG_ARCH}..." && \
-    wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz && \
-    tar -xf zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz && \
-    mv zig-linux-${ZIG_ARCH}-${ZIG_VERSION} /opt/zig && \
-    rm zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz && \
-    /opt/zig/zig version
-
-ENV PATH="/opt/zig:${PATH}"
-
-# Install liburing and pkg-config
-RUN apt-get update && apt-get install -y \
-    liburing-dev \
+    cmake \
     pkg-config \
-    linux-tools-common \
-    linux-tools-generic \
+    git \
+    curl \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# --------------------------
+# Install Zig (0.15.2 - latest stable)
+# --------------------------
+RUN curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz \
+    -o /tmp/zig.tar.xz && \
+    tar -xf /tmp/zig.tar.xz -C /opt && \
+    ln -s /opt/zig-x86_64-linux-0.15.2/zig /usr/local/bin/zig
+
+# --------------------------
+# Build PicoTLS (with OpenSSL for cert loading)
+# --------------------------
+RUN git clone --recursive https://github.com/h2o/picotls /tmp/picotls && \
+    cd /tmp/picotls && \
+    cmake -B build \
+        -DWITH_OPENSSL=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        . && \
+    cmake --build build --config Release && \
+    find build/ -name "*.a" -exec cp {} /usr/local/lib/ \; && \
+    cp -r include/* /usr/local/include/
+
+# --------------------------
+# Stage 2: Application build
+# --------------------------
+FROM builder AS app-build
+
+# Ensure OpenSSL headers are available
+RUN apt-get update && apt-get install -y libssl-dev && \
+    mkdir -p /usr/include/openssl && \
+    ln -sf /usr/include/aarch64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/opensslconf.h 2>/dev/null || true && \
+    ln -sf /usr/include/aarch64-linux-gnu/openssl/configuration.h /usr/include/openssl/configuration.h 2>/dev/null || true && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy source
+# Copy your QUIC project
 COPY . .
 
-# Update ldconfig cache and verify liburing
-RUN ldconfig && \
-    echo "=== liburing library locations ===" && \
-    find /usr -name "liburing.so*" 2>/dev/null && \
-    ldconfig -p | grep uring && \
-    pkg-config --libs liburing || true
+# Create certs directory and generate certificates
+RUN mkdir -p certs && \
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout certs/server.key -out certs/server.crt \
+        -days 365 -nodes \
+        -subj "/C=US/ST=Test/L=Test/O=Blitz/CN=localhost"
 
-# Build Blitz (ReleaseFast for maximum performance)
-RUN zig build -Doptimize=ReleaseFast
+# Build the QUIC handshake server
+RUN cd /app && \
+    echo "=== Building QUIC handshake server ===" && \
+    zig build run-quic-handshake && \
+    ls -la zig-out/bin/blitz-quic-handshake
 
-# Install benchmarking tools
-RUN cd /tmp && \
-    git clone https://github.com/giltene/wrk2.git && \
-    cd wrk2 && \
-    make && \
-    cp wrk /usr/local/bin/wrk2 && \
-    cd / && \
-    rm -rf /tmp/wrk2
+# --------------------------
+# Stage 3: Runtime Stage (minimal)
+# --------------------------
+FROM ubuntu:22.04 AS runtime
 
-# Copy setup script
-COPY scripts/bench-box-setup.sh /usr/local/bin/bench-box-setup.sh
-RUN chmod +x /usr/local/bin/bench-box-setup.sh
+# Minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Expose port
-EXPOSE 8080
+WORKDIR /app
 
-# Default: run Blitz
-# Use --privileged flag for full system access (required for some tuning)
-CMD ["./zig-out/bin/blitz"]
+# Copy PicoTLS library
+COPY --from=builder /usr/local/lib /usr/local/lib
+COPY --from=builder /usr/local/include /usr/local/include
 
+# Copy compiled binary
+COPY --from=app-build /app/zig-out/bin/blitz-quic-handshake /app/blitz-quic-handshake
+
+# Set library path
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
+# Expose QUIC/HTTP3 port
+EXPOSE 8443/udp
+
+CMD ["/app/blitz-quic-handshake"]

@@ -7,7 +7,7 @@ const packet = @import("packet.zig");
 const connection = @import("connection.zig");
 const handshake = @import("handshake.zig");
 const udp = @import("udp.zig");
-const tls = @import("../tls/tls.zig");
+// const tls = @import("../tls/tls.zig"); // Temporarily disabled for picotls migration
 const frames = @import("frames.zig");
 
 // QUIC Server Connection
@@ -26,12 +26,12 @@ pub const QuicServerConnection = struct {
     
     pub fn init(
         allocator: std.mem.Allocator,
-        local_conn_id: []u8,
-        remote_conn_id: []u8,
+        local_conn_id: []const u8,
+        remote_conn_id: []const u8,
         client_addr: std.net.Ip4Address,
     ) QuicServerConnection {
         var quic_conn = connection.QuicConnection.init(allocator, local_conn_id, remote_conn_id);
-        var handshake_mgr = handshake.QuicHandshake.init(allocator, &quic_conn, local_conn_id, remote_conn_id);
+        const handshake_mgr = handshake.QuicHandshake.init(allocator, &quic_conn, local_conn_id, remote_conn_id);
         
         return QuicServerConnection{
             .quic_conn = quic_conn,
@@ -74,7 +74,7 @@ pub const QuicServerConnection = struct {
                     },
                 }
             },
-            .short => |short_pkt| {
+            .short => |_| {
                 // Short header packets are used after handshake
                 if (self.state != .connected) {
                     return error.InvalidPacketState;
@@ -186,7 +186,7 @@ pub const QuicServer = struct {
         try conn.processPacket(data, null);
     }
     
-    fn getOrCreateConnection(
+    pub fn getOrCreateConnection(
         self: *QuicServer,
         remote_conn_id: []const u8,
         client_addr: std.net.Ip4Address,

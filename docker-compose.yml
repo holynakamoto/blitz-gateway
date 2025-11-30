@@ -1,27 +1,63 @@
 version: '3.8'
 
 services:
-  blitz:
+  blitz-quic:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: blitz
-    # Privileged mode required for:
-    # - CPU governor changes
-    # - THP disabling
-    # - System tuning
-    privileged: true
-    network_mode: host
-    # Mount /sys for CPU governor and THP
+    container_name: blitz-quic-server
+    ports:
+      - "9443:8443/udp"  # QUIC (mapped to avoid port conflict)
+      - "8080:8080/tcp"  # HTTP
+      - "8444:8444/tcp"  # HTTPS
     volumes:
-      - /sys:/sys:rw
-    # Increase file descriptor limits
-    ulimits:
-      nofile:
-        soft: 1048576
-        hard: 1048576
-    # Keep container running
-    command: tail -f /dev/null
-    # Or run Blitz directly:
-    # command: ["./zig-out/bin/blitz"]
+      # Mount certificates (read-only)
+      - ./certs:/app/certs:ro
+      # Optional: Mount for development (uncomment for live reload)
+      # - .:/app
+    # Required for io_uring
+    privileged: true
+    cap_add:
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - NET_RAW
+    # Restart policy
+    restart: unless-stopped
+    # Health check (optional)
+    healthcheck:
+      test: ["CMD", "nc", "-zu", "localhost", "8443"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Environment variables (if needed)
+    environment:
+      - QUIC_LOG=trace
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '2'
+          memory: 1G
+    networks:
+      - blitz-network
 
+  # Optional: Test backend for load balancing
+  backend:
+    image: nginx:alpine
+    container_name: blitz-backend
+    ports:
+      - "9000:80"
+    volumes:
+      - ./test-backend.html:/usr/share/nginx/html/index.html:ro
+    networks:
+      - blitz-network
+    profiles:
+      - with-backend
+
+networks:
+  blitz-network:
+    driver: bridge

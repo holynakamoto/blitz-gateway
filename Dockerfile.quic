@@ -1,0 +1,76 @@
+# Dockerfile for QUIC Server Testing
+# Works on ARM Macs (Apple Silicon)
+
+FROM ubuntu:22.04
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    build-essential \
+    libssl-dev \
+    libssl3 \
+    liburing-dev \
+    pkg-config \
+    netcat-openbsd \
+    net-tools \
+    ca-certificates \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/* && \
+    # Create symlinks for libraries in architecture-specific directories
+    # Ubuntu 22.04 puts libraries in /usr/lib/x86_64-linux-gnu/
+    mkdir -p /usr/lib && \
+    (ln -sf /usr/lib/x86_64-linux-gnu/libcrypto.so* /usr/lib/ 2>/dev/null || true) && \
+    (ln -sf /usr/lib/x86_64-linux-gnu/libssl.so* /usr/lib/ 2>/dev/null || true) && \
+    (ln -sf /usr/lib/x86_64-linux-gnu/liburing.so* /usr/lib/ 2>/dev/null || true) && \
+    # Update library cache
+    ldconfig
+
+# Install Zig 0.15.2 (x86_64 for Linux container)
+# Note: Docker on ARM Macs can run x86_64 containers via emulation
+# Correct URL format: zig-x86_64-linux-0.15.2.tar.xz (not zig-linux-x86_64)
+RUN cd /tmp && \
+    curl -L -f -o zig.tar.xz "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz" && \
+    tar -xf zig.tar.xz && \
+    mv zig-x86_64-linux-0.15.2 /usr/local/zig && \
+    ln -s /usr/local/zig/zig /usr/local/bin/zig && \
+    rm -f zig.tar.xz && \
+    zig version
+
+WORKDIR /app
+
+# Copy source code (exclude large/unnecessary files)
+COPY build.zig .
+COPY src/ ./src/
+COPY .gitignore .
+
+# Update library cache and verify
+RUN ldconfig && \
+    ls -la /usr/lib/x86_64-linux-gnu/liburing.so* 2>/dev/null || \
+    ls -la /usr/lib/*/liburing.so* 2>/dev/null || \
+    find /usr -name "liburing.so*" 2>/dev/null | head -3
+
+# Build QUIC handshake server with verbose output
+RUN cd /app && \
+    echo "=== Building QUIC handshake server ===" && \
+    zig build run-quic-handshake 2>&1 || \
+    (echo "=== Build failed, showing full error ===" && \
+     zig build run-quic-handshake 2>&1 | head -100 && \
+     echo "=== Library locations ===" && \
+     ls -la /usr/lib/libcrypto* /usr/lib/libssl* /usr/lib/liburing* 2>/dev/null && \
+     ls -la /usr/lib/x86_64-linux-gnu/libcrypto* /usr/lib/x86_64-linux-gnu/libssl* /usr/lib/x86_64-linux-gnu/liburing* 2>/dev/null && \
+     exit 1)
+
+# Create certs directory
+RUN mkdir -p certs
+
+# Expose ports
+# 8080: HTTP
+# 8443: QUIC (UDP)
+# 8444: HTTPS (TCP, forwarded from 8443)
+EXPOSE 8080 8443/udp 8443
+
+# Run QUIC handshake server
+CMD ["./zig-out/bin/blitz-quic-handshake"]
+

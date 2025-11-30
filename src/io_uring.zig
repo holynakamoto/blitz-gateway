@@ -6,7 +6,7 @@ const http = @import("http/parser.zig");
 // Use liburing for io_uring support
 // Define AT_FDCWD if not already defined (needed for liburing.h on some systems)
 const AT_FDCWD: c_int = -100;
-const c = @cImport({
+pub const c = @cImport({
     @cDefine("AT_FDCWD", "-100");
     @cInclude("liburing.h");
     @cInclude("sys/socket.h");
@@ -19,7 +19,7 @@ const c = @cImport({
 });
 
 // C wrapper functions to avoid Zig 0.12.0 union type issues and inline function linking
-extern fn blitz_bind(sockfd: c_int, addr: [*c]const c.struct_sockaddr_in) c_int;
+pub extern fn blitz_bind(sockfd: c_int, addr: [*c]const c.struct_sockaddr_in) c_int;
 extern fn blitz_io_uring_cqe_seen(ring: *c.struct_io_uring, cqe: ?*c.struct_io_uring_cqe) void;
 extern fn blitz_io_uring_wait_cqe(ring: *c.struct_io_uring, cqe_ptr: *?*c.struct_io_uring_cqe) c_int;
 extern fn blitz_io_uring_get_sqe(ring: *c.struct_io_uring) ?*c.struct_io_uring_sqe;
@@ -36,7 +36,7 @@ const TLS_RECORD_TYPE_HANDSHAKE: u8 = 0x16; // TLS handshake record type
 const HTTP_RESPONSE = http.CommonResponses.OK;
 
 // Import TLS and HTTP/2 modules
-const tls = @import("tls/tls.zig");
+// const tls = @import("tls/tls.zig"); // Temporarily disabled for picotls migration
 const http2 = @import("http2/connection.zig");
 
 // Connection state
@@ -45,12 +45,12 @@ const Connection = struct {
     read_buffer: ?[]u8 = null,
     write_buffer: ?[]u8 = null,
     in_use: bool = false,
-    // TLS support
-    tls_conn: ?tls.TlsConnection = null,
+    // TLS support (disabled for PicoTLS migration)
+    tls_conn: ?*anyopaque = null, // Placeholder
     is_tls: bool = false,
     // HTTP/2 support
     http2_conn: ?*http2.Http2Connection = null,
-    protocol: tls.Protocol = .http1_1,
+    protocol: u8 = 0, // Placeholder
     // Connection tracking for limits/timeouts
     created_at: i64 = 0,
     last_active: i64 = 0,
@@ -137,7 +137,7 @@ fn setSqeData(sqe: *c.struct_io_uring_sqe, user_data: u64) void {
     c.io_uring_sqe_set_data(sqe, @as(?*anyopaque, @ptrFromInt(user_data)));
 }
 
-var ring: c.struct_io_uring = undefined;
+pub var ring: c.struct_io_uring = undefined;
 
 pub fn init() !void {
     if (builtin.os.tag != .linux) {
@@ -208,13 +208,13 @@ pub fn runEchoServer(port: u16) !void {
     const backing_allocator = gpa.allocator();
     
     // Initialize TLS context (optional - only if certs exist)
-    var tls_ctx: ?tls.TlsContext = null;
+    var tls_ctx: ?*anyopaque = null; // Disabled for PicoTLS migration
     const cert_path = "certs/server.crt";
     const key_path = "certs/server.key";
     
     // Try to load TLS certificates (non-fatal if they don't exist)
     tls_ctx = blk: {
-        break :blk tls.TlsContext.init() catch |err| {
+        break :blk null; // TLS disabled for PicoTLS migration
             std.log.warn("TLS initialization failed: {} (continuing without TLS)", .{err});
             break :blk null;
         };

@@ -86,7 +86,7 @@ pub const BufferPool = struct {
         const read_buffers = try backing_allocator.alloc([]u8, pool_size);
         errdefer backing_allocator.free(read_buffers);
 
-        var read_free = std.ArrayList(usize).init(backing_allocator);
+        var read_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init read_free list");
         errdefer read_free.deinit();
 
         for (0..pool_size) |i| {
@@ -99,7 +99,7 @@ pub const BufferPool = struct {
         const write_buffers = try backing_allocator.alloc([]u8, pool_size);
         errdefer backing_allocator.free(write_buffers);
 
-        var write_free = std.ArrayList(usize).init(backing_allocator);
+        var write_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init write_free list");
         errdefer write_free.deinit();
 
         for (0..pool_size) |i| {

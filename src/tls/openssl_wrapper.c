@@ -1,13 +1,118 @@
 // C wrapper for OpenSSL TLS 1.3 functions
 // This avoids Zig 0.12.0 compatibility issues with OpenSSL's complex types
-
-#define _GNU_SOURCE
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/conf.h>
 #include <openssl/bio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdio.h>
+#include "picotls.h"
+#include "picotls/minicrypto.h"
+
+// Global picotls context (allocated in C to avoid Zig opaque struct issues)
+static ptls_context_t g_ptls_ctx_storage;
+
+// Get pointer to context
+ptls_context_t* blitz_get_ptls_ctx(void) {
+    return &g_ptls_ctx_storage;
+}
+
+// Helper to initialize ptls_context_t (Zig can't access opaque struct fields)
+void blitz_ptls_ctx_init(
+    void (*random_bytes)(void *buf, size_t len),
+    ptls_get_time_t *get_time,
+    const ptls_key_exchange_algorithm_t *const *key_exchanges,
+    const ptls_cipher_suite_t *const *cipher_suites) {
+    ptls_context_t* ctx = &g_ptls_ctx_storage;
+    ctx->random_bytes = random_bytes;
+    ctx->get_time = get_time;
+    // Cast away const to match picotls context structure (it's safe - we're not modifying)
+    ctx->key_exchanges = (ptls_key_exchange_algorithm_t **)key_exchanges;
+    ctx->cipher_suites = (ptls_cipher_suite_t **)cipher_suites;
+}
+
+// Storage for captured TLS secrets (for QUIC key derivation)
+static unsigned char g_client_handshake_secret[48];
+static unsigned char g_server_handshake_secret[48];
+static unsigned char g_client_traffic_secret[48];
+static unsigned char g_server_traffic_secret[48];
+static int g_handshake_secrets_available = 0;
+static int g_traffic_secrets_available = 0;
+
+// Parse hex string to bytes
+static int hex_to_bytes(const char* hex, unsigned char* out, int max_len) {
+    int len = 0;
+    while (*hex && *(hex+1) && len < max_len) {
+        unsigned int byte;
+        if (sscanf(hex, "%2x", &byte) != 1) break;
+        out[len++] = (unsigned char)byte;
+        hex += 2;
+    }
+    return len;
+}
+
+// Keylog callback to capture TLS secrets
+static void blitz_keylog_callback(const SSL* ssl, const char* line) {
+    // Parse NSS key log format: LABEL <client_random> <secret>
+    // We're interested in:
+    // - CLIENT_HANDSHAKE_TRAFFIC_SECRET
+    // - SERVER_HANDSHAKE_TRAFFIC_SECRET  
+    // - CLIENT_TRAFFIC_SECRET_0
+    // - SERVER_TRAFFIC_SECRET_0
+    
+    if (strncmp(line, "CLIENT_HANDSHAKE_TRAFFIC_SECRET ", 32) == 0) {
+        const char* secret = strchr(line + 32, ' ');
+        if (secret) {
+            hex_to_bytes(secret + 1, g_client_handshake_secret, 48);
+            g_handshake_secrets_available = 1;
+            fprintf(stderr, "[TLS-KEYLOG] Got CLIENT_HANDSHAKE_TRAFFIC_SECRET\n");
+        }
+    }
+    else if (strncmp(line, "SERVER_HANDSHAKE_TRAFFIC_SECRET ", 32) == 0) {
+        const char* secret = strchr(line + 32, ' ');
+        if (secret) {
+            hex_to_bytes(secret + 1, g_server_handshake_secret, 48);
+            fprintf(stderr, "[TLS-KEYLOG] Got SERVER_HANDSHAKE_TRAFFIC_SECRET\n");
+        }
+    }
+    else if (strncmp(line, "CLIENT_TRAFFIC_SECRET_0 ", 24) == 0) {
+        const char* secret = strchr(line + 24, ' ');
+        if (secret) {
+            hex_to_bytes(secret + 1, g_client_traffic_secret, 48);
+            g_traffic_secrets_available = 1;
+            fprintf(stderr, "[TLS-KEYLOG] Got CLIENT_TRAFFIC_SECRET_0 (1-RTT)\n");
+        }
+    }
+    else if (strncmp(line, "SERVER_TRAFFIC_SECRET_0 ", 24) == 0) {
+        const char* secret = strchr(line + 24, ' ');
+        if (secret) {
+            hex_to_bytes(secret + 1, g_server_traffic_secret, 48);
+            fprintf(stderr, "[TLS-KEYLOG] Got SERVER_TRAFFIC_SECRET_0 (1-RTT)\n");
+        }
+    }
+}
+
+// Get handshake secrets for QUIC key derivation
+int blitz_get_handshake_secrets(unsigned char* client_secret, unsigned char* server_secret) {
+    if (!g_handshake_secrets_available) return 0;
+    memcpy(client_secret, g_client_handshake_secret, 48);
+    memcpy(server_secret, g_server_handshake_secret, 48);
+    return 1;
+}
+
+// Get traffic secrets for 1-RTT
+int blitz_get_traffic_secrets(unsigned char* client_secret, unsigned char* server_secret) {
+    if (!g_traffic_secrets_available) return 0;
+    memcpy(client_secret, g_client_traffic_secret, 48);
+    memcpy(server_secret, g_server_traffic_secret, 48);
+    return 1;
+}
+
+// Check if handshake secrets are available
+int blitz_handshake_secrets_available(void) {
+    return g_handshake_secrets_available;
+}
 
 // Initialize OpenSSL
 int blitz_openssl_init(void) {
@@ -30,6 +135,9 @@ SSL_CTX* blitz_ssl_ctx_new(void) {
     // Set minimum version to TLS 1.3
     SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
     SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+    
+    // Set keylog callback to capture secrets for QUIC
+    SSL_CTX_set_keylog_callback(ctx, blitz_keylog_callback);
     
     return ctx;
 }

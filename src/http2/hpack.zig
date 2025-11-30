@@ -81,24 +81,28 @@ pub const HpackDecoder = struct {
     
     pub fn init(allocator: std.mem.Allocator) HpackDecoder {
         return HpackDecoder{
-            .dynamic_table = std.ArrayList(HeaderField).init(allocator),
+            // Zig 0.15.2: Use initCapacity for ArrayList
+            .dynamic_table = std.ArrayList(HeaderField).initCapacity(allocator, 64) catch @panic("Failed to init HPACK dynamic table"),
             .allocator = allocator,
         };
     }
     
     pub fn deinit(self: *HpackDecoder) void {
-        self.dynamic_table.deinit();
+        // Zig 0.15.2: deinit requires allocator
+        self.dynamic_table.deinit(self.allocator);
     }
     
     // Decode header block
     pub fn decode(self: *HpackDecoder, data: []const u8) ![]HeaderField {
-        var headers = std.ArrayList(HeaderField).init(self.allocator);
-        errdefer headers.deinit();
+        // Zig 0.15.2: Use initCapacity
+        var headers = std.ArrayList(HeaderField).initCapacity(self.allocator, 16) catch return error.OutOfMemory;
+        errdefer headers.deinit(self.allocator);
         
         var offset: usize = 0;
         while (offset < data.len) {
             const header = try self.decodeHeaderField(data[offset..]);
-            try headers.append(header.field);
+            // Zig 0.15.2: append requires allocator
+            try headers.append(self.allocator, header.field);
             offset += header.bytes_consumed;
         }
         
@@ -285,7 +289,8 @@ pub const HpackDecoder = struct {
             _ = self.dynamic_table.pop();
         }
         
-        try self.dynamic_table.append(field);
+        // Zig 0.15.2: append requires allocator
+        try self.dynamic_table.append(self.allocator, field);
     }
     
     fn getTableSize(self: *HpackDecoder) usize {
@@ -316,7 +321,8 @@ pub const HpackEncoder = struct {
     
     pub fn init(allocator: std.mem.Allocator) HpackEncoder {
         return HpackEncoder{
-            .dynamic_table = std.ArrayList(HeaderField).init(allocator),
+            // Zig 0.15.2: Use initCapacity
+            .dynamic_table = std.ArrayList(HeaderField).initCapacity(allocator, 64) catch @panic("Failed to init HPACK encoder table"),
             .allocator = allocator,
         };
     }
@@ -327,7 +333,8 @@ pub const HpackEncoder = struct {
             self.allocator.free(field.name);
             self.allocator.free(field.value);
         }
-        self.dynamic_table.deinit();
+        // Zig 0.15.2: deinit requires allocator
+        self.dynamic_table.deinit(self.allocator);
     }
     
     // Encode a single header field

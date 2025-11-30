@@ -7,7 +7,7 @@ Blitz uses io_uring which is **Linux-only**. Use Docker to test on macOS/Windows
 **One-command setup and benchmark:**
 
 ```bash
-./scripts/docker-bench.sh
+./scripts/bench/docker-bench.sh
 ```
 
 This will:
@@ -66,12 +66,12 @@ docker exec -d blitz bash -c "cd /app && ./zig-out/bin/blitz"
 
 **Option A: From host** (if wrk2 installed on macOS/Windows):
 ```bash
-./benches/local-benchmark.sh
+./scripts/bench/local-benchmark.sh
 ```
 
 **Option B: Inside container**:
 ```bash
-docker exec blitz bash -c "cd /app && ./benches/local-benchmark.sh"
+docker exec blitz bash -c "cd /app && ./scripts/bench/local-benchmark.sh"
 ```
 
 **Option C: Manual wrk2 test**:
@@ -86,11 +86,11 @@ docker exec blitz wrk2 -t 4 -c 1000 -d 30s -R 1000000 --latency http://localhost
 docker-compose up -d
 
 # Apply tuning and start Blitz
-docker exec blitz bash -c "cd /app && ./scripts/bench-box-setup.sh" || true
+docker exec blitz bash -c "cd /app && ./scripts/bench/bench-box-setup.sh" || true
 docker exec -d blitz bash -c "cd /app && ./zig-out/bin/blitz"
 
 # Run benchmarks
-docker exec blitz bash -c "cd /app && ./benches/local-benchmark.sh"
+docker exec blitz bash -c "cd /app && ./scripts/bench/local-benchmark.sh"
 ```
 
 ## Expected Performance in Docker
@@ -159,7 +159,7 @@ docker rmi blitz:latest
 
 After testing in Docker:
 1. Deploy Ubuntu 24.04 LTS Minimal on bare metal
-2. Run `./scripts/bench-box-setup.sh` on bare metal
-3. Run `./benches/reproduce.sh` for production benchmarks
+2. Run `./scripts/bench/bench-box-setup.sh` on bare metal
+3. Run `./scripts/bench/reproduce.sh` for production benchmarks
 4. Compare results (Docker vs bare metal)
 

@@ -3,20 +3,15 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @cImport({
-    @cInclude("sys/socket.h");
-    @cInclude("netinet/in.h");
-    @cInclude("arpa/inet.h");
-    @cInclude("unistd.h");
-    @cInclude("errno.h");
-    @cInclude("fcntl.h");
-    @cInclude("liburing.h");
-});
+
+// Import io_uring C bindings from parent module for type compatibility
+const io_uring_mod = @import("../io_uring.zig");
+const c = io_uring_mod.c;
 
 const server_mod = @import("server.zig");
 const packet = @import("packet.zig");
 const udp = @import("udp.zig");
-const tls = @import("../tls/tls.zig");
+// const tls = @import("../tls/tls.zig"); // Temporarily disabled for picotls migration
 
 // Buffer pool for UDP packets
 const UDP_BUFFER_SIZE = 1500; // Standard MTU
@@ -35,15 +30,15 @@ pub const UdpBufferPool = struct {
     allocator: std.mem.Allocator,
     
     pub fn init(allocator: std.mem.Allocator) !UdpBufferPool {
-        var buffers = try allocator.alloc(UdpBuffer, UDP_BUFFER_POOL_SIZE);
+        const buffers = try allocator.alloc(UdpBuffer, UDP_BUFFER_POOL_SIZE);
         errdefer allocator.free(buffers);
         
-        var free_list = std.ArrayList(usize).init(allocator);
+        var free_list = std.ArrayList(usize).initCapacity(allocator, UDP_BUFFER_POOL_SIZE) catch @panic("Failed to init buffer pool free list");
         errdefer free_list.deinit();
         
         // Initialize all buffers as free
         for (0..UDP_BUFFER_POOL_SIZE) |i| {
-            try free_list.append(i);
+            free_list.appendAssumeCapacity(i);
         }
         
         return UdpBufferPool{
@@ -59,7 +54,7 @@ pub const UdpBufferPool = struct {
     }
     
     pub fn acquire(self: *UdpBufferPool) ?*UdpBuffer {
-        const idx = self.free_list.popOrNull() orelse return null;
+        const idx = self.free_list.pop() orelse return null;
         self.buffers[idx].in_use = true;
         return &self.buffers[idx];
     }
@@ -69,7 +64,7 @@ pub const UdpBufferPool = struct {
         const buffer_idx = idx / @sizeOf(UdpBuffer);
         if (buffer_idx < self.buffers.len) {
             self.buffers[buffer_idx].in_use = false;
-            self.free_list.append(buffer_idx) catch {};
+            self.free_list.append(self.allocator, buffer_idx) catch {};
         }
     }
 };
@@ -88,8 +83,8 @@ const UserData = struct {
 
 fn encodeUserData(fd: c_int, op: UserData.Operation, buffer_idx: usize) u64 {
     const fd_part: u64 = @intCast(fd & 0xFFFF);
-    const op_part: u64 = @intCast(@intFromEnum(op)) << 16;
-    const buf_part: u64 = @intCast(buffer_idx) << 24;
+    const op_part: u64 = @as(u64, @intCast(@intFromEnum(op))) << 16;
+    const buf_part: u64 = @as(u64, @intCast(buffer_idx)) << 24;
     return fd_part | op_part | buf_part;
 }
 
@@ -121,12 +116,12 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
     defer quic_server.deinit();
     
     // Initialize TLS context (for QUIC handshake)
-    var tls_ctx: ?tls.TlsContext = null;
+    var tls_ctx: ?*anyopaque = null; // Disabled for PicoTLS migration
     const cert_path = "certs/server.crt";
     const key_path = "certs/server.key";
     
     tls_ctx = blk: {
-        break :blk tls.TlsContext.init() catch |err| {
+        break :blk null; // TLS disabled for PicoTLS migration
             std.log.warn("TLS initialization failed: {} (QUIC requires TLS)", .{err});
             break :blk null;
         };
@@ -223,22 +218,12 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                 const buf = &buffer_pool.buffers[decoded.buffer_idx];
                 const packet_data = buf.data[0..@intCast(res)];
                 
-                // Convert client address
-                var client_addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in);
-                var client_addr_len: c.socklen_t = @sizeOf(c.struct_sockaddr_in);
-                
-                // Get client address from recvfrom result
-                // Note: In a real implementation, we'd need to store this from the recvfrom call
-                // For now, we'll parse it from the packet and use a placeholder
-                var client_addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in);
-                var client_addr_len: c.socklen_t = @sizeOf(c.struct_sockaddr_in);
-                
-                // Process QUIC packet
+                // Process QUIC packet (client_addr is already filled by recvfrom)
                 handleQuicPacket(
                     &quic_server,
                     packet_data,
-                    &client_addr,
-                    &client_addr_len,
+                    &buf.client_addr,
+                    &buf.client_addr_len,
                     ring,
                     &buffer_pool,
                 ) catch |err| {

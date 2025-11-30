@@ -45,7 +45,7 @@ For initial development and testing:
 **One-command setup** (Ubuntu 24.04 LTS):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/bench-box-setup.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/bench/bench-box-setup.sh | sudo bash
 ```
 
 This script will:
@@ -59,7 +59,7 @@ This script will:
 **Or if you have the repo:**
 
 ```bash
-sudo ./scripts/bench-box-setup.sh
+sudo ./scripts/bench/bench-box-setup.sh
 ```
 
 ### Manual Network Tuning (if needed)

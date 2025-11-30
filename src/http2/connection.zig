@@ -471,24 +471,27 @@ pub const Http2Connection = struct {
         // Note: body ownership is transferred to ResponseAction - caller must call action.deinit(allocator) to free
         
         // Prepare response headers
-        var response_headers = std.ArrayList(hpack.HeaderField).init(self.allocator);
+        // Zig 0.15.2: Use initCapacity for ArrayList
+        var response_headers = std.ArrayList(hpack.HeaderField).initCapacity(self.allocator, 8) catch return error.OutOfMemory;
         errdefer {
             for (response_headers.items) |h| {
                 if (std.mem.eql(u8, h.name, "content-length")) {
                     self.allocator.free(h.value);
                 }
             }
-            response_headers.deinit();
+            // Zig 0.15.2: deinit requires allocator
+            response_headers.deinit(self.allocator);
             self.allocator.free(body);
         }
         
         const content_length_str = try std.fmt.allocPrint(self.allocator, "{}", .{body.len});
         errdefer self.allocator.free(content_length_str);
         
-        try response_headers.append(hpack.HeaderField{ .name = ":status", .value = "200" });
-        try response_headers.append(hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
-        try response_headers.append(hpack.HeaderField{ .name = "content-length", .value = content_length_str });
-        try response_headers.append(hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
+        // Zig 0.15.2: append requires allocator
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = ":status", .value = "200" });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-length", .value = content_length_str });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
         
         return ResponseAction{
             .send_response = .{

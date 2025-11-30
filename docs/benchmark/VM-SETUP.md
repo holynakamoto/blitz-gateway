@@ -117,7 +117,7 @@ zig build -Doptimize=ReleaseFast
 
 ```bash
 # Apply system tuning for better performance
-sudo ./scripts/bench-box-setup.sh
+sudo ./scripts/bench/bench-box-setup.sh
 # Note: This will reboot the VM once for kernel upgrade
 ```
 
@@ -133,7 +133,7 @@ sudo cp wrk /usr/local/bin/wrk2
 
 # Run benchmarks
 cd ~/blitz
-./benches/local-benchmark.sh
+./scripts/bench/local-benchmark.sh
 ```
 
 ## Transferring Files from Mac to VM

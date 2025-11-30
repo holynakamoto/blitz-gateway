@@ -47,7 +47,7 @@ open https://ubuntu.com/download/server
 ```bash
 # In VM terminal:
 cd ~
-cp /path/to/shared/blitz-gateway/scripts/setup-utm-x86-vm.sh .
+cp /path/to/shared/blitz-gateway/scripts/vm/setup-utm-x86-vm.sh .
 chmod +x setup-utm-x86-vm.sh
 ./setup-utm-x86-vm.sh
 ```
@@ -56,7 +56,7 @@ chmod +x setup-utm-x86-vm.sh
 ```bash
 # From Mac terminal:
 cd ~/blitz-gateway
-scp scripts/setup-utm-x86-vm.sh ubuntu@<VM_IP>:~/
+scp scripts/vm/setup-utm-x86-vm.sh ubuntu@<VM_IP>:~/
 
 # Then in VM:
 chmod +x setup-utm-x86-vm.sh

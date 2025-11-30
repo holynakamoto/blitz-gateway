@@ -7,9 +7,10 @@ zig-cache/
 benches/*.txt
 benches/*.png
 benches/*.svg
-!benches/COMPARISON.md
-!benches/benchmark-machine-spec.md
-!benches/*.sh
+scripts/bench/results/
+scripts/bench/results/*.txt
+scripts/bench/results/*.png
+scripts/bench/results/*.svg
 
 # OS files
 .DS_Store
@@ -28,3 +29,5 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+.vagrant/
+deps/

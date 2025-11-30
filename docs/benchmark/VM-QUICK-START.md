@@ -44,7 +44,7 @@ Once logged into Ubuntu VM:
 
 ```bash
 # One-command setup (installs everything)
-curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/vm-setup.sh | bash
+curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/vm/vm-setup.sh | bash
 
 # Or if you have the repo locally, transfer it first:
 # From Mac: scp -r ~/blitz-gateway user@vm-ip:/home/user/
@@ -65,7 +65,7 @@ In another terminal (or SSH session):
 
 ```bash
 cd blitz-gateway
-./benches/local-benchmark.sh
+./scripts/bench/local-benchmark.sh
 ```
 
 ## That's It!
@@ -79,5 +79,5 @@ You should see:
 
 ---
 
-**Troubleshooting?** See `benches/VM-SETUP.md` for detailed guide.
+**Troubleshooting?** See `docs/benchmark/VM-SETUP.md` for detailed guide.
 

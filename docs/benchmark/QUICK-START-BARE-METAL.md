@@ -18,7 +18,7 @@ On your server:
 
 ```bash
 # One-command setup
-curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/bench-box-setup.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/bench/bench-box-setup.sh | sudo bash
 ```
 
 This will:
@@ -50,7 +50,7 @@ In another terminal:
 curl http://localhost:8080/hello
 
 # Full benchmark
-./benches/reproduce.sh
+./scripts/bench/reproduce.sh
 ```
 
 ## Expected Results

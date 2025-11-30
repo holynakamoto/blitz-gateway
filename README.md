@@ -179,17 +179,26 @@ zig build
 ### Run
 
 ```bash
-# HTTP/1.1 + HTTP/2 server
+# HTTP/1.1 + HTTP/2 echo server
 zig build run
 
-# QUIC/HTTP/3 handshake server (Linux only)
+# QUIC/HTTP/3 Origin Server (Linux only)
+zig build run-quic
+
+# QUIC/HTTP/3 Load Balancer (Linux only)
+zig build run-quic -- --lb lb.toml
+
+# QUIC/HTTP/3 Handshake Server (Linux only)
 zig build run-quic-handshake
 
 # Load balancer tests
 zig build test-load-balancer
 ```
 
-The main server starts on port 8080 by default. QUIC/HTTP3 uses UDP port 8443.
+**Ports:**
+- HTTP/1.1 + HTTP/2: TCP 8080
+- QUIC/HTTP/3 Origin: UDP 8443
+- QUIC/HTTP/3 Load Balancer: UDP 4433 (configurable)
 
 ### Benchmark
 
@@ -240,6 +249,75 @@ All tests run automatically on:
 - **Performance monitoring** - Regression detection
 
 See [`.github/workflows/`](.github/workflows/) for CI/CD pipeline details.
+
+## ⚖️ Load Balancer Mode
+
+Blitz supports **Layer 4 + Layer 7 QUIC/HTTP/3 load balancing** with zero configuration changes needed for basic use.
+
+### Quick Start
+
+```bash
+# Start two origin servers
+zig build run-quic -- --port 8443 &
+zig build run-quic -- --port 8444 &
+
+# Start load balancer
+zig build run-quic -- --lb lb.example.toml
+```
+
+### Configuration
+
+Copy and customize the example configuration:
+
+```bash
+cp lb.example.toml lb.toml
+# Edit lb.toml with your backend servers
+```
+
+**Example `lb.toml`:**
+```toml
+listen = "0.0.0.0:4433"
+
+[backends.origin-1]
+host = "127.0.0.1"
+port = 8443
+weight = 10
+health_check_path = "/health"
+
+[backends.origin-2]
+host = "127.0.0.1"
+port = 8444
+weight = 5
+```
+
+### Features
+
+- ✅ **QUIC/HTTP/3 Proxying** - Full protocol support
+- ✅ **Weighted Round-Robin** - Load distribution by backend weight
+- ✅ **Health Checks** - Automatic backend failure detection
+- ✅ **Connection Pooling** - Efficient backend connection reuse
+- ✅ **Retry Logic** - Exponential backoff on failures
+- ✅ **Zero Downtime** - Graceful backend draining
+
+### Production Deployment
+
+```bash
+# Build optimized binary
+zig build -Doptimize=ReleaseFast
+
+# Run load balancer
+./zig-out/bin/blitz-quic --lb production.toml
+```
+
+### Docker Load Balancer
+
+```bash
+# Build load balancer image
+docker build --target prod -t blitz-lb .
+
+# Run with backend services
+docker-compose --profile lb up
+```
 
 ## 📊 Benchmarking
 

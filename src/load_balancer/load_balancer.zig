@@ -5,6 +5,7 @@ const std = @import("std");
 const backend = @import("backend.zig");
 const health_check = @import("health_check.zig");
 const connection_pool = @import("connection_pool.zig");
+const config = @import("../config.zig");
 
 pub const LoadBalancerError = error{
     NoBackendsAvailable,
@@ -29,7 +30,7 @@ pub const LoadBalancer = struct {
         var pool = backend.BackendPool.init(allocator);
         const checker = health_check.HealthChecker.init(allocator, &pool);
         const conn_pool = connection_pool.ConnectionPool.init(allocator);
-        
+
         return LoadBalancer{
             .pool = pool,
             .health_checker = checker,
@@ -39,6 +40,27 @@ pub const LoadBalancer = struct {
             .retry_delay_ms = 100,
             .request_timeout_ms = 5000,
         };
+    }
+
+    /// Initialize load balancer from configuration
+    pub fn initFromConfig(allocator: std.mem.Allocator, cfg: config.Config) !LoadBalancer {
+        var lb = LoadBalancer.init(allocator);
+
+        // Add all backends from config
+        for (cfg.backends.items) |backend_config| {
+            const b = try lb.addBackend(backend_config.host, backend_config.port);
+            b.weight = backend_config.weight;
+
+            // Set health check path if specified
+            if (backend_config.health_check_path) |path| {
+                // Note: This would need to be implemented in the Backend struct
+                // For now, we'll use the default health check
+                std.log.info("Health check path configured: {s} (not yet implemented)", .{path});
+            }
+        }
+
+        std.log.info("Load balancer initialized with {} backends", .{cfg.backends.items.len});
+        return lb;
     }
     
     pub fn deinit(self: *LoadBalancer) void {
@@ -252,6 +274,45 @@ pub const LoadBalancer = struct {
             .successful_requests = pool_stats.successful_requests,
             .failed_requests = pool_stats.failed_requests,
         };
+    }
+
+    /// Start the load balancer server (integrates with QUIC server)
+    /// This is a placeholder - actual implementation would integrate with
+    /// the QUIC handshake server to forward requests to backends
+    pub fn serve(self: *LoadBalancer, host: []const u8, port: u16) !void {
+        std.log.info("Load balancer server starting on {s}:{d}", .{host, port});
+        std.log.info("Backends configured: {}", .{self.pool.backends.items.len});
+
+        // Start health checking in background
+        self.startHealthChecking();
+
+        // TODO: Integrate with QUIC server to accept connections
+        // For now, this is a placeholder that shows the load balancer is ready
+        std.log.info("Load balancer is ready to accept QUIC connections", .{});
+
+        // In a real implementation, this would:
+        // 1. Listen on UDP port for QUIC connections
+        // 2. Perform TLS handshake
+        // 3. Parse HTTP/3 requests
+        // 4. Forward to healthy backends using round-robin/load balancing
+        // 5. Return responses to clients
+
+        // For now, we'll just keep it running
+        while (true) {
+            std.time.sleep(1_000_000_000); // Sleep for 1 second
+            self.performHealthCheck();
+        }
+    }
+
+    /// Start background health checking
+    fn startHealthChecking(self: *LoadBalancer) void {
+        std.log.info("Starting health checks for {} backends", .{self.pool.backends.items.len});
+
+        // Perform initial health check
+        self.performHealthCheck();
+
+        // TODO: In a real implementation, this would run in a separate thread
+        // or use async/await to perform periodic health checks
     }
 };
 

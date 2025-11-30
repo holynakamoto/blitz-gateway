@@ -1,0 +1,30 @@
+# Blitz Load Balancer Configuration Example
+# Copy this file to lb.toml and customize for your deployment
+
+# Server mode (origin or load_balancer)
+mode = "load_balancer"
+
+# Listen address and port for the load balancer
+listen = "0.0.0.0:4433"
+
+# Backend server configurations
+# Each backend can have different weights for load distribution
+
+[backends.origin-1]
+host = "127.0.0.1"
+port = 8443
+weight = 10
+health_check_path = "/health"
+
+[backends.origin-2]
+host = "127.0.0.1"
+port = 8444
+weight = 5
+health_check_path = "/healthz"
+
+# Add more backends as needed
+# [backends.origin-3]
+# host = "10.0.0.100"
+# port = 8443
+# weight = 8
+# health_check_path = "/status"

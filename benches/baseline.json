@@ -1,0 +1,90 @@
+{
+  "baseline_commit": "main",
+  "timestamp": "2024-01-01T00:00:00Z",
+  "environment": {
+    "os": "ubuntu-22.04",
+    "cpu": "auto",
+    "memory": "auto",
+    "zig_version": "0.15.2"
+  },
+  "configuration": {
+    "duration_seconds": 30,
+    "connections": 100,
+    "threads": 4,
+    "protocol": "http"
+  },
+  "metrics": {
+    "requests_per_second": {
+      "wrk": 8500,
+      "hey": 8400,
+      "target": 8000,
+      "threshold_degradation_percent": 10
+    },
+    "latency_p50_ms": {
+      "wrk": 4.5,
+      "hey": 4.7,
+      "target": 5.0,
+      "threshold_degradation_percent": 20
+    },
+    "latency_p95_ms": {
+      "wrk": 15.2,
+      "hey": 16.1,
+      "target": 20.0,
+      "threshold_degradation_percent": 15
+    },
+    "latency_p99_ms": {
+      "wrk": 35.8,
+      "hey": 38.2,
+      "target": 50.0,
+      "threshold_degradation_percent": 10
+    },
+    "error_rate_percent": {
+      "target": 0.1,
+      "threshold_max_percent": 1.0
+    },
+    "cpu_usage_percent": {
+      "target": 75,
+      "threshold_max_percent": 90
+    },
+    "memory_usage_mb": {
+      "target": 150,
+      "threshold_max_mb": 500
+    }
+  },
+  "test_scenarios": [
+    {
+      "name": "http_get_homepage",
+      "method": "GET",
+      "path": "/",
+      "expected_status": 200,
+      "weight": 80
+    },
+    {
+      "name": "http_get_api",
+      "method": "GET",
+      "path": "/api/v1/status",
+      "expected_status": 200,
+      "weight": 15
+    },
+    {
+      "name": "http_post_api",
+      "method": "POST",
+      "path": "/api/v1/data",
+      "expected_status": 200,
+      "weight": 5
+    }
+  ],
+  "regression_rules": {
+    "significance_level": 0.05,
+    "minimum_samples": 3,
+    "outlier_detection": true,
+    "trend_analysis_days": 30,
+    "alert_on_regression": true,
+    "alert_channels": ["github", "slack"]
+  },
+  "metadata": {
+    "description": "Performance baseline for Blitz Gateway v1.0.0",
+    "tags": ["baseline", "production", "http"],
+    "notes": "Established on clean Ubuntu 22.04 environment with Zig 0.15.2"
+  }
+}

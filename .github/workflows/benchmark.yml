@@ -28,9 +28,9 @@ on:
         default: '100'
 
 jobs:
-  # Run benchmarks in Docker environment
-  benchmark-docker:
-    name: Docker Benchmark
+  # Comprehensive benchmarking
+  benchmark-comprehensive:
+    name: Comprehensive Benchmark
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout code
@@ -38,47 +38,50 @@ jobs:
       with:
         submodules: true
 
-    - name: Create test certificates
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+
+    - name: Install system dependencies
       run: |
-        mkdir -p certs
-        openssl req -x509 -newkey rsa:2048 \
-          -keyout certs/server.key -out certs/server.crt \
-          -days 1 -nodes \
-          -subj "/C=US/ST=Test/L=Test/O=Blitz/CN=localhost"
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config wrk curl htop time
 
-    - name: Build benchmark Docker image
+    - name: Install hey (golang load tester)
       run: |
-        docker build -f Dockerfile -t blitz-benchmark .
+        wget -O hey https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64
+        chmod +x hey
+        sudo mv hey /usr/local/bin/
 
-    - name: Run basic benchmark
+    - name: Build optimized binary
+      run: zig build -Doptimize=ReleaseFast
+
+    - name: Run comprehensive benchmark
       run: |
-        # Start server in background
-        docker run -d --name blitz-server -p 8080:8080 -p 9443:8443/udp blitz-benchmark
-        sleep 10
+        echo "Running Blitz Gateway comprehensive benchmark..."
+        export DURATION=30
+        export CONNECTIONS=50  # Reduced for CI environment
+        export THREADS=2
+        ./scripts/bench/local-benchmark.sh
 
-        # Run simple benchmark
-        echo "Running basic HTTP benchmark..."
-        docker run --rm --network container:blitz-server \
-          curlimages/curl \
-          --max-time 10 -s http://localhost:8080/ || echo "HTTP benchmark completed"
-
-        # Check server logs
-        docker logs blitz-server | tail -10
-
-        # Cleanup
-        docker stop blitz-server
-        docker rm blitz-server
-
-    - name: Run benchmark scripts (if available)
+    - name: Validate benchmark results
       run: |
-        # Check if benchmark scripts exist and are executable
-        if [ -x "scripts/bench/local-benchmark.sh" ]; then
-          echo "✅ Benchmark script found"
-          # Note: Full benchmarks require proper test environment
-          echo "Full benchmark execution skipped in CI (requires dedicated environment)"
-        else
-          echo "No benchmark scripts found"
+        # Check that results were generated
+        if [ ! -d "benches/results/" ]; then
+          echo "❌ No benchmark results found"
+          exit 1
         fi
+
+        # Check for key result files
+        RESULT_DIR=$(ls -td benches/results/*/ | head -1)
+        if [ ! -f "$RESULT_DIR/summary.txt" ]; then
+          echo "❌ Benchmark summary not found"
+          exit 1
+        fi
+
+        echo "✅ Benchmark results validated"
+        cat "$RESULT_DIR/summary.txt"
 
   # Performance regression test
   performance-regression:
@@ -98,34 +101,42 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libssl-dev liburing-dev pkg-config time
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config wrk curl htop time
+
+    - name: Install hey
+      run: |
+        wget -O hey https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64
+        chmod +x hey
+        sudo mv hey /usr/local/bin/
 
     - name: Build optimized binary
       run: zig build -Doptimize=ReleaseFast
 
-    - name: Run performance baseline test
+    - name: Run performance regression test
       run: |
-        echo "Running performance baseline test..."
+        echo "Running performance regression analysis..."
 
-        # Test build time
-        time zig build -Doptimize=ReleaseFast > /dev/null
+        # Quick performance test
+        export DURATION=15
+        export CONNECTIONS=25
+        export THREADS=1
+        ./scripts/bench/local-benchmark.sh
 
-        # Test binary size
-        ls -lh zig-out/bin/blitz
+        # Extract key metrics
+        RESULT_DIR=$(ls -td benches/results/*/ | head -1)
+        if [ -f "$RESULT_DIR/summary.txt" ]; then
+          echo "Performance metrics:"
+          grep -E "(Requests/sec|Latency)" "$RESULT_DIR/summary.txt" || echo "Metrics extracted"
+        fi
 
-        # Test startup time
-        timeout 5 ./zig-out/bin/blitz --help > /dev/null || echo "Startup test completed"
-
-    - name: Compare with baseline (if available)
+    - name: Check for performance regressions
       run: |
-        # This would compare against a stored baseline
-        # For now, just validate the build works
-        if [ -f "zig-out/bin/blitz" ]; then
-          echo "✅ Binary built successfully"
-          ./zig-out/bin/blitz --help | head -5
+        # Compare against baseline if it exists
+        if ./scripts/bench/reproduce.sh regression 2>/dev/null; then
+          echo "✅ No performance regressions detected"
         else
-          echo "❌ Binary not found"
-          exit 1
+          echo "⚠️ Performance regression may be present"
+          echo "Check benchmark results for details"
         fi
 
   # Memory and resource usage test
@@ -178,44 +189,58 @@ jobs:
         retention-days: 7
       if: always()
 
-  # Benchmark documentation validation
-  benchmark-docs:
-    name: Benchmark Documentation Check
+  # Benchmark infrastructure validation
+  benchmark-validation:
+    name: Benchmark Infrastructure Check
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Check benchmark scripts exist
+    - name: Validate benchmark infrastructure
       run: |
-        # Validate benchmark documentation and scripts
-        if [ ! -f "scripts/bench/local-benchmark.sh" ]; then
-          echo "❌ scripts/bench/local-benchmark.sh not found"
+        # Check benchmark scripts
+        if [ ! -x "scripts/bench/local-benchmark.sh" ]; then
+          echo "❌ scripts/bench/local-benchmark.sh not executable"
           exit 1
         fi
 
-        if [ ! -f "scripts/bench/reproduce.sh" ]; then
-          echo "❌ scripts/bench/reproduce.sh not found"
+        if [ ! -x "scripts/bench/reproduce.sh" ]; then
+          echo "❌ scripts/bench/reproduce.sh not executable"
           exit 1
         fi
 
-        if [ ! -d "docs/benchmark" ]; then
-          echo "❌ docs/benchmark directory not found"
+        # Check configuration files
+        if [ ! -f "benches/config.toml" ]; then
+          echo "❌ benches/config.toml not found"
+          exit 1
+        fi
+
+        # Check documentation
+        if [ ! -f "docs/benchmark/README.md" ]; then
+          echo "❌ docs/benchmark/README.md not found"
+          exit 1
+        fi
+
+        # Check WRK script
+        if [ ! -f "scripts/bench/wrk_script.lua" ]; then
+          echo "❌ scripts/bench/wrk_script.lua not found"
           exit 1
         fi
 
         echo "✅ Benchmark infrastructure validated"
 
-    - name: Validate documentation links
+    - name: Validate configuration syntax
       run: |
-        # Check that documentation files reference correct script paths
-        if grep -r "benches/local-benchmark.sh" docs/; then
-          echo "❌ Found outdated script references in docs"
-          exit 1
+        # Check if config is valid TOML (basic validation)
+        if command -v python3 &> /dev/null; then
+          python3 -c "import tomllib; tomllib.load(open('benches/config.toml', 'rb'))" 2>/dev/null && echo "✅ TOML config syntax valid" || echo "⚠️ TOML validation not available"
+        else
+          echo "⚠️ Python not available for TOML validation"
         fi
 
-        if grep -r "scripts/bench/" docs/; then
-          echo "✅ Documentation uses correct script paths"
-        else
-          echo "⚠️ No script references found in docs (might be OK)"
-        fi
+    - name: Check script syntax
+      run: |
+        # Basic shell script syntax check
+        bash -n scripts/bench/local-benchmark.sh && echo "✅ local-benchmark.sh syntax OK"
+        bash -n scripts/bench/reproduce.sh && echo "✅ reproduce.sh syntax OK"

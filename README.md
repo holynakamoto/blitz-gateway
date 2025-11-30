@@ -736,6 +736,42 @@ make monitoring up -d
 # - Blitz Metrics: http://localhost:9090/metrics
 ```
 
+### 🏃‍♂️ Performance Benchmarking
+
+Blitz Gateway includes a comprehensive benchmarking suite:
+
+#### Quick Benchmark
+```bash
+# Install load testing tools
+sudo apt-get install wrk hey
+
+# Run comprehensive benchmark
+./scripts/bench/local-benchmark.sh
+
+# Results saved to: benches/results/YYYYMMDD_HHMMSS/
+```
+
+#### Regression Testing
+```bash
+# Set performance baseline
+./scripts/bench/reproduce.sh baseline
+
+# Check for performance regressions
+./scripts/bench/reproduce.sh regression
+
+# Compare specific commits
+./scripts/bench/reproduce.sh compare abc123 def456
+```
+
+#### Benchmark Features
+- **Multi-Tool Support**: WRK, hey, bombardier with Lua scripting
+- **Scenario Testing**: HTTP GET/POST, WebSocket, custom request patterns
+- **Regression Detection**: Statistical analysis with confidence intervals
+- **CI/CD Integration**: Automated benchmarking in GitHub Actions
+- **System Monitoring**: CPU, memory, network resource tracking
+
+📊 **Complete Benchmark Guide**: [docs/benchmark/README.md](docs/benchmark/README.md)
+
 ### 🔧 Advanced Configuration
 
 #### Custom Environment Variables
@@ -796,39 +832,6 @@ See [infra/README.md](infra/README.md) for detailed infrastructure documentation
 - ✅ **Release automation** - GitHub Container Registry publishing
 
 All pipelines run automatically on pushes and PRs. See [`.github/workflows/`](.github/workflows/) for details.
-
-## 🚀 Production Deployment
-
-Blitz Gateway is **production-ready** with comprehensive deployment guides:
-
-### Quick Deploy Options
-
-**🐳 Docker Compose** (Development/Production)
-```bash
-make monitoring up -d  # Observability stack
-make prod up -d        # Production deployment
-```
-
-**☸️ Kubernetes** (Enterprise)
-```bash
-helm install blitz-gateway infra/helm/blitz-gateway/
-kubectl apply -f infra/k8s/monitoring/
-```
-
-**☁️ Cloud** (AWS/GCP/Azure)
-- AWS: CloudFormation templates in `infra/aws/`
-- Kubernetes manifests in `infra/k8s/`
-- Helm charts for easy deployment
-
-### Production Features ✅
-
-- **High Availability**: Multi-zone, auto-scaling, load balancing
-- **Security**: TLS 1.3, mTLS, network policies, secrets management
-- **Monitoring**: Prometheus + Grafana dashboards, alerting rules
-- **Performance**: Kernel tuning, connection pooling, caching
-- **Backup**: Automated configuration and data backups
-
-📚 **Complete Guide**: [docs/production/README.md](docs/production/README.md)
 
 ## 🔗 Links
 

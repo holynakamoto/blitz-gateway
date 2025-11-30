@@ -33,7 +33,18 @@ Blitz Gateway is an ultra-low-latency edge API gateway and reverse proxy written
 curl -fsSL https://raw.githubusercontent.com/holynakamoto/blitz-gateway/main/install.sh | sudo bash
 ```
 
-This installs Blitz Gateway as a systemd service with auto-updates via `apt upgrade`.
+Installs Blitz Gateway as a systemd service. Configure and start:
+
+```bash
+# Edit configuration
+sudo nano /etc/blitz-gateway/config.toml
+
+# Start service
+sudo systemctl start blitz-gateway
+
+# Enable on boot
+sudo systemctl enable blitz-gateway
+```
 
 ### Build from Source
 

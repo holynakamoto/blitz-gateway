@@ -118,10 +118,11 @@ See [benchmarking guide](docs/benchmark/README.md) for production benchmarks on 
 
 ## Documentation
 
+- **[Documentation Index](docs/INDEX.md)** - Complete documentation guide
 - **[Production Deployment](docs/production/README.md)** - Docker, Kubernetes, AWS, Bare Metal
 - **[Benchmarking Guide](docs/benchmark/README.md)** - Performance testing and optimization
 - **[Contributing](docs/CONTRIBUTING.md)** - Development setup and guidelines
-- **[Architecture](docs/)** - Detailed technical documentation
+- **[Release & Publishing](docs/release/)** - Publishing to APT and Docker
 
 ## Status
 

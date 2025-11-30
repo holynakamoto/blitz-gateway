@@ -7,8 +7,8 @@ set -euo pipefail
 VERSION="${1:-}"
 
 if [ -z "$VERSION" ]; then
-    echo "Usage: ./PUBLISH-RELEASE.sh VERSION"
-    echo "Example: ./PUBLISH-RELEASE.sh 0.6.0"
+    echo "Usage: ./scripts/release/PUBLISH-RELEASE.sh VERSION"
+    echo "Example: ./scripts/release/PUBLISH-RELEASE.sh 0.6.0"
     exit 1
 fi
 

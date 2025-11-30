@@ -3,7 +3,7 @@
 ## One-Command Release
 
 ```bash
-./PUBLISH-RELEASE.sh 0.6.0
+./scripts/release/PUBLISH-RELEASE.sh 0.6.0
 ```
 
 That's it! This will:
@@ -70,6 +70,6 @@ docker run --rm ghcr.io/holynakamoto/blitz-gateway:latest --help
 ## Full Documentation
 
 - **Detailed Guide**: `docs/packaging/PUBLISHING.md`
-- **Checklist**: `RELEASE-CHECKLIST.md`
+- **Checklist**: `docs/release/RELEASE-CHECKLIST.md`
 - **Packaging Docs**: `packaging/README.md`
 

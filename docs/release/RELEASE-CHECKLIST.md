@@ -26,7 +26,7 @@ Complete checklist for publishing Blitz Gateway to APT and Docker.
 ### Option 1: Automated Script
 
 ```bash
-./PUBLISH-RELEASE.sh 0.6.0
+./scripts/release/PUBLISH-RELEASE.sh 0.6.0
 ```
 
 This will:

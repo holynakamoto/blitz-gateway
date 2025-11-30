@@ -37,12 +37,12 @@ fi
 
 # Step 3: Update version in files
 echo "📝 Updating version to ${VERSION}..."
-sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" nfpm.yaml
+sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" packaging/nfpm.yaml
 sed -i.bak "s/\"0\\.6\\.0\"/\"${VERSION}\"/g" README.md || true
-rm -f nfpm.yaml.bak README.md.bak
+rm -f packaging/nfpm.yaml.bak README.md.bak
 
 # Step 4: Commit version updates
-git add nfpm.yaml README.md
+git add packaging/nfpm.yaml README.md
 git commit -m "Bump version to ${VERSION}" || echo "No changes to commit"
 
 # Step 5: Create and push tag

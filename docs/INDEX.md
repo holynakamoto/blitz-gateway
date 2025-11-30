@@ -63,7 +63,7 @@ blitz-gateway/
 ├── build.zig                    # Zig build configuration
 ├── Dockerfile                   # Docker build file
 ├── Vagrantfile                  # Vagrant VM configuration
-├── nfpm.yaml                    # Package build configuration
+├── packaging/nfpm.yaml          # Package build configuration
 │
 ├── docs/                        # All documentation
 │   ├── INDEX.md                # This file

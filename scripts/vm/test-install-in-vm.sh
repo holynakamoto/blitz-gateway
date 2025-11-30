@@ -78,20 +78,20 @@ log_info "Creating .deb package..."
 mkdir -p dist
 
 # Backup nfpm.yaml
-cp nfpm.yaml nfpm.yaml.bak
+cp packaging/nfpm.yaml packaging/nfpm.yaml.bak
 
 # Update version
-sed -i "s/version: \".*\"/version: \"${VERSION}\"/" nfpm.yaml
+sed -i "s/version: \".*\"/version: \"${VERSION}\"/" packaging/nfpm.yaml
 
 # Build package
-nfpm pkg --packager deb --target dist/ || {
+nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml || {
     log_error "Failed to build .deb package"
-    mv nfpm.yaml.bak nfpm.yaml
+    mv packaging/nfpm.yaml.bak packaging/nfpm.yaml
     exit 1
 }
 
 # Restore nfpm.yaml
-mv nfpm.yaml.bak nfpm.yaml
+mv packaging/nfpm.yaml.bak packaging/nfpm.yaml
 
 log_success ".deb package created: $(ls -1 dist/*.deb)"
 

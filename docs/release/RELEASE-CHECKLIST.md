@@ -5,7 +5,7 @@ Complete checklist for publishing Blitz Gateway to APT and Docker.
 ## Pre-Release
 
 - [ ] All tests passing (`zig build test`)
-- [ ] Version updated in `nfpm.yaml`
+- [ ] Version updated in `packaging/nfpm.yaml`
 - [ ] CHANGELOG.md updated (if exists)
 - [ ] Documentation reviewed
 
@@ -41,9 +41,9 @@ This will:
 VERSION="0.6.0"
 TAG="v${VERSION}"
 
-# Update version in nfpm.yaml
-sed -i "s/version: \".*\"/version: \"${VERSION}\"/" nfpm.yaml
-git add nfpm.yaml
+# Update version in packaging/nfpm.yaml
+sed -i "s/version: \".*\"/version: \"${VERSION}\"/" packaging/nfpm.yaml
+git add packaging/nfpm.yaml
 git commit -m "Bump version to ${VERSION}"
 
 # Create and push tag

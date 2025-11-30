@@ -34,7 +34,7 @@
 - `Dockerfile` - Docker build file
 - `Vagrantfile` - VM configuration
 - `Makefile` - Common commands
-- `nfpm.yaml` - Package config
+- `packaging/nfpm.yaml` - Package config
 - `lb.example.toml` - Config example
 
 ## 📖 Documentation Index

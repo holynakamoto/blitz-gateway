@@ -63,7 +63,7 @@ scp -r ~/blitz-gateway ${VM_USER}@${VM_IP}:~/
 scp -r ~/blitz-gateway/packaging ${VM_USER}@${VM_IP}:~/blitz-gateway/
 scp -r ~/blitz-gateway/scripts ${VM_USER}@${VM_IP}:~/blitz-gateway/
 scp ~/blitz-gateway/install.sh ${VM_USER}@${VM_IP}:~/blitz-gateway/
-scp ~/blitz-gateway/nfpm.yaml ${VM_USER}@${VM_IP}:~/blitz-gateway/
+scp -r ~/blitz-gateway/packaging ${VM_USER}@${VM_IP}:~/blitz-gateway/
 scp ~/blitz-gateway/build.zig ${VM_USER}@${VM_IP}:~/blitz-gateway/
 ```
 

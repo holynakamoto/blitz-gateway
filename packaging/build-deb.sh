@@ -29,17 +29,17 @@ if [ ! -f "zig-out/bin/blitz-quic" ]; then
 fi
 
 # Update version in nfpm.yaml
-sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" nfpm.yaml
+sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" packaging/nfpm.yaml
 
 # Create dist directory
 mkdir -p dist
 
 # Build .deb package
 echo "Building .deb package..."
-nfpm pkg --packager deb --target dist/
+nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml
 
 # Restore nfpm.yaml
-mv nfpm.yaml.bak nfpm.yaml
+mv packaging/nfpm.yaml.bak packaging/nfpm.yaml
 
 echo ""
 echo "✅ Package built successfully!"

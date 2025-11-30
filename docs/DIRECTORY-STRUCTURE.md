@@ -13,7 +13,7 @@ Overview of the Blitz Gateway project structure.
 - `Vagrantfile` - Vagrant VM configuration
 - `Makefile` - Common commands
 - `install.sh` - One-command install script
-- `nfpm.yaml` - Package build configuration
+- `packaging/nfpm.yaml` - Package build configuration
 - `lb.example.toml` - Load balancer config example
 
 ## Documentation (`docs/`)

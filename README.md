@@ -390,8 +390,11 @@ zig build -Doptimize=ReleaseFast
 # Build load balancer image
 docker build --target prod -t blitz-lb .
 
-# Run with backend services
+# Run with backend services (legacy way)
 docker-compose --profile lb up
+
+# Or use the new infrastructure setup
+make prod --profile with-backend up -d
 ```
 
 ## 📊 Monitoring & Observability
@@ -623,35 +626,167 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 
 ## 🐳 Docker Deployment
 
-### Production Deployment
+Blitz Gateway uses a **production-grade Docker Compose setup** that scales from development to enterprise deployments.
+
+### 🚀 Quick Start (New Infrastructure)
 
 ```bash
-# Build production image
-docker build --target prod -t blitz:latest .
+# Development environment
+make dev up
 
-# Run with proper networking
-docker run -d \
-  --name blitz-server \
-  -p 8080:8080/tcp \
-  -p 8443:8443/udp \
-  --restart unless-stopped \
-  blitz:latest
+# Staging environment
+make staging up -d
+
+# Production environment
+make prod up -d
+
+# With monitoring
+make dev --profile monitoring up
 ```
 
-### Development Environment
+### 🏗️ Infrastructure Overview
+
+The new setup implements **Tier 1** of the Docker Compose evolution pattern:
+
+```
+infra/
+├── compose/           # Environment-specific compose files
+│   ├── common.yml     # Shared base services
+│   ├── dev.yml        # Development overrides
+│   ├── staging.yml    # Staging environment
+│   ├── prod.yml       # Production environment
+│   └── monitoring.yml # Observability stack
+├── env/               # Environment variables
+└── up.sh              # Smart wrapper script
+```
+
+**Benefits:**
+- ✅ **Environment isolation** - Each environment runs separately
+- ✅ **Configuration management** - Environment-specific settings
+- ✅ **CI/CD ready** - Optimized for automated deployments
+- ✅ **Scalability** - Easy to add new environments
+- ✅ **Security** - Production-hardened configurations
+
+### 📋 Available Environments
+
+| Environment | Purpose | Replicas | Monitoring | Ports |
+|-------------|---------|----------|------------|-------|
+| `dev` | Development with hot reload | 1 | Optional | All exposed |
+| `staging` | Pre-production testing | 2 | Enabled | Limited |
+| `prod` | Production deployment | 3+ | Enabled | Minimal |
+| `ci` | Automated testing | 1 | Disabled | None |
+
+### 🛠️ Development Commands
 
 ```bash
-# Start development stack
-docker-compose --profile dev up -d
+# Start development environment
+make dev up
 
-# View logs
-docker-compose logs -f blitz-quic-dev
+# View logs across all services
+make dev logs -f
+
+# Restart specific service
+make dev restart blitz-quic
 
 # Debug shell
-docker-compose exec blitz-quic-dev /bin/bash
+make dev exec blitz-quic /bin/bash
+
+# Stop everything
+make dev down
 ```
 
-See [docs/dev/docker-multi-stage.md](docs/dev/docker-multi-stage.md) for detailed Docker usage.
+### 🚢 Production Deployment
+
+```bash
+# Deploy to production with monitoring
+make prod --profile monitoring up -d
+
+# Scale to 8 replicas
+make prod up -d --scale blitz-quic=8
+
+# Zero-downtime updates
+make prod up -d --no-deps blitz-quic
+
+# Check health
+make prod ps
+```
+
+### 📊 Monitoring Setup
+
+```bash
+# Start with full observability stack
+make monitoring up -d
+
+# Access dashboards:
+# - Grafana: http://localhost:3000 (admin/admin)
+# - Prometheus: http://localhost:9090
+# - Blitz Metrics: http://localhost:9090/metrics
+```
+
+### 🔧 Advanced Configuration
+
+#### Custom Environment Variables
+
+```bash
+# Override settings
+QUIC_LOG=trace make dev up
+
+# Use custom config
+make prod --env-file custom.env up
+```
+
+#### Scaling Services
+
+```bash
+# Scale load balancer
+make prod up -d --scale blitz-quic=10
+
+# Scale monitoring (if needed)
+make monitoring up -d --scale prometheus=2
+```
+
+#### Multi-Region Deployment
+
+```bash
+# Deploy to different regions
+make prod up -d  # Region 1
+DOCKER_HOST=region2.docker.example.com make prod up -d  # Region 2
+```
+
+### 🧪 Testing with Docker
+
+```bash
+# Run full test suite in containers
+make ci up --abort-on-container-exit
+
+# Integration tests
+make dev --profile with-backend up -d
+curl http://localhost:8080/health
+```
+
+### 🔒 Production Security
+
+- **Certificates**: Mount real TLS certificates
+- **Secrets**: Use Docker secrets or external providers
+- **Network policies**: Configure proper isolation
+- **Resource limits**: Set appropriate CPU/memory bounds
+- **Updates**: Rolling updates for zero downtime
+
+### 🏗️ Migration from Legacy Setup
+
+If you were using the old `docker-compose.yml`:
+
+```bash
+# Stop old setup
+docker-compose down
+
+# Start new infrastructure
+make dev up
+
+# The new setup is backward compatible but more powerful
+```
+
+See [infra/README.md](infra/README.md) for detailed infrastructure documentation.
 
 ## 🔄 CI/CD Status
 

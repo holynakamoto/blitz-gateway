@@ -1,47 +1,63 @@
-# Makefile workaround for Zig build system issues on ARM64 Debian
-ZIG = /usr/local/bin/zig
-TARGET = native-linux-gnu
-OPTIMIZE = ReleaseFast
-OUTPUT = zig-out/bin/blitz
+# Blitz Gateway Development Makefile
+# Provides convenient shortcuts for common development tasks
 
-.PHONY: all clean run
+.PHONY: help dev staging prod ci monitoring test build clean
 
-all: $(OUTPUT)
+# Default target
+help:
+	@echo "🚀 Blitz Gateway Development Commands"
+	@echo ""
+	@echo "Environments:"
+	@echo "  make dev         - Start development environment"
+	@echo "  make staging     - Start staging environment"
+	@echo "  make prod        - Start production environment"
+	@echo "  make ci          - Start CI environment"
+	@echo ""
+	@echo "Monitoring:"
+	@echo "  make monitoring  - Start monitoring stack"
+	@echo ""
+	@echo "Development:"
+	@echo "  make test        - Run all tests"
+	@echo "  make build       - Build production binary"
+	@echo "  make clean       - Clean up containers and volumes"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make dev logs    - View development logs"
+	@echo "  make staging ps  - Check staging status"
+	@echo "  make prod scale REPLICAS=5  - Scale production"
 
-$(OUTPUT): src/main.zig src/bind_wrapper.c
-	@mkdir -p zig-out/bin
-	@echo "Finding liburing headers..."
-	@INCLUDE_PATH=$$(find /usr/include -name 'liburing.h' 2>/dev/null | head -1 | xargs dirname); \
-	if [ -z "$$INCLUDE_PATH" ]; then \
-		INCLUDE_PATH="/usr/include"; \
-	fi; \
-	echo "Using include path: $$INCLUDE_PATH"; \
-	echo "Compiling bind_wrapper.c with gcc..."; \
-	gcc -c -O3 -D_GNU_SOURCE -I$$INCLUDE_PATH src/bind_wrapper.c -o /tmp/bind_wrapper.o; \
-	echo "Finding OpenSSL headers..."; \
-	OPENSSL_INCLUDE=$$(find /usr/include -name 'opensslconf.h' 2>/dev/null | head -1 | xargs dirname | xargs dirname); \
-	if [ -z "$$OPENSSL_INCLUDE" ]; then \
-		OPENSSL_INCLUDE="/usr/include"; \
-	fi; \
-	echo "Using OpenSSL include: $$OPENSSL_INCLUDE"; \
-	echo "Compiling openssl_wrapper.c with gcc..."; \
-	gcc -c -O3 -D_GNU_SOURCE -I$$INCLUDE_PATH -I$$OPENSSL_INCLUDE src/tls/openssl_wrapper.c -o /tmp/openssl_wrapper.o; \
-	echo "Building Blitz..."; \
-	cd zig-out/bin && $(ZIG) build-exe -O $(OPTIMIZE) -fstrip -target $(TARGET) \
-		-lc -I$$INCLUDE_PATH -I$$OPENSSL_INCLUDE -I../../src \
-		../../src/main.zig /tmp/bind_wrapper.o /tmp/openssl_wrapper.o \
-		/usr/lib/aarch64-linux-gnu/liburing.so.2.3 \
-		-L/usr/lib/aarch64-linux-gnu -lssl -lcrypto; \
-	if [ -f main ] && [ ! -f ../../$(OUTPUT) ]; then mv main ../../$(OUTPUT); fi; \
-	if [ -f blitz ] && [ ! -f ../../$(OUTPUT) ]; then mv blitz ../../$(OUTPUT); fi; \
-	if [ ! -f ../../$(OUTPUT) ] && [ -f main ]; then cp main ../../$(OUTPUT); fi; \
-	if [ ! -f ../../$(OUTPUT) ] && [ -f blitz ]; then cp blitz ../../$(OUTPUT); fi
-	@chmod +x $(OUTPUT)
-	@echo "✅ Build complete: $(OUTPUT)"
+# Environment targets
+dev:
+	./infra/up.sh dev $(filter-out $@,$(MAKECMDGOALS))
 
+staging:
+	./infra/up.sh staging $(filter-out $@,$(MAKECMDGOALS))
+
+prod:
+	./infra/up.sh prod $(filter-out $@,$(MAKECMDGOALS))
+
+ci:
+	./infra/up.sh ci $(filter-out $@,$(MAKECMDGOALS))
+
+monitoring:
+	./infra/up.sh monitoring $(filter-out $@,$(MAKECMDGOALS))
+
+# Development helpers
+test:
+	zig build test
+
+build:
+	zig build -Doptimize=ReleaseFast
+
+# Cleanup
 clean:
-	rm -rf zig-out /tmp/bind_wrapper.o /tmp/openssl_wrapper.o
+	@echo "🧹 Cleaning up all environments..."
+	-./infra/up.sh dev down -v --remove-orphans 2>/dev/null || true
+	-./infra/up.sh staging down -v --remove-orphans 2>/dev/null || true
+	-./infra/up.sh prod down -v --remove-orphans 2>/dev/null || true
+	-./infra/up.sh ci down -v --remove-orphans 2>/dev/null || true
+	-docker system prune -f
 
-run: $(OUTPUT)
-	./$(OUTPUT)
-
+# Allow passing arguments to docker-compose commands
+%:
+	@:

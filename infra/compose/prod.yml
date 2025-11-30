@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  blitz-quic:
+    container_name: blitz-quic-prod-server
+    ports:
+      - "443:8443/udp"   # Standard QUIC port
+    volumes:
+      # Mount certificates (read-only)
+      - ../../certs:/app/certs:ro
+    environment:
+      - QUIC_LOG=${QUIC_LOG:-warn}
+      - DEBUG=0
+      - ENV=production
+    deploy:
+      replicas: ${REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "nc", "-zu", "localhost", "8443"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 30s

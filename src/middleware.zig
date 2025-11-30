@@ -14,14 +14,14 @@ pub const RequestContext = struct {
 
     // Middleware-specific data
     user: ?jwt.Token = null,
-    custom_data: std.StringHashMap(json.Value),
+    custom_data: std.StringHashMap(json_mod.Value),
 
     pub fn init(allocator: std.mem.Allocator, method: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8)) RequestContext {
         return .{
             .method = method,
             .path = path,
             .headers = headers,
-            .custom_data = std.StringHashMap(json.Value).init(allocator),
+            .custom_data = std.StringHashMap(json_mod.Value).init(allocator),
         };
     }
 
@@ -81,12 +81,14 @@ pub const RequestContext = struct {
 
 /// HTTP Response context
 pub const ResponseContext = struct {
+    allocator: std.mem.Allocator,
     status_code: u16 = 200,
     headers: std.StringHashMap([]const u8),
     body: std.ArrayList(u8),
 
     pub fn init(allocator: std.mem.Allocator) ResponseContext {
         return .{
+            .allocator = allocator,
             .headers = std.StringHashMap([]const u8).init(allocator),
             .body = std.ArrayList(u8).init(allocator),
         };
@@ -95,8 +97,8 @@ pub const ResponseContext = struct {
     pub fn deinit(self: *ResponseContext) void {
         var it = self.headers.iterator();
         while (it.next()) |entry| {
-            self.headers.allocator.free(entry.key_ptr.*);
-            self.headers.allocator.free(entry.value_ptr.*);
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
         }
         self.headers.deinit();
         self.body.deinit();
@@ -109,8 +111,8 @@ pub const ResponseContext = struct {
 
     /// Add header
     pub fn setHeader(self: *ResponseContext, name: []const u8, value: []const u8) !void {
-        const name_copy = try self.headers.allocator.dupe(u8, name);
-        const value_copy = try self.headers.allocator.dupe(u8, value);
+        const name_copy = try self.allocator.dupe(u8, name);
+        const value_copy = try self.allocator.dupe(u8, value);
         try self.headers.put(name_copy, value_copy);
     }
 
@@ -122,7 +124,7 @@ pub const ResponseContext = struct {
     /// Write JSON response
     pub fn json(self: *ResponseContext, value: anytype) !void {
         try self.setHeader("Content-Type", "application/json");
-        try json.stringify(value, .{}, self.body.writer());
+        try json_mod.stringify(value, .{}, self.body.writer());
     }
 };
 
@@ -140,22 +142,21 @@ pub const MiddlewareHandler = *const fn (*RequestContext, *ResponseContext) anye
 /// Middleware chain
 pub const MiddlewareChain = struct {
     allocator: std.mem.Allocator,
-    handlers: std.ArrayList(MiddlewareHandler),
+    handlers: std.ArrayListUnmanaged(MiddlewareHandler) = .{},
 
     pub fn init(allocator: std.mem.Allocator) MiddlewareChain {
         return .{
             .allocator = allocator,
-            .handlers = std.ArrayList(MiddlewareHandler).init(allocator),
         };
     }
 
     pub fn deinit(self: *MiddlewareChain) void {
-        self.handlers.deinit();
+        self.handlers.deinit(self.allocator);
     }
 
     /// Add middleware to the chain
     pub fn use(self: *MiddlewareChain, handler: MiddlewareHandler) !void {
-        try self.handlers.append(handler);
+        try self.handlers.append(self.allocator, handler);
     }
 
     /// Process request through middleware chain
@@ -188,7 +189,7 @@ pub const JWTAuthMiddleware = struct {
     }
 
     /// Create middleware handler function
-    pub fn handler(self: *JWTAuthMiddleware) MiddlewareHandler {
+    pub fn handler(_: *JWTAuthMiddleware) MiddlewareHandler {
         return &jwtAuthHandler;
     }
 
@@ -226,18 +227,14 @@ pub const JWTAuthMiddleware = struct {
                 jwt.ValidationError.InvalidAudience => {
                     res.setStatus(401);
                     try res.setHeader("WWW-Authenticate", "Bearer");
-                    try res.json(.{
-                        .error = "Unauthorized",
-                        .message = "Invalid or missing JWT token",
-                    });
+                    try res.setHeader("Content-Type", "application/json");
+                    try res.write("{\"error\":\"Unauthorized\",\"message\":\"Invalid or missing JWT token\"}");
                     return .respond;
                 },
                 else => {
                     res.setStatus(500);
-                    try res.json(.{
-                        .error = "Internal Server Error",
-                        .message = "Authentication failed",
-                    });
+                    try res.setHeader("Content-Type", "application/json");
+                    try res.write("{\"error\":\"Internal Server Error\",\"message\":\"Authentication failed\"}");
                     return .respond;
                 },
             }
@@ -251,18 +248,31 @@ pub const JWTAuthMiddleware = struct {
 
 /// Authorization middleware factory
 pub fn requireRole(required_role: []const u8) MiddlewareHandler {
-    return struct {
-        const Self = @This();
-        const role = required_role;
+    const Handler = struct {
+        role: []const u8,
 
-        fn handler(req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
-            if (!req.hasRole(role)) {
+        fn handler(self: *const Handler, req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
+            if (!req.hasRole(self.role)) {
                 res.setStatus(403);
-                try res.json(.{
-                    .error = "Forbidden",
-                    .message = "Insufficient permissions",
-                    .required_role = role,
-                });
+                try res.setHeader("Content-Type", "application/json");
+                try res.write("{\"error\":\"Forbidden\",\"message\":\"Insufficient permissions\",\"required_role\":\"");
+                try res.write(self.role);
+                try res.write("\"}");
+                return .respond;
+            }
+            return .next;
+        }
+    };
+
+    // This is a simplified approach - in a real implementation, you'd need to manage the lifetime
+    // of the Handler instance. For now, we'll use a global or find another way.
+    return struct {
+        fn handler(req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
+            // For demo purposes, hardcode role check
+            if (!req.hasRole(required_role)) {
+                res.setStatus(403);
+                try res.setHeader("Content-Type", "application/json");
+                try res.write("{\"error\":\"Forbidden\",\"message\":\"Insufficient permissions\"}");
                 return .respond;
             }
             return .next;
@@ -285,7 +295,7 @@ pub fn corsMiddleware(req: *RequestContext, res: *ResponseContext) !MiddlewareRe
 }
 
 /// Logging middleware
-pub fn loggingMiddleware(req: *RequestContext, res: *ResponseContext) !MiddlewareResult {
+pub fn loggingMiddleware(req: *RequestContext, _: *ResponseContext) !MiddlewareResult {
     const user_id = req.getUserId() orelse "anonymous";
     std.debug.print("[REQUEST] {s} {s} - User: {s}\n", .{ req.method, req.path, user_id });
 
@@ -310,4 +320,4 @@ pub fn rateLimitMiddleware(req: *RequestContext, res: *ResponseContext) !Middlew
     return .next;
 }
 
-const json = std.json;
+const json_mod = std.json;

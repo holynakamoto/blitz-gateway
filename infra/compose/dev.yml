@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  blitz-quic:
+    build:
+      target: dev
+      args:
+        BUILD_TYPE: Debug
+    container_name: blitz-quic-dev-server
+    ports:
+      - "9443:8443/udp"  # QUIC
+      - "8080:8080/tcp"  # HTTP/1.1
+      - "8443:8444/tcp"  # HTTPS
+      - "9090:9090/tcp"  # Metrics (if enabled)
+    volumes:
+      # Mount source code for hot reloading
+      - ../../:/app
+      # Mount certificates
+      - ../../certs:/app/certs:ro
+    environment:
+      - QUIC_LOG=${QUIC_LOG:-debug}
+      - DEBUG=1
+      - ENV=development
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  backend:
+    ports:
+      - "9000:80"

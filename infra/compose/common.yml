@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  blitz-quic:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: prod
+      args:
+        BUILD_TYPE: Release
+    container_name: blitz-quic-server
+    # Environment-specific ports, volumes, etc. will be overridden
+    privileged: true
+    cap_add:
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-zu", "localhost", "8443"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    environment:
+      - QUIC_LOG=${QUIC_LOG:-info}
+      - ENV=${ENV:-production}
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-4}'
+          memory: ${MEMORY_LIMIT:-2G}
+        reservations:
+          cpus: '${CPU_RESERVATION:-2}'
+          memory: ${MEMORY_RESERVATION:-1G}
+    networks:
+      - blitz-network
+
+  # Optional test backend for load balancing demos
+  backend:
+    image: nginx:alpine
+    container_name: blitz-backend-test
+    volumes:
+      - ../../test-backend.html:/usr/share/nginx/html/index.html:ro
+    networks:
+      - blitz-network
+    profiles:
+      - with-backend
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  blitz-network:
+    driver: bridge
+  monitoring:
+    driver: bridge

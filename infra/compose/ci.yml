@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  blitz-quic:
+    build:
+      target: prod
+      args:
+        BUILD_TYPE: Release
+    container_name: blitz-quic-ci
+    # No ports exposed in CI
+    environment:
+      - QUIC_LOG=error
+      - DEBUG=0
+      - ENV=ci
+      - CI=true
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "nc", "-zu", "localhost", "8443"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    command: ["zig", "build", "test"]
+
+  # Test database for integration tests
+  test-db:
+    image: postgres:15-alpine
+    container_name: blitz-test-db
+    environment:
+      - POSTGRES_DB=blitz_test
+      - POSTGRES_USER=blitz
+      - POSTGRES_PASSWORD=test_password
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - blitz-network
+    profiles:
+      - with-db

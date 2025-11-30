@@ -8,6 +8,7 @@ const json = std.json;
 const base64 = std.base64;
 const mem = std.mem;
 const time = std.time;
+const json_mod = std.json;
 
 pub const Algorithm = enum {
     HS256,
@@ -37,11 +38,11 @@ pub const Payload = struct {
     jti: ?[]const u8 = null, // JWT ID
 
     // Custom claims can be added via additional JSON parsing
-    custom_claims: std.StringHashMap(json.Value),
+    custom_claims: std.StringHashMap(json_mod.Value),
 
     pub fn init(allocator: std.mem.Allocator) Payload {
         return .{
-            .custom_claims = std.StringHashMap(json.Value).init(allocator),
+            .custom_claims = std.StringHashMap(json_mod.Value).init(allocator),
         };
     }
 
@@ -54,7 +55,7 @@ pub const Payload = struct {
         var it = self.custom_claims.iterator();
         while (it.next()) |entry| {
             allocator.free(entry.key_ptr.*);
-            entry.value_ptr.deinit();
+            entry.value_ptr.*.deinit();
         }
         self.custom_claims.deinit();
     }
@@ -147,6 +148,7 @@ pub const ValidatorConfig = struct {
 
     pub fn init(allocator: std.mem.Allocator) ValidatorConfig {
         return .{
+            .algorithm = .HS256,
             .keys = std.StringHashMap([]const u8).init(allocator),
         };
     }
@@ -191,7 +193,7 @@ pub const Validator = struct {
     /// Validate a JWT token string
     pub fn validateToken(self: *Validator, token_str: []const u8) !Token {
         // Split token into parts
-        var parts = std.mem.split(u8, token_str, ".");
+        var parts = std.mem.splitSequence(u8, token_str, ".");
         const header_b64 = parts.next() orelse return ValidationError.InvalidToken;
         const payload_b64 = parts.next() orelse return ValidationError.InvalidToken;
         const signature_b64 = parts.next() orelse return ValidationError.InvalidToken;
@@ -199,21 +201,21 @@ pub const Validator = struct {
         if (parts.next() != null) return ValidationError.InvalidToken;
 
         // Decode header
-        const header_json = try base64.decodeAlloc(self.allocator, header_b64);
+        const header_json = try std.base64.url_safe.Decoder.allocDecode(self.allocator, header_b64);
         defer self.allocator.free(header_json);
 
         var header = try self.parseHeader(header_json);
         defer header.deinit(self.allocator);
 
         // Decode payload
-        const payload_json = try base64.decodeAlloc(self.allocator, payload_b64);
+        const payload_json = try std.base64.url_safe.Decoder.allocDecode(self.allocator, payload_b64);
         defer self.allocator.free(payload_json);
 
         var payload = try self.parsePayload(payload_json);
         defer payload.deinit(self.allocator);
 
         // Decode signature
-        const signature = try base64.decodeAlloc(self.allocator, signature_b64);
+        const signature = try std.base64.url_safe.Decoder.allocDecode(self.allocator, signature_b64);
         defer self.allocator.free(signature);
 
         // Validate algorithm matches config
@@ -327,7 +329,7 @@ pub const Validator = struct {
     }
 
     /// Parse algorithm string
-    fn parseAlgorithm(self: *Validator, alg_str: []const u8) !Algorithm {
+    fn parseAlgorithm(_: *Validator, alg_str: []const u8) !Algorithm {
         if (mem.eql(u8, alg_str, "HS256")) return .HS256;
         if (mem.eql(u8, alg_str, "RS256")) return .RS256;
         if (mem.eql(u8, alg_str, "ES256")) return .ES256;
@@ -429,7 +431,7 @@ pub const JWTMiddleware = struct {
     }
 
     /// Check if user has required role/permission
-    pub fn authorize(self: *JWTMiddleware, token: *const Token, required_claim: []const u8, required_value: []const u8) !void {
+    pub fn authorize(_: *JWTMiddleware, token: *const Token, required_claim: []const u8, required_value: []const u8) !void {
         const claim_value = token.payload.custom_claims.get(required_claim) orelse return ValidationError.InvalidToken;
 
         // For string claims
@@ -449,7 +451,7 @@ pub const JWTMiddleware = struct {
     }
 
     /// Get custom claim value
-    pub fn getClaim(self: *JWTMiddleware, token: *const Token, claim_name: []const u8) ?json.Value {
+    pub fn getClaim(self: *JWTMiddleware, token: *const Token, claim_name: []const u8) ?json_mod.Value {
         _ = self;
         return token.payload.custom_claims.get(claim_name);
     }

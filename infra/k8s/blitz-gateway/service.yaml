@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: blitz-gateway
+  labels:
+    app: blitz-gateway
+  annotations:
+    # AWS Load Balancer annotations
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+    # GCP Load Balancer annotations
+    cloud.google.com/load-balancer-type: "Internal"
+    # Azure Load Balancer annotations
+    service.beta.kubernetes.io/azure-load-balancer-resource-group: "my-resource-group"
+spec:
+  type: LoadBalancer
+  selector:
+    app: blitz-gateway
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8443
+    protocol: TCP
+  - name: quic
+    port: 8443
+    targetPort: 8443
+    protocol: UDP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blitz-gateway-headless
+  labels:
+    app: blitz-gateway
+spec:
+  clusterIP: None
+  selector:
+    app: blitz-gateway
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+  - name: quic
+    port: 8443
+    protocol: UDP

@@ -6,11 +6,9 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Zig](https://img.shields.io/badge/zig-0.15.2-orange.svg)](https://ziglang.org/)
-[![CI](https://github.com/blitz-gateway/blitz-gateway/workflows/ci/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/ci.yml)
-[![Docker](https://github.com/blitz-gateway/blitz-gateway/workflows/docker/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/docker.yml)
-[![Code Quality](https://github.com/blitz-gateway/blitz-gateway/workflows/code-quality/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions/workflows/code-quality.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/blitzgateway/blitz-quic.svg)](https://hub.docker.com/r/blitzgateway/blitz-quic)
-[![GitHub release](https://img.shields.io/github/release/blitz-gateway/blitz-gateway.svg)](https://github.com/blitz-gateway/blitz-gateway/releases)
+[![CI](https://github.com/blitz-gateway/blitz-gateway/workflows/CI/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
+[![Docker](https://github.com/blitz-gateway/blitz-gateway/workflows/Docker/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
+[![Code Quality](https://github.com/blitz-gateway/blitz-gateway/workflows/Code%20Quality/badge.svg)](https://github.com/blitz-gateway/blitz-gateway/actions)
 
 ## 🎯 Vision
 
@@ -799,6 +797,39 @@ See [infra/README.md](infra/README.md) for detailed infrastructure documentation
 
 All pipelines run automatically on pushes and PRs. See [`.github/workflows/`](.github/workflows/) for details.
 
+## 🚀 Production Deployment
+
+Blitz Gateway is **production-ready** with comprehensive deployment guides:
+
+### Quick Deploy Options
+
+**🐳 Docker Compose** (Development/Production)
+```bash
+make monitoring up -d  # Observability stack
+make prod up -d        # Production deployment
+```
+
+**☸️ Kubernetes** (Enterprise)
+```bash
+helm install blitz-gateway infra/helm/blitz-gateway/
+kubectl apply -f infra/k8s/monitoring/
+```
+
+**☁️ Cloud** (AWS/GCP/Azure)
+- AWS: CloudFormation templates in `infra/aws/`
+- Kubernetes manifests in `infra/k8s/`
+- Helm charts for easy deployment
+
+### Production Features ✅
+
+- **High Availability**: Multi-zone, auto-scaling, load balancing
+- **Security**: TLS 1.3, mTLS, network policies, secrets management
+- **Monitoring**: Prometheus + Grafana dashboards, alerting rules
+- **Performance**: Kernel tuning, connection pooling, caching
+- **Backup**: Automated configuration and data backups
+
+📚 **Complete Guide**: [docs/production/README.md](docs/production/README.md)
+
 ## 🔗 Links
 
 - **GitHub**: [github.com/blitz-gateway/blitz-gateway](https://github.com/blitz-gateway/blitz-gateway)
@@ -811,4 +842,3 @@ All pipelines run automatically on pushes and PRs. See [`.github/workflows/`](.g
 Join us in building the future of edge computing. Every microsecond matters.
 
 **LFG. 🚀**
-

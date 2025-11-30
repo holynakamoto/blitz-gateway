@@ -430,8 +430,8 @@ pub fn build(b: *std.Build) void {
 
     // WASM plugin tests
     const wasm_tests = b.addTest(.{
-        .root_module = b.addModule("wasm_root", .{
-            .root_source_file = b.path("src/wasm/types.zig"),
+        .root_module = b.addModule("wasm_test", .{
+            .root_source_file = b.path("tests/wasm_test.zig"),
             .target = target,
         }),
     });

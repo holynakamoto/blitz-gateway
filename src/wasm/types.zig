@@ -39,7 +39,7 @@ pub const PluginResult = enum {
     /// Stop processing with success (e.g., handled request)
     stop,
     /// Error occurred, stop processing
-    error,
+    @"error",
 };
 
 /// Plugin execution result
@@ -58,7 +58,7 @@ pub const ExecutionResult = struct {
 
     pub fn failed(message: []const u8, http_status: ?u16) ExecutionResult {
         return .{
-            .status = .error,
+            .status = .@"error",
             .error_message = message,
             .http_status_code = http_status,
         };

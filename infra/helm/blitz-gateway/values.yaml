@@ -1,0 +1,127 @@
+# Default values for blitz-gateway Helm chart
+
+# Number of replicas
+replicaCount: 3
+
+# Docker image
+image:
+  repository: blitzgateway/blitz-quic
+  tag: "latest"
+  pullPolicy: Always
+
+# Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+# Resources
+resources:
+  requests:
+    memory: "1Gi"
+    cpu: "500m"
+  limits:
+    memory: "2Gi"
+    cpu: "2000m"
+
+# Application configuration
+config:
+  env: production
+  quicLog: warn
+  metricsEnabled: true
+  metricsPort: 9090
+
+# TLS configuration
+tls:
+  enabled: false
+  secretName: blitz-gateway-tls
+  certManager:
+    enabled: false
+    issuerRef:
+      name: letsencrypt-prod
+      kind: ClusterIssuer
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP/2"
+  hosts:
+    - host: api.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: blitz-gateway-tls
+      hosts:
+        - api.yourdomain.com
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    http:
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    https:
+      port: 443
+      targetPort: 8443
+      protocol: TCP
+    quic:
+      port: 8443
+      targetPort: 8443
+      protocol: UDP
+    metrics:
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - blitz-gateway
+        topologyKey: kubernetes.io/hostname

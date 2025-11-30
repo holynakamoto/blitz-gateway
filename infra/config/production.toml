@@ -1,0 +1,155 @@
+# Blitz Gateway Production Configuration
+# This file contains production-ready settings for high-performance deployment
+
+[server]
+# Server configuration
+host = "0.0.0.0"
+port = 8080
+workers = 8
+max_connections = 10000
+buffer_size = 65536
+timeout = 30
+keep_alive = 75
+
+# TLS configuration
+[tls]
+enabled = true
+cert_path = "/app/certs/cert.pem"
+key_path = "/app/certs/key.pem"
+min_version = "TLS1.2"
+cipher_suites = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256"
+]
+
+# QUIC configuration
+[quic]
+enabled = true
+port = 8443
+max_idle_timeout = 30
+max_streams = 100
+initial_max_data = 1048576  # 1MB
+initial_max_stream_data_bidi_local = 262144  # 256KB
+initial_max_stream_data_bidi_remote = 262144  # 256KB
+initial_max_stream_data_uni = 131072  # 128KB
+
+# HTTP/3 configuration
+[http3]
+enabled = true
+max_header_list_size = 32768
+max_concurrent_streams = 128
+
+# Metrics configuration
+[metrics]
+enabled = true
+port = 9090
+path = "/metrics"
+prometheus_enabled = true
+collection_interval = 15
+
+# Rate limiting configuration
+[rate_limit]
+enabled = true
+global_rps = 10000
+per_ip_rps = 1000
+burst_multiplier = 2.0
+cleanup_interval_seconds = 300
+
+# Logging configuration
+[logging]
+level = "warn"
+format = "json"
+output = "stdout"
+
+# Backend configuration
+[backends]
+default_timeout = 30
+max_retries = 3
+retry_delay = 100
+
+  [backends.upstream1]
+  url = "http://api-service-1:8080"
+  weight = 100
+  health_check = "/health"
+  health_check_interval = 30
+
+  [backends.upstream2]
+  url = "http://api-service-2:8080"
+  weight = 100
+  health_check = "/health"
+  health_check_interval = 30
+
+# Load balancing configuration
+[load_balancer]
+algorithm = "least_conn"  # round_robin, least_conn, ip_hash, weighted
+sticky_sessions = false
+session_timeout = 1800
+
+# Security configuration
+[security]
+# CORS configuration
+[cors]
+enabled = true
+allowed_origins = ["*"]
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+allowed_headers = ["Content-Type", "Authorization", "X-Requested-With"]
+allow_credentials = true
+max_age = 86400
+
+# Request limits
+[limits]
+max_request_size = 10485760  # 10MB
+max_header_size = 8192
+max_headers_count = 100
+timeout_read = 30
+timeout_write = 30
+timeout_idle = 75
+
+# Circuit breaker
+[circuit_breaker]
+enabled = true
+failure_threshold = 5
+recovery_timeout = 60
+half_open_max_requests = 3
+
+# WASM plugin configuration
+[wasm]
+enabled = false  # Enable when plugins are available
+plugin_dir = "/app/plugins"
+memory_limit = 2097152  # 2MB per plugin
+timeout_ms = 3000
+hot_reload = false
+
+# Plugins configuration
+[plugins]
+enabled_plugins = []
+routing_rules = {}
+
+# Monitoring and alerting
+[monitoring]
+health_check_path = "/health"
+metrics_path = "/metrics"
+status_path = "/status"
+
+# External monitoring endpoints
+alert_webhook_url = ""
+metrics_push_gateway = ""
+
+# Environment-specific overrides
+[environment]
+name = "production"
+debug = false
+maintenance_mode = false
+
+# Feature flags
+[features]
+http3 = true
+quic = true
+tls13 = true
+early_data = true
+zero_rtt = true
+session_resumption = true
+rate_limiting = true
+metrics = true
+tracing = false  # Enable when tracing backend is available

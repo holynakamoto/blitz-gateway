@@ -86,6 +86,11 @@ Users → Global Anycast → Blitz Edge Nodes (bare metal or VMs)
   - Graceful reload with signal handling (zero-downtime config updates)
   - eBPF rate limiting architecture for ultra-high performance
   - Comprehensive security features for internet deployment
+- ✅ **Observability & Monitoring** - **COMPLETE** ✅
+  - OpenTelemetry metrics collection (counters, gauges, histograms)
+  - Prometheus exposition format (/metrics endpoint)
+  - Grafana dashboard for real-time monitoring
+  - Comprehensive Blitz gateway metrics (HTTP, QUIC, load balancing, rate limiting)
 - ✅ **Enterprise Infrastructure** - **COMPLETE** ✅
   - Professional repository structure (12+ directories organized)
   - Comprehensive CI/CD pipeline (6 GitHub Actions workflows)
@@ -252,6 +257,9 @@ zig build test-transport-params
 # HTTP/3 integration tests
 zig build test-http3-integration
 
+# Metrics tests
+zig build test-metrics
+
 # Run all tests with verbose output
 zig build test --verbose
 ```
@@ -356,6 +364,92 @@ docker build --target prod -t blitz-lb .
 docker-compose --profile lb up
 ```
 
+## 📊 Monitoring & Observability
+
+Blitz includes comprehensive OpenTelemetry metrics with Prometheus/Grafana integration for production monitoring.
+
+### Quick Start Monitoring
+
+```bash
+# Start Blitz with metrics enabled
+zig build run-quic -- --lb lb.example.toml
+
+# In another terminal, start monitoring stack
+docker-compose -f docker-compose.monitoring.yml up -d
+
+# Access dashboards:
+# - Grafana: http://localhost:3000 (admin/admin)
+# - Prometheus: http://localhost:9090
+# - Blitz Metrics: http://localhost:9090/metrics
+```
+
+### Metrics Collected
+
+#### HTTP Metrics
+- `blitz_http_requests_total` - Total HTTP requests
+- `blitz_http_request_duration_seconds` - Request duration histogram
+- `blitz_http_responses_total` - Total HTTP responses
+- `blitz_http_responses_2xx_total` - 2xx responses
+- `blitz_http_responses_4xx_total` - 4xx responses
+- `blitz_http_responses_5xx_total` - 5xx responses
+
+#### Connection Metrics
+- `blitz_active_connections` - Current active connections
+- `blitz_connections_total` - Total connections accepted
+
+#### QUIC Metrics
+- `blitz_quic_packets_total` - Total QUIC packets processed
+- `blitz_quic_handshakes_total` - Total QUIC handshakes
+- `blitz_quic_handshake_duration_seconds` - Handshake duration histogram
+
+#### Rate Limiting Metrics
+- `blitz_rate_limit_requests_total` - Total rate limit checks
+- `blitz_rate_limit_requests_dropped` - Requests dropped by rate limiting
+- `blitz_rate_limit_active_ips` - IPs currently being tracked
+
+#### Load Balancer Metrics
+- `blitz_lb_requests_total` - Total load balancer requests
+- `blitz_lb_requests_backend_{name}_total` - Requests per backend
+- `blitz_lb_backend_{name}_healthy` - Backend health status
+
+### Grafana Dashboard
+
+The included Grafana dashboard provides:
+
+- **Real-time Request Rate** - HTTP requests per second
+- **Response Status Codes** - Success/error rate visualization
+- **Request Duration (95th percentile)** - Latency monitoring
+- **Active Connections** - Connection tracking
+- **QUIC Performance** - Handshake and packet metrics
+- **Rate Limiting Stats** - Dropped requests and active IPs
+- **Load Balancer Health** - Backend status and distribution
+- **System Overview** - Error rates and uptime
+
+### Configuration
+
+Enable metrics in `lb.toml`:
+
+```toml
+# Metrics configuration
+metrics_enabled = true               # Enable metrics collection
+metrics_port = 9090                  # Metrics HTTP server port
+metrics_prometheus_enabled = true    # Enable Prometheus format
+metrics_otlp_endpoint = ""           # Optional OTLP endpoint
+```
+
+### Production Deployment
+
+```bash
+# Build with metrics enabled
+zig build -Doptimize=ReleaseFast
+
+# Run with monitoring
+./zig-out/bin/blitz-quic -- --lb production.toml
+
+# Start monitoring stack
+docker-compose -f docker-compose.monitoring.yml up -d
+```
+
 ## 📊 Benchmarking
 
 ### Docker-Based Testing (Recommended)
@@ -456,7 +550,7 @@ curl --http3-only --insecure https://localhost:8443/hello
 | Q1 2025       | MVP v0.2 (private beta) ✅ **COMPLETE**        | **HTTP/2 over TLS 1.3 COMPLETE** ✅, **Load Balancing Module COMPLETE** ✅       |
 | Q1 2025       | MVP v0.3 (private beta) ✅ **COMPLETE**        | **HTTP/3/QUIC COMPLETE** ✅, **Enterprise Infrastructure COMPLETE** ✅, **Load Balancer Integration COMPLETE** ✅ |
 | Q2 2025       | v0.4 (production beta) ✅ **COMPLETE**         | **Rate Limiting + DoS Protection** ✅, **Graceful Reload + Zero-Downtime Updates** ✅, **Production Hardening** ✅ |
-| Q2 2025       | v0.5 (public beta)                             | **JWT authentication**, **OpenTelemetry (OTLP) metrics**, **WASM plugin system** |
+| Q2 2025       | v0.5 (observability beta) ✅ **COMPLETE**       | **OpenTelemetry Metrics + Prometheus/Grafana Dashboard** ✅, **Comprehensive Monitoring** ✅ |
 | Q3 2025       | v1.0 GA (open source)                          | **Enterprise WAF module**, **Global load balancing**, **SLA monitoring**        |
 | Q4 2025       | v2.0 (enterprise + cloud launch)               | Managed global platform launch, marketplace, SLA 99.999%, SOC2                   |
 | Q1 2026       | Exit event                                     | Acquisition term sheet (target $100M+)                                           |

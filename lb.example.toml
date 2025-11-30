@@ -13,6 +13,12 @@ rate_limit_per_ip = "1000 req/s"     # Per-IP rate limit
 rate_limit_burst_multiplier = 2.0    # Allow 2x burst capacity
 rate_limit_enable_ebpf = true        # Use eBPF acceleration (Linux only)
 
+# Metrics configuration (OpenTelemetry + Prometheus)
+metrics_enabled = true               # Enable metrics collection
+metrics_port = 9090                  # Metrics HTTP server port
+metrics_prometheus_enabled = true    # Enable Prometheus exposition format
+metrics_otlp_endpoint = ""           # Optional OTLP endpoint
+
 # Backend server configurations
 # Each backend can have different weights for load distribution
 

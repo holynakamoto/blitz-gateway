@@ -44,6 +44,24 @@ pub const RateLimitConfig = struct {
     cleanup_interval_seconds: u32 = 60,
 };
 
+/// Metrics configuration
+pub const MetricsConfig = struct {
+    /// Enable metrics collection
+    enabled: bool = false,
+
+    /// Metrics server port
+    port: u16 = 9090,
+
+    /// Enable Prometheus exposition format
+    prometheus_enabled: bool = true,
+
+    /// OTLP endpoint (optional)
+    otlp_endpoint: ?[]const u8 = null,
+
+    /// Collection interval in seconds
+    collection_interval_seconds: u32 = 10,
+};
+
 /// Main configuration structure
 pub const Config = struct {
     /// Server mode
@@ -60,6 +78,9 @@ pub const Config = struct {
 
     /// Rate limiting configuration
     rate_limit: RateLimitConfig = .{},
+
+    /// Metrics configuration
+    metrics: MetricsConfig = .{},
 
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -205,6 +226,14 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
                 config.rate_limit.burst_multiplier = try std.fmt.parseFloat(f32, value);
             } else if (std.mem.eql(u8, key, "rate_limit_enable_ebpf")) {
                 config.rate_limit.enable_ebpf = std.mem.eql(u8, value, "true");
+            } else if (std.mem.eql(u8, key, "metrics_enabled")) {
+                config.metrics.enabled = std.mem.eql(u8, value, "true");
+            } else if (std.mem.eql(u8, key, "metrics_port")) {
+                config.metrics.port = try std.fmt.parseInt(u16, value, 10);
+            } else if (std.mem.eql(u8, key, "metrics_otlp_endpoint")) {
+                config.metrics.otlp_endpoint = try config.allocator.dupe(u8, value);
+            } else if (std.mem.eql(u8, key, "metrics_prometheus_enabled")) {
+                config.metrics.prometheus_enabled = std.mem.eql(u8, value, "true");
             }
     } else if (std.mem.startsWith(u8, section.?, "backends.")) {
         // Backend configuration

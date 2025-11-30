@@ -400,4 +400,18 @@ pub fn build(b: *std.Build) void {
     const run_graceful_reload_tests = b.addRunArtifact(graceful_reload_tests);
     const graceful_reload_test_step = b.step("test-graceful-reload", "Run graceful reload tests");
     graceful_reload_test_step.dependOn(&run_graceful_reload_tests.step);
+
+    // Metrics tests
+    const metrics_tests = b.addTest(.{
+        .root_module = b.addModule("metrics_root", .{
+            .root_source_file = b.path("tests/metrics_test.zig"),
+            .target = target,
+        }),
+    });
+
+    metrics_tests.linkLibC();
+
+    const run_metrics_tests = b.addRunArtifact(metrics_tests);
+    const metrics_test_step = b.step("test-metrics", "Run metrics tests");
+    metrics_test_step.dependOn(&run_metrics_tests.step);
 }

@@ -10,6 +10,7 @@ const config = @import("config.zig");
 const load_balancer = @import("load_balancer/load_balancer.zig");
 const rate_limit = @import("rate_limit.zig");
 const graceful_reload = @import("graceful_reload.zig");
+const metrics = @import("metrics.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -104,10 +105,26 @@ pub fn main() !void {
         break :blk null;
     };
     defer if (reload_manager) |*rm| rm.deinit();
+    defer if (metrics_server) |*ms| ms.stop();
+    defer if (blitz_metrics) |*bm| bm.deinit();
 
     // Set reload callback
     if (reload_manager) |*rm| {
         rm.setReloadCallback(&reloadCallback);
+    }
+
+    // Initialize metrics if enabled
+    var blitz_metrics: ?metrics.BlitzMetrics = null;
+    var metrics_server: ?metrics.MetricsServer = null;
+    if (cfg.metrics.enabled) {
+        blitz_metrics = try metrics.BlitzMetrics.init(allocator);
+        metrics_server = metrics.MetricsServer.init(allocator, &blitz_metrics.?.registry);
+
+        if (cfg.metrics.prometheus_enabled) {
+            try metrics_server.?.start(cfg.metrics.port);
+            std.debug.print("Metrics server started on port {}\n", .{cfg.metrics.port});
+            std.debug.print("Prometheus metrics: http://localhost:{}/metrics\n", .{cfg.metrics.port});
+        }
     }
 
     // Main server loop with reload support
@@ -119,7 +136,7 @@ pub fn main() !void {
             &current_config;
 
         if (cfg.mode == .load_balancer) {
-            try runLoadBalancer(allocator, cfg);
+            try runLoadBalancer(allocator, cfg, if (blitz_metrics) |*bm| bm else null);
         } else {
             try runOriginServer(allocator, port);
         }
@@ -171,7 +188,7 @@ fn reloadCallback(new_config: *config.Config) anyerror!void {
 }
 
 /// Run load balancer server
-fn runLoadBalancer(allocator: std.mem.Allocator, cfg: *const config.Config) !void {
+fn runLoadBalancer(allocator: std.mem.Allocator, cfg: *const config.Config, blitz_metrics: ?*metrics.BlitzMetrics) !void {
     std.debug.print("Starting QUIC/HTTP3 Load Balancer\n", .{});
     std.debug.print("Listen: {s}:{d}\n", .{cfg.listen_addr, cfg.listen_port});
     std.debug.print("Backends: {}\n", .{cfg.backends.items.len});

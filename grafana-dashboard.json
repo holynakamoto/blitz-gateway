@@ -1,0 +1,237 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Blitz Edge Gateway - Production Dashboard",
+    "description": "Comprehensive monitoring dashboard for Blitz QUIC/HTTP3 edge gateway",
+    "tags": ["blitz", "quic", "http3", "edge", "gateway"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "HTTP Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_http_requests_total[5m])",
+            "legendFormat": "HTTP Requests/sec"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "HTTP Response Status Codes",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_http_responses_2xx_total[5m])",
+            "legendFormat": "2xx Success"
+          },
+          {
+            "expr": "rate(blitz_http_responses_4xx_total[5m])",
+            "legendFormat": "4xx Client Error"
+          },
+          {
+            "expr": "rate(blitz_http_responses_5xx_total[5m])",
+            "legendFormat": "5xx Server Error"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+      },
+      {
+        "id": 3,
+        "title": "HTTP Request Duration (95th percentile)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(blitz_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(blitz_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "yAxes": [
+          { "unit": "seconds", "min": 0 },
+          { "unit": "short" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+      },
+      {
+        "id": 4,
+        "title": "Active Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "blitz_active_connections",
+            "legendFormat": "Active Connections"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+      },
+      {
+        "id": 5,
+        "title": "QUIC Handshake Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_quic_handshakes_total[5m])",
+            "legendFormat": "Handshakes/sec"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+      },
+      {
+        "id": 6,
+        "title": "QUIC Handshake Duration (95th percentile)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(blitz_quic_handshake_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          }
+        ],
+        "yAxes": [
+          { "unit": "seconds", "min": 0 },
+          { "unit": "short" }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
+      },
+      {
+        "id": 7,
+        "title": "Rate Limiting - Dropped Requests",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_rate_limit_requests_dropped[5m])",
+            "legendFormat": "Dropped/sec"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 }
+      },
+      {
+        "id": 8,
+        "title": "Rate Limiting - Active IPs",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "blitz_rate_limit_active_ips",
+            "legendFormat": "Tracked IPs"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 }
+      },
+      {
+        "id": 9,
+        "title": "Load Balancer - Backend Health",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "blitz_lb_backend_*_healthy",
+            "legendFormat": "{{backend}}"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Value" },
+              "properties": [
+                {
+                  "id": "mappings",
+                  "value": [
+                    { "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } }, "type": "value" }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 }
+      },
+      {
+        "id": 10,
+        "title": "Load Balancer - Request Distribution",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(blitz_lb_requests_backend_*_total[5m])",
+            "legendFormat": "{{backend}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 }
+      },
+      {
+        "id": 11,
+        "title": "System Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up",
+            "legendFormat": "Blitz Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } }, "type": "value" }
+            ]
+          }
+        },
+        "gridPos": { "h": 4, "w": 8, "x": 0, "y": 40 }
+      },
+      {
+        "id": 12,
+        "title": "Total HTTP Requests",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "blitz_http_requests_total",
+            "legendFormat": "Total Requests"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 8, "x": 8, "y": 40 }
+      },
+      {
+        "id": 13,
+        "title": "Error Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(blitz_http_responses_5xx_total[5m]) / rate(blitz_http_requests_total[5m]) * 100",
+            "legendFormat": "Error Rate %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 1 },
+                { "color": "red", "value": 5 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 4, "w": 8, "x": 16, "y": 40 }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": []
+    },
+    "annotations": {
+      "list": []
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 0,
+    "links": []
+  }
+}

@@ -1,0 +1,12 @@
+# Grafana dashboard provisioning for Blitz
+
+apiVersion: 1
+
+providers:
+  - name: 'blitz'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

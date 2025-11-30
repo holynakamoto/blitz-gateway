@@ -37,9 +37,10 @@ Vagrant.configure("2") do |config|
   config.vm.provider "utm" do |utm|
     utm.memory = 16384  # 16GB RAM
     utm.cpus = 8        # 8 cores
-    utm.arch = "x86_64" # x86_64 architecture
+    utm.arch = "x86_64" # x86_64 architecture (emulated on Apple Silicon)
     utm.machine_type = "pc"  # PC machine type
-    utm.accel = "tcg"   # TCG acceleration (or "hvf" for Apple Silicon)
+    utm.accel = "hvf"   # HVF acceleration for Apple Silicon (faster than TCG)
+    utm.cpu = "host"    # Use host CPU features
   end
 
   # Network configuration

@@ -1,0 +1,243 @@
+# Code Quality Pipeline for Blitz QUIC/HTTP3 Server
+# Runs linting, formatting, and code quality checks
+
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # Format and lint Zig code
+  zig-quality:
+    name: Zig Code Quality
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+
+    - name: Check Zig formatting
+      run: |
+        echo "Checking Zig code formatting..."
+        if ! zig fmt --check src/ build.zig; then
+          echo "❌ Zig code is not properly formatted"
+          echo "Run 'zig fmt src/ build.zig' to fix formatting"
+          exit 1
+        else
+          echo "✅ Zig code is properly formatted"
+        fi
+
+    - name: Build with strict warnings
+      run: |
+        echo "Building with strict warning settings..."
+        # Build with maximum warnings enabled
+        zig build -Doptimize=Debug 2>&1 | tee build.log
+
+        # Check for warnings
+        if grep -i "warning" build.log; then
+          echo "⚠️ Build warnings found (review above)"
+        else
+          echo "✅ No build warnings"
+        fi
+
+    - name: Run clippy-like checks (if available)
+      run: |
+        # Zig doesn't have clippy, but we can do basic checks
+        echo "Running basic code quality checks..."
+
+        # Check for TODO comments (not necessarily bad, but worth noting)
+        TODO_COUNT=$(grep -r "TODO\|FIXME\|XXX" src/ --include="*.zig" | wc -l)
+        echo "Found $TODO_COUNT TODO/FIXME comments"
+
+        # Check for very long lines
+        LONG_LINES=$(find src/ -name "*.zig" -exec grep -l '^.\{120,\}' {} \; | wc -l)
+        if [ "$LONG_LINES" -gt 0 ]; then
+          echo "⚠️ Found $LONG_LINES files with lines longer than 120 characters"
+        else
+          echo "✅ No excessively long lines found"
+        fi
+
+  # Lint C code
+  c-quality:
+    name: C Code Quality
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format-14
+
+    - name: Check C code formatting
+      run: |
+        echo "Checking C code formatting..."
+        find src/ -name "*.c" -o -name "*.h" | xargs -I {} sh -c '
+          if clang-format-14 --dry-run --Werror {} > /dev/null 2>&1; then
+            echo "✅ {} is properly formatted"
+          else
+            echo "❌ {} is not properly formatted"
+            echo "Run: clang-format-14 -i {}"
+            exit 1
+          fi
+        '
+
+    - name: Build C code
+      run: |
+        echo "Building C code components..."
+        # Try to compile the C files to check for syntax errors
+        gcc -c src/tls/openssl_wrapper.c -I/usr/include -I/usr/include/x86_64-linux-gnu -fsyntax-only || {
+          echo "❌ C code compilation failed"
+          exit 1
+        }
+
+        gcc -c src/bind_wrapper.c -fsyntax-only || {
+          echo "❌ C wrapper compilation failed"
+          exit 1
+        }
+
+        echo "✅ C code compiles successfully"
+
+  # Documentation quality checks
+  docs-quality:
+    name: Documentation Quality
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check documentation links
+      run: |
+        echo "Checking documentation links..."
+
+        # Find all markdown files
+        find docs/ README.md -name "*.md" | while read -r file; do
+          echo "Checking $file..."
+
+          # Extract links and check if they exist (basic check)
+          grep -o '\[.*\]([^)]*)' "$file" | while read -r link; do
+            # Extract URL/path
+            url=$(echo "$link" | sed 's/.*](\([^)]*\)).*/\1/')
+
+            # Skip external URLs and anchors
+            if echo "$url" | grep -q '^http'; then
+              continue
+            fi
+
+            # Remove anchor parts
+            path=$(echo "$url" | cut -d'#' -f1)
+
+            # Check if relative path exists
+            if [ -n "$path" ] && [ "$path" != "." ]; then
+              if [ ! -f "$(dirname "$file")/$path" ] && [ ! -d "$(dirname "$file")/$path" ]; then
+                echo "⚠️ Broken link in $file: $url"
+              fi
+            fi
+          done
+        done
+
+        echo "✅ Link checking completed"
+
+    - name: Validate documentation structure
+      run: |
+        echo "Validating documentation structure..."
+
+        # Check for required sections in main docs
+        if [ ! -f "README.md" ]; then
+          echo "❌ README.md missing"
+          exit 1
+        fi
+
+        if [ ! -f "docs/CONTRIBUTING.md" ]; then
+          echo "❌ docs/CONTRIBUTING.md missing"
+          exit 1
+        fi
+
+        # Check for empty documentation files
+        find docs/ -name "*.md" -exec sh -c '
+          if [ ! -s "$1" ]; then
+            echo "⚠️ Empty documentation file: $1"
+          fi
+        ' _ {} \;
+
+        echo "✅ Documentation structure validated"
+
+  # Dependency analysis
+  dependencies:
+    name: Dependency Analysis
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Analyze dependencies
+      run: |
+        echo "Analyzing project dependencies..."
+
+        # Check Zig dependencies
+        echo "Zig dependencies:"
+        grep -r "@import\|import" src/ --include="*.zig" | head -10
+
+        # Check C dependencies
+        echo "C dependencies:"
+        grep -r "#include" src/ --include="*.c" --include="*.h" | grep -v "<" | head -10
+
+        # Check for unused imports (basic check)
+        echo "Checking for potential issues..."
+        find src/ -name "*.zig" -exec sh -c '
+          file="$1"
+          # Count imports vs usage (very basic check)
+          import_count=$(grep -c "@import" "$file")
+          if [ "$import_count" -gt 10 ]; then
+            echo "⚠️ $file has $import_count imports (review for consolidation)"
+          fi
+        ' _ {} \;
+
+        echo "✅ Dependency analysis completed"
+
+  # License and copyright checks
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check license headers
+      run: |
+        echo "Checking license compliance..."
+
+        # Check that main license file exists
+        if [ ! -f "LICENSE" ]; then
+          echo "❌ LICENSE file missing"
+          exit 1
+        fi
+
+        # Check license in source files (basic check)
+        LICENSE_COUNT=$(find src/ -name "*.zig" -exec grep -l "Copyright\|License" {} \; | wc -l)
+        TOTAL_FILES=$(find src/ -name "*.zig" | wc -l)
+
+        echo "Files with license headers: $LICENSE_COUNT / $TOTAL_FILES"
+
+        if [ "$LICENSE_COUNT" -lt "$TOTAL_FILES" ]; then
+          echo "⚠️ Some files may be missing license headers"
+        else
+          echo "✅ License headers look good"
+        fi
+
+        # Check license compatibility
+        if head -20 LICENSE | grep -i "mit\|apache\|bsd"; then
+          echo "✅ OSI-approved license detected"
+        else
+          echo "⚠️ License may not be OSI-approved"
+        fi

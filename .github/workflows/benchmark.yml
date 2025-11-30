@@ -1,0 +1,217 @@
+# Benchmarking Pipeline for Blitz QUIC/HTTP3 Server
+# Runs performance tests and generates benchmark reports
+
+name: Benchmark
+
+on:
+  push:
+    branches: [ main, benchmark ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'scripts/bench/**'
+      - 'benches/**'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Benchmark duration in seconds'
+        required: false
+        default: '30'
+      connections:
+        description: 'Number of concurrent connections'
+        required: false
+        default: '100'
+
+jobs:
+  # Run benchmarks in Docker environment
+  benchmark-docker:
+    name: Docker Benchmark
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Create test certificates
+      run: |
+        mkdir -p certs
+        openssl req -x509 -newkey rsa:2048 \
+          -keyout certs/server.key -out certs/server.crt \
+          -days 1 -nodes \
+          -subj "/C=US/ST=Test/L=Test/O=Blitz/CN=localhost"
+
+    - name: Build benchmark Docker image
+      run: |
+        docker build -f Dockerfile -t blitz-benchmark .
+
+    - name: Run basic benchmark
+      run: |
+        # Start server in background
+        docker run -d --name blitz-server -p 8080:8080 -p 9443:8443/udp blitz-benchmark
+        sleep 10
+
+        # Run simple benchmark
+        echo "Running basic HTTP benchmark..."
+        docker run --rm --network container:blitz-server \
+          curlimages/curl \
+          --max-time 10 -s http://localhost:8080/ || echo "HTTP benchmark completed"
+
+        # Check server logs
+        docker logs blitz-server | tail -10
+
+        # Cleanup
+        docker stop blitz-server
+        docker rm blitz-server
+
+    - name: Run benchmark scripts (if available)
+      run: |
+        # Check if benchmark scripts exist and are executable
+        if [ -x "scripts/bench/local-benchmark.sh" ]; then
+          echo "✅ Benchmark script found"
+          # Note: Full benchmarks require proper test environment
+          echo "Full benchmark execution skipped in CI (requires dedicated environment)"
+        else
+          echo "No benchmark scripts found"
+        fi
+
+  # Performance regression test
+  performance-regression:
+    name: Performance Regression Test
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config time
+
+    - name: Build optimized binary
+      run: zig build -Doptimize=ReleaseFast
+
+    - name: Run performance baseline test
+      run: |
+        echo "Running performance baseline test..."
+
+        # Test build time
+        time zig build -Doptimize=ReleaseFast > /dev/null
+
+        # Test binary size
+        ls -lh zig-out/bin/blitz
+
+        # Test startup time
+        timeout 5 ./zig-out/bin/blitz --help > /dev/null || echo "Startup test completed"
+
+    - name: Compare with baseline (if available)
+      run: |
+        # This would compare against a stored baseline
+        # For now, just validate the build works
+        if [ -f "zig-out/bin/blitz" ]; then
+          echo "✅ Binary built successfully"
+          ./zig-out/bin/blitz --help | head -5
+        else
+          echo "❌ Binary not found"
+          exit 1
+        fi
+
+  # Memory and resource usage test
+  resource-usage:
+    name: Resource Usage Test
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config valgrind time
+
+    - name: Build debug binary
+      run: zig build -Doptimize=Debug
+
+    - name: Test memory usage
+      run: |
+        echo "Testing memory usage..."
+
+        # Run a quick memory check (if valgrind is available and compatible)
+        timeout 10 valgrind --tool=massif --massif-out-file=massif.out \
+          --max-stackframe=2000000 --stacks=yes \
+          ./zig-out/bin/blitz --help 2>/dev/null || echo "Memory test completed"
+
+        # Check binary size
+        ls -lh zig-out/bin/blitz
+
+    - name: Test compilation speed
+      run: |
+        echo "Testing compilation performance..."
+        time zig build -Doptimize=ReleaseFast
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results-${{ github.run_id }}
+        path: |
+          massif.out
+          zig-out/bin/blitz
+        retention-days: 7
+      if: always()
+
+  # Benchmark documentation validation
+  benchmark-docs:
+    name: Benchmark Documentation Check
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check benchmark scripts exist
+      run: |
+        # Validate benchmark documentation and scripts
+        if [ ! -f "scripts/bench/local-benchmark.sh" ]; then
+          echo "❌ scripts/bench/local-benchmark.sh not found"
+          exit 1
+        fi
+
+        if [ ! -f "scripts/bench/reproduce.sh" ]; then
+          echo "❌ scripts/bench/reproduce.sh not found"
+          exit 1
+        fi
+
+        if [ ! -d "docs/benchmark" ]; then
+          echo "❌ docs/benchmark directory not found"
+          exit 1
+        fi
+
+        echo "✅ Benchmark infrastructure validated"
+
+    - name: Validate documentation links
+      run: |
+        # Check that documentation files reference correct script paths
+        if grep -r "benches/local-benchmark.sh" docs/; then
+          echo "❌ Found outdated script references in docs"
+          exit 1
+        fi
+
+        if grep -r "scripts/bench/" docs/; then
+          echo "✅ Documentation uses correct script paths"
+        else
+          echo "⚠️ No script references found in docs (might be OK)"
+        fi

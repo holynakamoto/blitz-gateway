@@ -1,0 +1,184 @@
+# Dependency Management Pipeline for Blitz QUIC/HTTP3 Server
+# Checks for dependency updates and security vulnerabilities
+
+name: Dependencies
+
+on:
+  schedule:
+    # Check for updates daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      check_updates:
+        description: 'Check for dependency updates'
+        required: false
+        default: 'true'
+
+jobs:
+  # Check for Zig dependency updates
+  zig-updates:
+    name: Check Zig Updates
+    runs-on: ubuntu-22.04
+    outputs:
+      zig-latest: ${{ steps.check-zig.outputs.latest }}
+      zig-current: ${{ steps.check-zig.outputs.current }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check Zig version
+      id: check-zig
+      run: |
+        # Get current Zig version from workflow files
+        CURRENT_VERSION=$(grep -h "version:" .github/workflows/*.yml | head -1 | sed 's/.*version: *//' | tr -d "'\"")
+        echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+        # Get latest Zig release from GitHub API
+        LATEST_VERSION=$(curl -s https://api.github.com/repos/ziglang/zig/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+        echo "latest=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+        echo "Current Zig version: $CURRENT_VERSION"
+        echo "Latest Zig version: $LATEST_VERSION"
+
+        if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
+          echo "🚨 Zig update available: $CURRENT_VERSION → $LATEST_VERSION"
+          echo "update_available=true" >> $GITHUB_OUTPUT
+        else
+          echo "✅ Zig is up to date"
+          echo "update_available=false" >> $GITHUB_OUTPUT
+        fi
+
+  # Check picotls submodule for updates
+  picotls-updates:
+    name: Check PicoTLS Updates
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Check PicoTLS version
+      run: |
+        cd deps/picotls
+        CURRENT_COMMIT=$(git rev-parse HEAD)
+        LATEST_COMMIT=$(git rev-parse origin/main 2>/dev/null || git rev-parse origin/master)
+
+        echo "Current PicoTLS commit: $CURRENT_COMMIT"
+        echo "Latest PicoTLS commit: $LATEST_COMMIT"
+
+        if [ "$CURRENT_COMMIT" != "$LATEST_COMMIT" ]; then
+          echo "🚨 PicoTLS update available"
+          git log --oneline $CURRENT_COMMIT..$LATEST_COMMIT | head -5
+        else
+          echo "✅ PicoTLS is up to date"
+        fi
+
+  # Security audit for dependencies
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install security audit tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl jq
+
+    - name: Check for known vulnerabilities in OpenSSL
+      run: |
+        # Check OpenSSL version for known CVEs
+        OPENSSL_VERSION=$(openssl version 2>/dev/null | head -1 || echo "OpenSSL not found")
+        echo "OpenSSL version: $OPENSSL_VERSION"
+
+        # This is a basic check - in production, use dedicated security scanners
+        if echo "$OPENSSL_VERSION" | grep -q "1.1.1\|3."; then
+          echo "✅ OpenSSL version looks reasonable"
+        else
+          echo "⚠️ OpenSSL version may be outdated"
+        fi
+
+    - name: Check for security issues in code
+      run: |
+        # Basic security checks
+        echo "Checking for potential security issues..."
+
+        # Check for unsafe code patterns (basic)
+        if grep -r "unsafe\|dangerous\|insecure" src/ --include="*.zig" | grep -v "test\|comment"; then
+          echo "⚠️ Found potentially unsafe code patterns"
+        else
+          echo "✅ No obvious unsafe code patterns found"
+        fi
+
+        # Check for hardcoded secrets (basic)
+        if grep -r "password\|secret\|key.*=.*[a-zA-Z0-9]\{20,\}" src/ --include="*.zig" | grep -v "test\|example"; then
+          echo "⚠️ Found potential hardcoded secrets"
+        else
+          echo "✅ No obvious hardcoded secrets found"
+        fi
+
+  # Update dependencies (manual trigger only)
+  update-deps:
+    name: Update Dependencies
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update PicoTLS submodule
+      run: |
+        cd deps/picotls
+        git fetch origin
+        git checkout main 2>/dev/null || git checkout master
+        git pull origin main 2>/dev/null || git pull origin master
+
+    - name: Test build after update
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config
+
+    - name: Test build
+      run: zig build test
+
+    - name: Create pull request for dependency updates
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "⬆️ Update dependencies
+
+- Updated PicoTLS submodule to latest version
+- Tested build compatibility
+- Ran basic test suite"
+        title: "⬆️ Dependency Updates"
+        body: |
+          ## Dependency Updates
+
+          This PR updates project dependencies to their latest versions:
+
+          - **PicoTLS**: Updated submodule to latest commit
+          - **Tested**: Build and basic tests pass
+
+          ### Checklist
+          - [x] Dependencies updated
+          - [x] Build tested
+          - [x] Basic tests pass
+          - [ ] Full test suite passes
+          - [ ] Benchmarks run (if applicable)
+
+          Please review and test thoroughly before merging.
+        branch: deps/update-${{ github.run_number }}
+        delete-branch: true

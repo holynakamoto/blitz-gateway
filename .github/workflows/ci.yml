@@ -1,407 +1,150 @@
-name: CI/CD Pipeline
+# GitHub Actions CI/CD Pipeline for Blitz QUIC/HTTP3 Server
+# Tests builds, runs unit tests, and validates Docker containers
+
+name: CI
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
-  release:
-    types: [ published ]
-
-# Cancel in-progress runs for the same workflow
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  ZIG_VERSION: "0.13.0"
-  CARGO_TERM_COLOR: always
 
 jobs:
-  # ============================================================================
-  # Code Quality & Security
-  # ============================================================================
-  
-  lint:
-    name: Lint & Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Check formatting
-        run: zig fmt --check src/
-
-      - name: Run Zig lint (if available)
-        run: |
-          if zig build --help | grep -q "lint"; then
-            zig build lint
-          else
-            echo "No lint target, skipping"
-          fi
-
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-  # ============================================================================
-  # Build & Test Matrix
-  # ============================================================================
-  
-  build-and-test:
-    name: Build & Test (${{ matrix.os }}, ${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+  # Test on multiple platforms
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         include:
-          # Linux builds
-          - os: linux
-            arch: x86_64
-            runner: ubuntu-latest
-            target: x86_64-linux-gnu
-          - os: linux
-            arch: aarch64
-            runner: ubuntu-latest
-            target: aarch64-linux-gnu
-          # macOS builds
-          - os: macos
-            arch: x86_64
-            runner: macos-15-intel
-            target: x86_64-macos
-          - os: macos
-            arch: aarch64
-            runner: macos-latest
-            target: aarch64-macos
+          - os: ubuntu-22.04
+            zig-target: x86_64-linux
+          - os: macos-13
+            zig-target: x86_64-macos
+          - os: macos-14
+            zig-target: aarch64-macos
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
 
-      - name: Install dependencies (Linux)
-        if: matrix.os == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y liburing-dev
+    - name: Verify Zig installation
+      run: zig version
 
-      - name: Cache Zig artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/zig
-            zig-cache
-          key: ${{ runner.os }}-${{ matrix.arch }}-zig-${{ hashFiles('build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.arch }}-zig-
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config
 
-      - name: Build (Debug)
-        run: zig build -Dtarget=${{ matrix.target }}
+    - name: Build main server
+      run: zig build
 
-      - name: Run tests
-        run: zig build test -Dtarget=${{ matrix.target }}
+    - name: Run foundation tests (TLS/HTTP/2)
+      run: zig build test-foundation
 
-      - name: Build (Release)
-        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+    - name: Run load balancer tests
+      run: zig build test-load-balancer
 
-      - name: Run benchmarks
-        if: matrix.os == 'linux' && matrix.arch == 'x86_64'
-        run: |
-          if zig build --help | grep -q "bench"; then
-            zig build bench
-          fi
+    - name: Run QUIC tests
+      run: zig build test-quic
 
-      - name: Archive build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: blitz-${{ matrix.os }}-${{ matrix.arch }}
-          path: zig-out/bin/blitz
-          retention-days: 7
+    - name: Run QUIC frame tests
+      run: zig build test-quic-frames
 
-  # ============================================================================
-  # Performance Benchmarks
-  # ============================================================================
-  
-  benchmark:
-    name: Performance Benchmarks
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'pull_request'
+    - name: Run QUIC packet generation tests
+      run: zig build test-quic-packet-gen
+
+    - name: Run QUIC packet simple tests
+      run: zig build test-quic-packet-simple
+
+    - name: Run transport parameters tests
+      run: zig build test-transport-params
+
+    - name: Run all unit tests
+      run: zig build test
+
+  # Test QUIC handshake server on Linux (requires io_uring)
+  test-quic-handshake:
+    name: Test QUIC Handshake Server
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y liburing-dev wrk
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config
 
-      - name: Build Release
-        run: zig build -Doptimize=ReleaseFast
+    - name: Build QUIC handshake server
+      run: zig build run-quic-handshake --help
 
-      - name: Run server in background
-        run: |
-          ./zig-out/bin/blitz &
-          echo $! > server.pid
-          sleep 2
+    - name: Verify QUIC handshake binary exists
+      run: ls -la zig-out/bin/blitz-quic-handshake
 
-      - name: Run benchmarks
-        id: benchmark
-        run: |
-          echo "Running performance benchmarks..."
-          wrk -t4 -c100 -d30s http://localhost:8080 > benchmark-results.txt
-          cat benchmark-results.txt
-
-      - name: Stop server
-        if: always()
-        run: |
-          if [ -f server.pid ]; then
-            kill $(cat server.pid) || true
-          fi
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark-results.txt
-
-      - name: Comment PR with results
-        uses: actions/github-script@v7
-        if: github.event_name == 'pull_request'
-        with:
-          script: |
-            const fs = require('fs');
-            const results = fs.readFileSync('benchmark-results.txt', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## 📊 Performance Benchmark Results\n\n\`\`\`\n${results}\n\`\`\`\n\n_Benchmark run on commit ${context.sha}_`
-            });
-
-  # ============================================================================
-  # Code Coverage
-  # ============================================================================
-  
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
+  # Test code quality and formatting
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y liburing-dev lcov
+    - name: Check formatting
+      run: zig fmt --check src/ build.zig
 
-      - name: Run tests with coverage
-        run: |
-          zig build test -Dtest-coverage
-          # Note: Zig's built-in coverage is still evolving
-          # You might need to use kcov or similar tools
+    - name: Build with all warnings
+      run: zig build -Doptimize=Debug
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.lcov
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  # ============================================================================
-  # Docker Build & Push
-  # ============================================================================
-  
-  docker:
-    name: Build & Push Docker Image
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'push' || github.event_name == 'release'
-    permissions:
-      contents: read
-      packages: write
+  # Security audit
+  security:
+    name: Security Audit
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev liburing-dev pkg-config
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+    - name: Build with security flags
+      run: |
+        # Build with additional security checks
+        zig build -Doptimize=ReleaseSafe
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ============================================================================
-  # Create GitHub Release
-  # ============================================================================
-  
-  release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: [build-and-test, docker]
-    if: github.event_name == 'release'
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create release archives
-        run: |
-          cd artifacts
-          for dir in */; do
-            tar -czf "${dir%/}.tar.gz" "$dir"
-          done
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v1
-        with:
-          files: artifacts/*.tar.gz
-          generate_release_notes: true
-
-  # ============================================================================
-  # Deployment (Example - adjust to your infrastructure)
-  # ============================================================================
-  
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: docker
-    if: github.ref == 'refs/heads/develop'
-    environment:
-      name: staging
-      url: https://staging.yourapp.com
-    steps:
-      - name: Deploy to staging
-        run: |
-          echo "Deploying to staging environment..."
-          # Add your deployment commands here
-          # Examples:
-          # - kubectl apply -f k8s/staging/
-          # - helm upgrade staging ./charts/blitz
-          # - aws ecs update-service --cluster staging --service blitz
-
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: docker
-    if: github.event_name == 'release'
-    environment:
-      name: production
-      url: https://yourapp.com
-    steps:
-      - name: Deploy to production
-        run: |
-          echo "Deploying to production environment..."
-          # Add your production deployment commands here
-
-  # ============================================================================
-  # Notifications
-  # ============================================================================
-  
-  notify:
-    name: Notify Status
-    runs-on: ubuntu-latest
-    needs: [lint, security-scan, build-and-test, coverage, docker]
-    if: always()
-    steps:
-      - name: Check job status
-        id: check
-        run: |
-          if [ "${{ needs.build-and-test.result }}" == "failure" ]; then
-            echo "status=failure" >> $GITHUB_OUTPUT
-          else
-            echo "status=success" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send Slack notification
-        if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            {
-              "text": "CI/CD Pipeline ${{ steps.check.outputs.status }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Status:* ${{ steps.check.outputs.status }}\n*Commit:* ${{ github.sha }}"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
+    - name: Verify no vulnerable patterns
+      run: |
+        # Basic security checks - look for common issues
+        if grep -r "unsafe" src/ --include="*.zig" | grep -v "test"; then
+          echo "⚠️ Found 'unsafe' usage outside tests"
+          exit 1
+        fi

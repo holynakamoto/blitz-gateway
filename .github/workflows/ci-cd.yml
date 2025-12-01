@@ -21,6 +21,67 @@ concurrency:
 
 jobs:
   # ============================================================================
+  # LIGHTWEIGHT BUILD (for PRs - free tier friendly)
+  # ============================================================================
+  build-pr:
+    name: Build (PR - Linux x86_64)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-local-cache
+      ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM to reduce RAM
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify submodules
+        run: |
+          if [ ! -f deps/picotls/include/picotls.h ]; then
+            echo "Submodules not initialized, initializing..."
+            git submodule update --init --recursive
+          fi
+          ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            liburing-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      - name: Cache Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/zig
+            zig-cache
+          key: pr-build-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            pr-build-
+
+      - name: Build blitz-quic
+        run: |
+          zig build run-quic -Doptimize=ReleaseFast
+          ls -lah zig-out/bin/blitz-quic
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-quic-linux-x86_64
+          path: zig-out/bin/blitz-quic
+          retention-days: 7
+          if-no-files-found: error
+
+  # ============================================================================
   # STATIC ANALYSIS & LINTING
   # ============================================================================
   lint:
@@ -94,11 +155,12 @@ jobs:
           # Add custom vulnerability checking logic here
 
   # ============================================================================
-  # BUILD & TEST
+  # BUILD & TEST (Full matrix - runs on push to main/develop, not PRs)
   # ============================================================================
   build:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    if: github.event_name != 'pull_request'  # Skip on PRs, use build-pr instead
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
       ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-local-cache
@@ -166,6 +228,7 @@ jobs:
     name: Test Suite
     runs-on: ubuntu-latest
     needs: [lint]
+    if: github.event_name != 'pull_request' || needs.lint.result == 'success'
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
       ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-local-cache

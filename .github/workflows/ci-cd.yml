@@ -288,6 +288,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
@@ -324,7 +326,9 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_SUMMARY: "false"
         with:
           context: .
           file: ./Dockerfile

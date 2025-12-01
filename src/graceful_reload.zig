@@ -32,11 +32,7 @@ pub const GracefulReload = struct {
     /// Initialize graceful reload manager
     pub fn init(allocator: std.mem.Allocator, initial_config: config.Config) !GracefulReload {
         // Create signal pipe
-        var pipe_fds: [2]std.posix.fd_t = undefined;
-        const rc = std.posix.pipe2(&pipe_fds, std.posix.O.CLOEXEC);
-        if (rc != 0) {
-            return error.PipeCreationFailed;
-        }
+        const pipe_fds = try std.posix.pipe2(std.posix.O.CLOEXEC);
 
         const gr = GracefulReload{
             .allocator = allocator,

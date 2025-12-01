@@ -11,6 +11,10 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    ignore:
+      # Ignore major version bumps for actions/checkout - v4 works fine
+      - dependency-name: "actions/checkout"
+        update-types: ["version-update:semver-major"]
 
   # Enable version updates for Docker
   - package-ecosystem: "docker"

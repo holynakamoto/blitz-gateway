@@ -213,9 +213,7 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                 // Resubmit recvfrom for next packet
                 const next_buf = buffer_pool.acquire() orelse {
                     // Pool exhausted - reuse this buffer
-                    var next_client_addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in);
-                    var next_client_addr_len: c.socklen_t = @sizeOf(c.struct_sockaddr_in);
-
+                    // Use the buffer's own client_addr fields (heap-allocated, not stack)
                     const sqe_opt = getSqe(ring);
                     if (sqe_opt == null) {
                         buffer_pool.release(buf);
@@ -223,14 +221,11 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                     }
                     const sqe = sqe_opt.?;
 
-                    udp.prepRecvFrom(sqe, quic_server.udp_fd, &buf.data, &next_client_addr, &next_client_addr_len);
+                    udp.prepRecvFrom(sqe, quic_server.udp_fd, &buf.data, &buf.client_addr, &buf.client_addr_len);
                     setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, decoded.buffer_idx));
                     _ = c.io_uring_submit(ring);
                     continue;
                 };
-
-                var next_client_addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in);
-                var next_client_addr_len: c.socklen_t = @sizeOf(c.struct_sockaddr_in);
 
                 const sqe_opt = getSqe(ring);
                 if (sqe_opt == null) {
@@ -243,7 +238,8 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                 const buffer_idx = @intFromPtr(next_buf) - @intFromPtr(buffer_pool.buffers.ptr);
                 const idx = buffer_idx / @sizeOf(UdpBuffer);
 
-                udp.prepRecvFrom(sqe, quic_server.udp_fd, &next_buf.data, &next_client_addr, &next_client_addr_len);
+                // Use the buffer's own client_addr fields (heap-allocated, not stack)
+                udp.prepRecvFrom(sqe, quic_server.udp_fd, &next_buf.data, &next_buf.client_addr, &next_buf.client_addr_len);
                 setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, idx));
                 _ = c.io_uring_submit(ring);
 

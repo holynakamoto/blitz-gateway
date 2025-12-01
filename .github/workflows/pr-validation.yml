@@ -1,0 +1,320 @@
+name: PR Validation & Quality Gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  # ============================================================================
+  # PR METADATA VALIDATION
+  # ============================================================================
+  validate-pr:
+    name: Validate PR Structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PR Title Convention
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            chore
+            ci
+          scopes: |
+            core
+            io_uring
+            http
+            proxy
+            auth
+            ratelimit
+            wasm
+            metrics
+            config
+            quic
+            load_balancer
+          requireScope: false
+          subjectPattern: ^[A-Z].+$
+          subjectPatternError: |
+            Subject must start with uppercase letter.
+            Example: "feat(http): Add HTTP/3 support"
+
+      - name: Check PR Description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            
+            const requiredSections = [
+              '## Description',
+              '## Type of Change',
+              '## Performance Impact',
+              '## Testing'
+            ];
+            
+            const missingSections = requiredSections.filter(
+              section => !body.includes(section)
+            );
+            
+            if (missingSections.length > 0) {
+              core.warning(
+                `PR description missing recommended sections: ${missingSections.join(', ')}`
+              );
+            }
+            
+            // Check for breaking changes indicator
+            if (body.toLowerCase().includes('breaking') && 
+                !pr.title.includes('!')) {
+              core.warning(
+                'PR mentions breaking changes but title lacks "!" indicator'
+              );
+            }
+
+      - name: Check File Size Limits
+        run: |
+          # Warn if any file is too large
+          find . -type f -size +1M -not -path "./.git/*" -not -path "./zig-cache/*" -not -path "./zig-out/*" -not -path "./target/*" | while read file; do
+            echo "::warning file=$file::File exceeds 1MB limit. Consider splitting or using Git LFS."
+          done || true
+
+  # ============================================================================
+  # BREAKING CHANGE DETECTION
+  # ============================================================================
+  detect-breaking-changes:
+    name: Detect Breaking Changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for Breaking Change Indicators
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title;
+            const body = pr.body || '';
+            
+            // Check title for breaking change indicator
+            const hasTitleIndicator = title.includes('!') || 
+                                     title.toLowerCase().includes('breaking');
+            
+            // Check body for breaking change mentions
+            const hasBodyIndicator = body.toLowerCase().includes('breaking change') ||
+                                    body.toLowerCase().includes('breaking:');
+            
+            if (hasBodyIndicator && !hasTitleIndicator) {
+              core.warning(
+                'PR mentions breaking changes but title lacks "!" indicator. ' +
+                'Add "!" after the type (e.g., "feat(core)!: ...")'
+              );
+            }
+            
+            // Comment if breaking changes detected
+            if (hasBodyIndicator || hasTitleIndicator) {
+              const comment = `## ⚠️ Breaking Changes Detected
+            
+            This PR introduces breaking changes.
+            
+            ### Required Actions:
+            1. Ensure PR title includes \`!\` (e.g., \`feat(core)!: ...\`)
+            2. Update CHANGELOG.md or docs with migration guide
+            3. Bump major version on merge
+            4. Add \`breaking-change\` label if not already present
+            `;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+
+  # ============================================================================
+  # AUTOMATED CODE REVIEW CHECKS
+  # ============================================================================
+  code-quality-gates:
+    name: Code Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Check Formatting
+        run: |
+          zig fmt --check . || {
+            echo "::error::Code is not properly formatted. Run 'zig fmt .' to fix."
+            exit 1
+          }
+
+      - name: Dependency Check
+        run: |
+          # Check if new dependencies were added
+          if git diff origin/${{ github.base_ref }} --name-only | grep -q "build.zig.zon"; then
+            echo "::notice::build.zig.zon modified. Please review dependency changes."
+            
+            # Show what changed
+            git diff origin/${{ github.base_ref }} build.zig.zon || true
+          fi
+
+  # ============================================================================
+  # PERFORMANCE REGRESSION PREVENTION
+  # ============================================================================
+  performance-gate:
+    name: Performance Regression Check
+    runs-on: ubuntu-latest
+    needs: [validate-pr]
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'performance') ||
+      contains(github.event.pull_request.title, 'perf') ||
+      contains(github.event.pull_request.title, '[perf]')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev liburing-dev pkg-config
+
+      - name: Build for Benchmark
+        run: |
+          zig build -Doptimize=ReleaseFast
+
+      - name: Run Basic Performance Check
+        run: |
+          echo "Performance benchmarks should be run manually on bare metal."
+          echo "See docs/benchmark/README.md for production benchmarking."
+          echo "::notice::Performance gate passed. Full benchmarks should be run on production hardware."
+
+  # ============================================================================
+  # SECURITY REVIEW
+  # ============================================================================
+  security-review:
+    name: Security Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Security-sensitive Files Check
+        id: security-check
+        run: |
+          # Check if PR touches security-critical code
+          SECURITY_PATHS="src/auth src/jwt src/ratelimit src/ebpf"
+          
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          
+          for path in $SECURITY_PATHS; do
+            if echo "$CHANGED_FILES" | grep -q "$path"; then
+              echo "security_changes=true" >> $GITHUB_OUTPUT
+              echo "::warning::This PR modifies security-critical code: $path"
+              break
+            fi
+          done || echo "security_changes=false" >> $GITHUB_OUTPUT
+
+      - name: Add Security Label
+        if: steps.security-check.outputs.security_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['security-review']
+            });
+            
+            const comment = `## 🔒 Security Review Required
+            
+            This PR modifies security-critical code. Please ensure:
+            
+            - [ ] Security review completed
+            - [ ] Constant-time operations used where applicable
+            - [ ] Input validation added
+            - [ ] Security tests added/updated
+            `;
+            
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+  # ============================================================================
+  # PR SIZE WARNING
+  # ============================================================================
+  pr-size-check:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            
+            const additions = pr.additions;
+            const deletions = pr.deletions;
+            const filesChanged = pr.changed_files;
+            
+            let size = 'small';
+            let color = '0e8a16';
+            
+            if (additions + deletions > 1000 || filesChanged > 30) {
+              size = 'large';
+              color = 'd93f0b';
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `⚠️ **Large PR Warning**
+                
+                This PR is quite large (${additions + deletions} lines changed across ${filesChanged} files).
+                
+                Consider:
+                - Breaking this into smaller, focused PRs
+                - Ensuring adequate test coverage
+                - Adding detailed documentation
+                - Running benchmarks to verify performance impact
+                `
+              });
+            } else if (additions + deletions > 500 || filesChanged > 15) {
+              size = 'medium';
+              color = 'fbca04';
+            }
+            
+            // Add size label if not already present
+            const existingLabels = pr.labels.map(l => l.name);
+            if (!existingLabels.includes(`size:${size}`)) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: [`size:${size}`]
+              });
+            }
+

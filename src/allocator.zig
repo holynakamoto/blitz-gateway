@@ -187,3 +187,4 @@ pub const BufferPool = struct {
     }
 };
 
+// Reviewed: 2025-12-01

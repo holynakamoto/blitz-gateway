@@ -350,3 +350,4 @@ pub const ConfigError = error{
     FileNotFound,
     ParseError,
 };
+// Reviewed: 2025-12-01

@@ -112,7 +112,7 @@ pub fn build(b: *std.Build) void {
 
     // Load balancer tests
     const load_balancer_root_module = b.addModule("load_balancer_root", .{
-        .root_source_file = b.path("tests/test.zig"),
+        .root_source_file = b.path("tests/unit/load_balancer/test.zig"),
         .target = target,
     });
     const load_balancer_tests = b.addTest(.{
@@ -362,7 +362,7 @@ pub fn build(b: *std.Build) void {
     // Rate limiting tests
     const rate_limit_tests = b.addTest(.{
         .root_module = b.addModule("rate_limit_root", .{
-            .root_source_file = b.path("tests/rate_limit_test.zig"),
+            .root_source_file = b.path("tests/unit/rate_limit/rate_limit_test.zig"),
             .target = target,
         }),
     });
@@ -376,7 +376,7 @@ pub fn build(b: *std.Build) void {
     // eBPF benchmark tests
     const ebpf_benchmark_tests = b.addTest(.{
         .root_module = b.addModule("ebpf_benchmark_root", .{
-            .root_source_file = b.path("tests/ebpf_benchmark_test.zig"),
+            .root_source_file = b.path("tests/unit/ebpf/ebpf_benchmark_test.zig"),
             .target = target,
         }),
     });
@@ -390,7 +390,7 @@ pub fn build(b: *std.Build) void {
     // Graceful reload tests
     const graceful_reload_tests = b.addTest(.{
         .root_module = b.addModule("graceful_reload_root", .{
-            .root_source_file = b.path("tests/graceful_reload_test.zig"),
+            .root_source_file = b.path("tests/integration/graceful_reload_test.zig"),
             .target = target,
         }),
     });
@@ -404,7 +404,7 @@ pub fn build(b: *std.Build) void {
     // Metrics tests
     const metrics_tests = b.addTest(.{
         .root_module = b.addModule("metrics_root", .{
-            .root_source_file = b.path("tests/metrics_test.zig"),
+            .root_source_file = b.path("tests/unit/metrics/metrics_test.zig"),
             .target = target,
         }),
     });
@@ -431,7 +431,7 @@ pub fn build(b: *std.Build) void {
     // WASM plugin tests
     const wasm_tests = b.addTest(.{
         .root_module = b.addModule("wasm_test", .{
-            .root_source_file = b.path("tests/wasm_test.zig"),
+            .root_source_file = b.path("tests/unit/wasm/wasm_test.zig"),
             .target = target,
         }),
     });

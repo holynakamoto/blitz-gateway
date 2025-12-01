@@ -206,5 +206,3 @@ pub const BackendPool = struct {
         };
     }
 };
-
-// Reviewed: 2025-12-01

@@ -163,5 +163,3 @@ pub const HealthChecker = struct {
         self.running = false;
     }
 };
-
-// Reviewed: 2025-12-01

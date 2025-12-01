@@ -139,4 +139,3 @@ pub const MetricsHttpServer = struct {
         try stream.writeAll(html);
     }
 };
-// Reviewed: 2025-12-01

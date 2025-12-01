@@ -326,5 +326,3 @@ pub const ForwardResult = struct {
         allocator.free(self.body);
     }
 };
-
-// Reviewed: 2025-12-01

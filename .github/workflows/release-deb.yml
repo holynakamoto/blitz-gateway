@@ -22,6 +22,14 @@ jobs:
       with:
         submodules: recursive
     
+    - name: Verify submodules
+      run: |
+        if [ ! -f deps/picotls/include/picotls.h ]; then
+          echo "Submodules not initialized, initializing..."
+          git submodule update --init --recursive
+        fi
+        ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
+    
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
       with:

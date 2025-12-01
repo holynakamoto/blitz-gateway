@@ -1,0 +1,250 @@
+# CodeRabbit AI Code Review Configuration for Blitz Gateway
+
+language: en-US
+tone_instructions: "Be concise, technical, and focus on performance, memory safety, and Zig best practices."
+
+reviews:
+  # Request changes for critical issues
+  request_changes_workflow: true
+  
+  # High-quality review with security focus
+  high_level_summary: true
+  
+  # Review settings
+  poem: false
+  review_status: true
+  
+  # Auto-review on every push
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - develop
+    # Skip auto-review for Dependabot PRs (they're just dependency updates)
+    ignore_labels:
+      - "ci/cd"
+    # Ignore Dependabot PRs (they only update dependencies)
+    ignore_labels:
+      - "ci/cd"
+    # Reduce review intensity for dependency-only changes
+    ignore_files:
+      - ".github/workflows/**"
+  
+  # Path-based review intensity
+  path_filters:
+    - path: "src/core/**"
+      intensity: thorough
+      instructions: |
+        Focus on memory safety, allocation patterns, and zero-copy optimizations.
+        Flag any allocations in hot paths. Verify proper defer usage.
+    
+    - path: "src/io_uring/**"
+      intensity: thorough
+      instructions: |
+        Scrutinize io_uring usage for correctness and performance.
+        Check SQE/CQE handling, batch submissions, and completion handling.
+    
+    - path: "src/http/**"
+      intensity: thorough
+      instructions: |
+        Review HTTP parsing for security vulnerabilities.
+        Check for buffer overflows, injection attacks, and DoS vectors.
+    
+    - path: "src/proxy/**"
+      intensity: thorough
+      instructions: |
+        Verify request/response handling, connection pooling, and error handling.
+        Check for connection leaks and proper timeout handling.
+    
+    - path: "src/auth/**"
+      intensity: thorough
+      instructions: |
+        Security-critical: Review JWT validation, timing attacks, and RBAC logic.
+        Ensure constant-time comparisons where needed.
+    
+    - path: "src/ratelimit/**"
+      intensity: thorough
+      instructions: |
+        Review rate limiting algorithms and eBPF integration.
+        Check for race conditions and accurate token bucket implementation.
+    
+    - path: "tests/**"
+      intensity: normal
+      instructions: |
+        Ensure tests are comprehensive and cover edge cases.
+        Verify performance benchmarks are accurate.
+    
+    - path: "*.md"
+      intensity: minimal
+      instructions: "Check for technical accuracy and clarity."
+
+  # Breaking change detection
+  breaking_changes:
+    enabled: true
+    patterns:
+      - "BREAKING CHANGE:"
+      - "breaking:"
+      - pattern: "^(feat|fix|refactor)!:"
+        type: conventional_commit
+
+# Specific checks for Zig/performance-critical code
+checks:
+  # Memory safety
+  - name: "Memory Leak Detection"
+    enabled: true
+    patterns:
+      - pattern: "alloc\\("
+        message: "Verify proper deallocation with defer or errdefer"
+      - pattern: "allocator\\.alloc"
+        message: "Ensure matching allocator.free() exists"
+      - pattern: "arena\\.allocator"
+        message: "Verify arena is properly reset or destroyed"
+  
+  # Performance patterns
+  - name: "Hot Path Allocations"
+    enabled: true
+    files: ["src/core/**", "src/io_uring/**", "src/http/**"]
+    patterns:
+      - pattern: "try allocator\\.alloc"
+        message: "🔥 HOT PATH: Avoid allocations in request handling. Use pre-allocated buffers or stack allocation."
+  
+  # Concurrency safety
+  - name: "Thread Safety"
+    enabled: true
+    patterns:
+      - pattern: "std\\.Thread\\.spawn"
+        message: "Verify proper synchronization and error handling"
+      - pattern: "std\\.atomic"
+        message: "Check memory ordering and race conditions"
+  
+  # Error handling
+  - name: "Error Handling"
+    enabled: true
+    patterns:
+      - pattern: "catch unreachable"
+        message: "⚠️ Use proper error handling instead of unreachable"
+      - pattern: "\\bcatch\\s+\\|"
+        message: "Verify error is properly handled or logged"
+  
+  # Security patterns
+  - name: "Security Checks"
+    enabled: true
+    files: ["src/auth/**", "src/http/**"]
+    patterns:
+      - pattern: "std\\.mem\\.eql"
+        message: "🔒 Use constant-time comparison for sensitive data"
+      - pattern: "\\bmemcpy\\b"
+        message: "Verify bounds checking to prevent buffer overflow"
+      - pattern: "std\\.fmt\\.format"
+        message: "Check for format string vulnerabilities"
+  
+  # Code quality
+  - name: "Code Quality"
+    enabled: true
+    patterns:
+      - pattern: "TODO|FIXME|HACK"
+        message: "Document why this needs attention and create tracking issue"
+      - pattern: "\\bprint\\b|\\bdebug\\b"
+        message: "Remove debug statements before merging"
+      - pattern: "@panic"
+        message: "Replace panic with proper error handling"
+
+# Knowledge base for Blitz-specific patterns
+knowledge_base:
+  - topic: "io_uring patterns"
+    content: |
+      - Always batch SQE submissions when possible
+      - Use IOSQE_IO_LINK for dependent operations
+      - Check CQE result codes thoroughly
+      - Implement proper backpressure when SQ is full
+  
+  - topic: "Zero-copy patterns"
+    content: |
+      - Prefer sendfile() for file serving
+      - Use splice() for proxy scenarios
+      - Avoid unnecessary buffer copies
+      - Utilize shared memory when appropriate
+  
+  - topic: "Memory management"
+    content: |
+      - Use ArenaAllocator for request-scoped allocations
+      - Pre-allocate connection pools at startup
+      - Implement object pooling for frequently allocated types
+      - Profile allocations under load
+  
+  - topic: "Performance guidelines"
+    content: |
+      - Target <50µs p99 latency
+      - Zero allocations in hot paths
+      - Batch operations when possible
+      - Use CPU affinity for critical threads
+
+# Custom review guidelines
+guidelines:
+  - title: "Performance Impact"
+    description: "Every change must consider performance impact. Run benchmarks for core path changes."
+  
+  - title: "Memory Safety"
+    description: "All allocations must have clear ownership and deallocation paths."
+  
+  - title: "Backward Compatibility"
+    description: "Breaking changes require major version bump and migration guide."
+  
+  - title: "Security First"
+    description: "All input must be validated. Use constant-time operations for auth."
+  
+  - title: "Test Coverage"
+    description: "Unit tests required for business logic. Benchmarks required for performance claims."
+
+# Chat settings
+chat:
+  auto_reply: false
+
+# PR description requirements
+pr_description:
+  required_sections:
+    - "## Description"
+    - "## Type of Change"
+    - "## Performance Impact"
+    - "## Breaking Changes"
+    - "## Testing"
+  
+  templates:
+    performance_impact: |
+      - [ ] No performance impact
+      - [ ] Improves performance (include benchmarks)
+      - [ ] May degrade performance (include benchmarks and justification)
+    
+    breaking_changes: |
+      - [ ] No breaking changes
+      - [ ] Breaking changes (describe migration path)
+    
+    testing: |
+      - [ ] Unit tests added/updated
+      - [ ] Integration tests added/updated
+      - [ ] Performance benchmarks run
+      - [ ] Manual testing performed
+
+# Ignored files (don't review)
+ignore:
+  - "*.sum"
+  - "zig-cache/**"
+  - "zig-out/**"
+  - ".github/**"
+  - "vendor/**"
+  - "*.lock"
+
+# Skip review for Dependabot PRs
+ignore_author_patterns:
+  - "dependabot"
+  - "dependabot[bot]"
+
+# Review focus areas
+focus_areas:
+  - memory_safety
+  - performance
+  - security
+  - concurrency
+  - error_handling
+

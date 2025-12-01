@@ -89,36 +89,6 @@ make prod up -d
 make monitoring up -d
 ```
 
-### Build from Source (Developers)
-
-**Prerequisites:**
-- Zig 0.15.2+
-- Linux 5.15+ (required for io_uring)
-- liburing development headers
-
-**Build & Run:**
-
-```bash
-# Clone with dependencies
-git clone --recursive https://github.com/holynakamoto/blitz-gateway.git
-cd blitz-gateway
-
-# Install dependencies
-sudo apt-get install liburing-dev libssl-dev pkg-config
-
-# Build
-zig build
-
-# Run HTTP/1.1 + HTTP/2 server
-zig build run
-
-# Run QUIC/HTTP/3 origin server
-zig build run-quic
-
-# Run load balancer
-zig build run-quic -- --lb lb.example.toml
-```
-
 ## Architecture
 
 ```
@@ -148,10 +118,11 @@ See [benchmarking guide](docs/benchmark/README.md) for production benchmarks on 
 
 ## Documentation
 
+- **[Documentation Index](docs/INDEX.md)** - Complete documentation guide
 - **[Production Deployment](docs/production/README.md)** - Docker, Kubernetes, AWS, Bare Metal
 - **[Benchmarking Guide](docs/benchmark/README.md)** - Performance testing and optimization
 - **[Contributing](docs/CONTRIBUTING.md)** - Development setup and guidelines
-- **[Architecture](docs/)** - Detailed technical documentation
+- **[Release & Publishing](docs/release/)** - Publishing to APT and Docker
 
 ## Status
 

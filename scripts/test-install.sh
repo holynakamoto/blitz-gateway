@@ -64,18 +64,18 @@ mkdir -p dist
 
 if [ "$BUILD_IN_VM" = "false" ]; then
     # Update version in nfpm.yaml
-    sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" nfpm.yaml
+    sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" packaging/nfpm.yaml
     
     # Build .deb package
     log_info "Building .deb package with nfpm..."
-    nfpm pkg --packager deb --target dist/ || {
+    nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml || {
         log_error "Failed to build .deb package locally"
         log_info "This is expected on macOS - will build in VM instead"
         BUILD_IN_VM=true
     }
     
     # Restore nfpm.yaml
-    mv nfpm.yaml.bak nfpm.yaml 2>/dev/null || true
+    mv packaging/nfpm.yaml.bak packaging/nfpm.yaml 2>/dev/null || true
 fi
 
 # Step 2: Start/Connect to VM
@@ -138,8 +138,8 @@ if [ "$BUILD_IN_VM" = "true" ]; then
         mkdir -p dist && \
         curl -sSfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb -o /tmp/nfpm.deb && \
         sudo dpkg -i /tmp/nfpm.deb && \
-        sed -i \"s/version: \\\".*\\\"/version: \\\"${VERSION}\\\"/\" nfpm.yaml && \
-        nfpm pkg --packager deb --target dist/ && \
+        sed -i \"s/version: \\\".*\\\"/version: \\\"${VERSION}\\\"/\" packaging/nfpm.yaml && \
+        nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml && \
         cp dist/*.deb /tmp/blitz-install-test/" || {
         log_error "Failed to build in VM"
         exit 1

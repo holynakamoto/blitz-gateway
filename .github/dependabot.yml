@@ -7,8 +7,10 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     labels:
-      - "dependencies"
-      - "github-actions"
+      - "ci/cd"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
 
   # Enable version updates for Docker
   - package-ecosystem: "docker"
@@ -17,6 +19,8 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels:
-      - "dependencies"
-      - "docker"
+      - "ci/cd"
+    commit-message:
+      prefix: "docker"
+      include: "scope"
 

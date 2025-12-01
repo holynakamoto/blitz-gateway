@@ -64,11 +64,11 @@ jobs:
     - name: Update nfpm.yaml with version
       run: |
         VERSION="${{ steps.version.outputs.version }}"
-        sed -i "s/version: \".*\"/version: \"${VERSION}\"/" nfpm.yaml
+        sed -i "s/version: \".*\"/version: \"${VERSION}\"/" packaging/nfpm.yaml
     
     - name: Build .deb package
       run: |
-        nfpm pkg --packager deb --target dist/
+        nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml
         ls -lah dist/
     
     - name: Upload .deb as artifact

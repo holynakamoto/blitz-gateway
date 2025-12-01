@@ -35,7 +35,8 @@ docker build -t blitz:latest . || {
     echo "  2. Build on Linux VM and copy binary to Docker"
     echo "  3. Wait for Zig 0.13.0+ with better liburing support"
     echo ""
-    echo "See benches/DOCKER-WORKAROUND.md for details."
+    echo "Docker benchmarks are not recommended. Use bare metal for accurate results."
+    echo "See docs/benchmark/QUICK-START-BARE-METAL.md for production benchmarking."
     echo ""
     exit 1
 }

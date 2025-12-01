@@ -900,8 +900,9 @@ pub fn runEchoServer(port: u16) !void {
                                         }
                                         // CRITICAL: Clear encrypted output before releasing buffer
                                         if (conn_ptr.is_tls) {
-                                            if (conn_ptr.tls_conn) |*tls_connection| {
-                                                tls_connection.clearEncryptedOutput();
+                                            if (conn_ptr.tls_conn) |tls_conn_opaque_inner| {
+                                                const tls_conn_inner = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque_inner)));
+                                                tls_conn_inner.clearEncryptedOutput();
                                             }
                                         }
                                     }
@@ -909,8 +910,9 @@ pub fn runEchoServer(port: u16) !void {
                                     // CRITICAL: Clear read_bio before releasing read buffer
                                     if (connections.getPtr(client_fd)) |conn_ptr| {
                                         if (conn_ptr.is_tls) {
-                                            if (conn_ptr.tls_conn) |*tls_connection| {
-                                                tls_connection.clearReadBio();
+                                            if (conn_ptr.tls_conn) |tls_conn_opaque_inner| {
+                                                const tls_conn_inner = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque_inner)));
+                                                tls_conn_inner.clearReadBio();
                                             }
                                         }
                                     }
@@ -1019,7 +1021,8 @@ pub fn runEchoServer(port: u16) !void {
                     sqe = sqe_opt2.?;
                     // For TLS, encrypt before writing
                     if (conn.is_tls) {
-                        if (conn.tls_conn) |*tls_conn| {
+                        if (conn.tls_conn) |tls_conn_opaque| {
+                            const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                             // CRITICAL: Release read buffer before encrypting/writing
                             buffer_pool.releaseRead(read_buf);
                             conn.read_buffer = null;
@@ -1125,7 +1128,8 @@ pub fn runEchoServer(port: u16) !void {
 
                 // For TLS connections, encrypt the response using memory BIOs
                 if (conn.is_tls) {
-                    if (conn.tls_conn) |*tls_conn| {
+                    if (conn.tls_conn) |tls_conn_opaque| {
+                        const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                         // CRITICAL: Release read buffer before encrypting/writing
                         // Don't reuse the buffer that contained encrypted request data
                         // This prevents BIO state issues and "bad record mac" errors
@@ -1192,7 +1196,8 @@ pub fn runEchoServer(port: u16) !void {
                 // This prevents "bad record mac" errors when buffers are reused
                 // OpenSSL's memory BIOs maintain pointers to the buffer - we must clear them first
                 if (conn.is_tls) {
-                    if (conn.tls_conn) |*tls_conn| {
+                    if (conn.tls_conn) |tls_conn_opaque| {
+                        const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                         tls_conn.clearEncryptedOutput();
                     }
                 }
@@ -1208,7 +1213,8 @@ pub fn runEchoServer(port: u16) !void {
                 if (conn.is_tls) {
                     // CRITICAL: Clear read_bio before getting a new read buffer
                     // This prevents "bad record mac" errors from stale data in read_bio
-                    if (conn.tls_conn) |*tls_conn| {
+                    if (conn.tls_conn) |tls_conn_opaque| {
+                        const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                         tls_conn.clearReadBio();
                     }
                     // TLS: Always use a fresh read buffer for each request

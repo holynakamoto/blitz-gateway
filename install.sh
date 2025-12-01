@@ -55,9 +55,34 @@ log_info "Detected Ubuntu $OS_CODENAME"
 
 # Get latest release version
 log_info "Fetching latest release..."
-LATEST_VERSION=$(curl -s "${REPO_API}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+API_RESPONSE=$(curl -s -w "\n%{http_code}" "${REPO_API}/releases/latest")
+HTTP_CODE=$(echo "$API_RESPONSE" | tail -n1)
+API_BODY=$(echo "$API_RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" != "200" ]; then
+    if [ "$HTTP_CODE" == "404" ]; then
+        log_error "No releases found in the repository"
+        echo ""
+        log_info "This repository doesn't have any published releases yet."
+        echo "  To install Blitz Gateway, you can:"
+        echo "  1. Build from source: See ${REPO_URL}#readme"
+        echo "  2. Use Docker: docker pull ghcr.io/holynakamoto/blitz-gateway:latest"
+        echo "  3. Wait for an official release to be published"
+        echo ""
+        log_info "Check for releases: ${REPO_URL}/releases"
+    else
+        log_error "Failed to fetch latest release version (HTTP $HTTP_CODE)"
+        if echo "$API_BODY" | grep -q '"message"'; then
+            ERROR_MSG=$(echo "$API_BODY" | grep '"message":' | sed -E 's/.*"message":\s*"([^"]+)".*/\1/')
+            log_error "GitHub API error: $ERROR_MSG"
+        fi
+    fi
+    exit 1
+fi
+
+LATEST_VERSION=$(echo "$API_BODY" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
 if [ -z "$LATEST_VERSION" ]; then
-    log_error "Failed to fetch latest release version"
+    log_error "Failed to parse release version from API response"
     exit 1
 fi
 

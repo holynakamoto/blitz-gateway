@@ -184,6 +184,11 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                 udp.prepRecvFrom(sqe, quic_server.udp_fd, &buf.data, &buf.client_addr, &buf.client_addr_len);
                 setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, idx));
                 _ = c.io_uring_submit(ring);
+            } else if (decoded.op == .sendto) {
+                // Release buffer for failed sendto operation (do not resubmit)
+                if (decoded.buffer_idx < buffer_pool.buffers.len) {
+                    buffer_pool.release(&buffer_pool.buffers[decoded.buffer_idx]);
+                }
             }
             continue;
         }

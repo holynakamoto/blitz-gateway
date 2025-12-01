@@ -88,6 +88,11 @@ pub const HpackDecoder = struct {
     }
 
     pub fn deinit(self: *HpackDecoder) void {
+        // Free all owned header field strings in the dynamic table
+        for (self.dynamic_table.items) |field| {
+            self.allocator.free(field.name);
+            self.allocator.free(field.value);
+        }
         // Zig 0.15.2: deinit requires allocator
         self.dynamic_table.deinit(self.allocator);
     }
@@ -211,6 +216,8 @@ pub const HpackDecoder = struct {
         const field = HeaderField{ .name = name, .value = value };
 
         // Add to dynamic table if needed
+        // Note: addToDynamicTable creates owned copies, so the original field.value
+        // (if Huffman-decoded) is still owned by the caller and returned in DecodeResult
         if (add_to_table) {
             try self.addToDynamicTable(field);
         }
@@ -286,11 +293,23 @@ pub const HpackDecoder = struct {
         // Evict entries if needed
         while (self.getTableSize() + entry_size > self.max_table_size) {
             if (self.dynamic_table.items.len == 0) break;
-            _ = self.dynamic_table.pop();
+            const old_field = self.dynamic_table.pop();
+            // Free the old field's memory
+            self.allocator.free(old_field.name);
+            self.allocator.free(old_field.value);
         }
 
-        // Zig 0.15.2: append requires allocator
-        try self.dynamic_table.append(self.allocator, field);
+        // Create owned copies to ensure consistent memory ownership
+        // This handles both Huffman-decoded values and borrowed slices from static table
+        const name_copy = try self.allocator.dupe(u8, field.name);
+        errdefer self.allocator.free(name_copy);
+        const value_copy = try self.allocator.dupe(u8, field.value);
+        errdefer self.allocator.free(value_copy);
+
+        try self.dynamic_table.append(self.allocator, .{
+            .name = name_copy,
+            .value = value_copy,
+        });
     }
 
     fn getTableSize(self: *HpackDecoder) usize {

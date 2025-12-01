@@ -13,6 +13,8 @@ pub const LoadBalancerError = error{
     ConnectionPoolExhausted,
     SendFailed,
     InvalidResponse,
+    ReceiveTimeout,
+    SelectError,
 };
 
 pub const LoadBalancer = struct {
@@ -210,12 +212,13 @@ pub const LoadBalancer = struct {
 
     /// Receive data with timeout
     fn receiveWithTimeout(self: *LoadBalancer, fd: c_int, timeout_ms: u64) ![]u8 {
-        _ = timeout_ms; // TODO: Implement timeout using select/poll
 
         const sys = @cImport({
             @cDefine("_GNU_SOURCE", "1");
             @cInclude("sys/socket.h");
+            @cInclude("sys/select.h");
             @cInclude("unistd.h");
+            @cInclude("errno.h");
         });
 
         var buffer = std.ArrayListUnmanaged(u8){};
@@ -223,7 +226,38 @@ pub const LoadBalancer = struct {
 
         var read_buf: [4096]u8 = undefined;
 
+        // Convert timeout_ms to struct timeval
+        const timeout_sec = @divTrunc(timeout_ms, 1000);
+        const timeout_usec = @as(c_long, @intCast((timeout_ms % 1000) * 1000));
+
         while (true) {
+            // Initialize fd_set for select()
+            var readfds: sys.fd_set = undefined;
+            sys.FD_ZERO(&readfds);
+            sys.FD_SET(fd, &readfds);
+
+            // Set up timeout (refresh each iteration)
+            var tv: sys.struct_timeval = undefined;
+            tv.tv_sec = @intCast(timeout_sec);
+            tv.tv_usec = timeout_usec;
+
+            // Call select() to wait for data to be ready
+            const select_result = sys.select(fd + 1, &readfds, null, null, &tv);
+
+            if (select_result == 0) {
+                // Timeout
+                return LoadBalancerError.ReceiveTimeout;
+            } else if (select_result < 0) {
+                // Error from select()
+                const errno_val = sys.errno;
+                if (errno_val == sys.EINTR) {
+                    // Interrupted by signal, retry
+                    continue;
+                }
+                return LoadBalancerError.SelectError;
+            }
+
+            // select() > 0: data is ready, proceed with recv()
             const received = sys.recv(fd, &read_buf, read_buf.len, 0);
             if (received <= 0) {
                 break;
@@ -238,14 +272,28 @@ pub const LoadBalancer = struct {
     pub fn parseStatusCode(self: *LoadBalancer, response: []const u8) !u16 {
         _ = self;
 
-        // Find "HTTP/1.1 200" pattern
+        // Find "HTTP/" pattern
         const http_pos = std.mem.indexOf(u8, response, "HTTP/") orelse return LoadBalancerError.InvalidResponse;
-        const space_pos = std.mem.indexOfScalarPos(u8, response, http_pos + 8, ' ') orelse return LoadBalancerError.InvalidResponse;
+        
+        // Find the first space character after http_pos (handles HTTP/1.1, HTTP/2, HTTP/3, etc.)
+        const space_pos = std.mem.indexOfScalarPos(u8, response, http_pos, ' ') orelse return LoadBalancerError.InvalidResponse;
         const status_start = space_pos + 1;
-        const status_end = std.mem.indexOfScalarPos(u8, response, status_start, ' ') orelse return LoadBalancerError.InvalidResponse;
+        
+        // Validate bounds
+        if (status_start >= response.len) {
+            return LoadBalancerError.InvalidResponse;
+        }
+        
+        // Find the end of the status code (next space or end of response)
+        const status_end = std.mem.indexOfScalarPos(u8, response, status_start, ' ') orelse response.len;
+        
+        // Validate bounds
+        if (status_end <= status_start) {
+            return LoadBalancerError.InvalidResponse;
+        }
 
         const status_str = response[status_start..status_end];
-        return try std.fmt.parseInt(u16, status_str, 10);
+        return std.fmt.parseInt(u16, status_str, 10) catch LoadBalancerError.InvalidResponse;
     }
 
     /// Perform health check on all backends

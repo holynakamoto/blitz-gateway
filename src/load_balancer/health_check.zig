@@ -83,10 +83,43 @@ pub const HealthChecker = struct {
         }
 
         // Send HTTP health check request
+        // Loop until all bytes are sent (handle partial writes on non-blocking sockets)
         const health_request = "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-        const sent = c.send(sockfd, health_request.ptr, health_request.len, 0);
-        if (sent != health_request.len) {
-            return false;
+        var bytes_sent: usize = 0;
+        
+        while (bytes_sent < health_request.len) {
+            const result = c.send(sockfd, health_request.ptr + bytes_sent, health_request.len - bytes_sent, 0);
+            
+            if (result > 0) {
+                // Partial or complete write - increment bytes_sent
+                bytes_sent += @intCast(result);
+            } else if (result == -1) {
+                const err = c.errno;
+                if (err == c.EINTR) {
+                    // Interrupted by signal - retry
+                    continue;
+                } else if (err == c.EAGAIN or err == c.EWOULDBLOCK) {
+                    // Socket would block - wait for it to become writable
+                    var send_write_fds: c.fd_set = undefined;
+                    c.FD_ZERO(&send_write_fds);
+                    c.FD_SET(sockfd, &send_write_fds);
+                    
+                    var send_timeout: c.struct_timeval = timeout;
+                    const send_select_result = c.select(sockfd + 1, null, &send_write_fds, null, &send_timeout);
+                    if (send_select_result <= 0) {
+                        // Timeout or error waiting for socket to become writable
+                        return false;
+                    }
+                    // Socket is now writable - retry send
+                    continue;
+                } else {
+                    // Non-recoverable error
+                    return false;
+                }
+            } else {
+                // Unexpected return value (should not happen)
+                return false;
+            }
         }
 
         // Read response (simplified - just check for HTTP/1.1 200)

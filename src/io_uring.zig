@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const allocator = @import("allocator.zig");
 const http = @import("http/parser.zig");
+const protocol = @import("protocol.zig");
 
 // Use liburing for io_uring support
 // Define AT_FDCWD if not already defined (needed for liburing.h on some systems)
@@ -39,6 +40,17 @@ const HTTP_RESPONSE = http.CommonResponses.OK;
 // const tls = @import("tls/tls.zig"); // Temporarily disabled for picotls migration
 const http2 = @import("http2/connection.zig");
 
+// TLS Connection stub type (for when TLS is re-enabled)
+// This defines the structure that tls_conn should have, including the protocol field
+const TlsConnectionStub = struct {
+    protocol: protocol.Protocol = .http1_1,
+    // Other fields would be added when TLS is re-implemented
+    // state: TlsState,
+    // read_bio: ?*anyopaque,
+    // write_bio: ?*anyopaque,
+    // etc.
+};
+
 // Connection state
 const Connection = struct {
     fd: c_int,
@@ -50,7 +62,7 @@ const Connection = struct {
     is_tls: bool = false,
     // HTTP/2 support
     http2_conn: ?*http2.Http2Connection = null,
-    protocol: u8 = 0, // Placeholder
+    protocol: protocol.Protocol = .http1_1,
     // Connection tracking for limits/timeouts
     created_at: i64 = 0,
     last_active: i64 = 0,
@@ -89,6 +101,7 @@ fn closeConnection(
 
         // Clean up HTTP/2 connection if present
         if (conn.http2_conn) |http2_conn| {
+            http2_conn.deinit();
             backing_allocator.destroy(http2_conn);
             conn.http2_conn = null;
         }
@@ -207,33 +220,8 @@ pub fn runEchoServer(port: u16) !void {
     defer _ = gpa.deinit();
     const backing_allocator = gpa.allocator();
 
-    // Initialize TLS context (optional - only if certs exist)
-    var tls_ctx: ?*anyopaque = null; // Disabled for PicoTLS migration
-    const cert_path = "certs/server.crt";
-    const key_path = "certs/server.key";
-
-    // Try to load TLS certificates (non-fatal if they don't exist)
-    tls_ctx = blk: {
-        break :blk null; // TLS disabled for PicoTLS migration
-    };
-
-    if (tls_ctx) |*ctx| {
-        if (ctx.loadCertificate(cert_path, key_path)) {
-            // Use std.debug.print for immediate unbuffered output
-            std.debug.print("TLS 1.3 enabled with HTTP/2 support\n", .{});
-            std.log.info("TLS 1.3 enabled with HTTP/2 support", .{});
-        } else |err| {
-            std.log.warn("Failed to load TLS certificates: {} (continuing without TLS)", .{err});
-            ctx.deinit();
-            tls_ctx = null;
-        }
-    }
-
-    defer {
-        if (tls_ctx) |*ctx| {
-            ctx.deinit();
-        }
-    }
+    // TLS context disabled for PicoTLS migration
+    // TLS will be handled by PicoTLS in QUIC implementation
 
     // Pre-allocate buffer pool (all buffers allocated at startup)
     var buffer_pool = try allocator.BufferPool.init(backing_allocator, BUFFER_SIZE, BUFFER_POOL_SIZE);
@@ -367,138 +355,19 @@ pub fn runEchoServer(port: u16) !void {
                 // Track effective data length (decrypted_len for TLS, bytes_read for plaintext)
                 var effective_bytes: usize = bytes_read;
 
-                // Auto-detect TLS: Check if first byte is TLS_RECORD_TYPE_HANDSHAKE (TLS handshake record)
-                // This MUST happen before we try to parse HTTP or handle existing TLS
-                // CRITICAL ISSUE: We've already read the ClientHello into read_buf, but OpenSSL
-                // with socket BIO expects to read directly from the socket. The data is no longer
-                // in the socket buffer, so OpenSSL can't access it. This requires memory BIOs
-                // for proper io_uring integration.
-                // TODO: Refactor to use memory BIOs to feed read_buf data to OpenSSL
-                if (tls_ctx != null and !conn.is_tls and bytes_read > 0) {
-                    if (read_buf[0] == TLS_RECORD_TYPE_HANDSHAKE) {
-                        // Looks like TLS ClientHello - initialize TLS connection
-                        // NOTE: This will currently fail because socket BIO can't access already-read data
-                        // The proper fix is memory BIOs (see TODO above)
-                        if (tls_ctx) |*ctx| {
-                            if (ctx.newConnection(client_fd)) |tls_conn| {
-                                conn.tls_conn = tls_conn;
-                                conn.is_tls = true;
-                                std.log.debug("TLS connection detected, starting handshake", .{});
-
-                                // Feed the ClientHello data we already read to OpenSSL via memory BIO
-                                var tls_conn_mut = conn.tls_conn.?;
-                                tls_conn_mut.feedData(read_buf[0..bytes_read]) catch |err| {
-                                    std.log.warn("Failed to feed TLS data: {}", .{err});
-                                    buffer_pool.releaseRead(read_buf);
-                                    _ = c.close(client_fd);
-                                    continue;
-                                };
-
-                                // Start TLS handshake (now OpenSSL can access the data via memory BIO)
-                                _ = tls_conn_mut.doHandshake() catch |err| {
-                                    std.log.warn("TLS handshake failed: {}", .{err});
-                                    buffer_pool.releaseRead(read_buf);
-                                    _ = c.close(client_fd);
-                                    continue;
-                                };
-
-                                // Check if handshake needs more data or produced encrypted output
-                                if (tls_conn_mut.state == .handshake) {
-                                    // Check if there's encrypted output to send (ServerHello, etc.)
-                                    if (tls_conn_mut.hasEncryptedOutput()) {
-                                        // Get encrypted output and write it via io_uring
-                                        const write_buf_tls = buffer_pool.acquireWrite() orelse {
-                                            buffer_pool.releaseRead(read_buf);
-                                            _ = c.close(client_fd);
-                                            continue;
-                                        };
-                                        // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
-                                        const encrypted_len = tls_conn_mut.getAllEncryptedOutput(write_buf_tls) catch |err| {
-                                            std.log.warn("Failed to get TLS encrypted output: {}", .{err});
-                                            buffer_pool.releaseWrite(write_buf_tls);
-                                            buffer_pool.releaseRead(read_buf);
-                                            _ = c.close(client_fd);
-                                            continue;
-                                        };
-
-                                        if (connections.getPtr(client_fd)) |conn_ptr| {
-                                            conn_ptr.write_buffer = write_buf_tls;
-                                        }
-
-                                        const sqe_opt_tls_write = blitz_io_uring_get_sqe(&ring);
-                                        if (sqe_opt_tls_write == null) {
-                                            buffer_pool.releaseRead(read_buf);
-                                            continue;
-                                        }
-                                        sqe = sqe_opt_tls_write.?;
-                                        c.io_uring_prep_write(sqe, client_fd, write_buf_tls.ptr, @as(c_uint, @intCast(encrypted_len)), 0);
-                                        setSqeData(sqe, encodeUserData(client_fd, .write));
-                                        _ = c.io_uring_submit(&ring);
-                                    }
-
-                                    // If still handshaking, need more data from client
-                                    const sqe_opt_tls = blitz_io_uring_get_sqe(&ring);
-                                    if (sqe_opt_tls == null) {
-                                        buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
-                                        continue;
-                                    }
-                                    sqe = sqe_opt_tls.?;
-                                    c.io_uring_prep_read(sqe, client_fd, read_buf.ptr, @as(c_uint, @intCast(BUFFER_SIZE)), 0);
-                                    setSqeData(sqe, encodeUserData(client_fd, .read));
-                                    _ = c.io_uring_submit(&ring);
-                                    buffer_pool.releaseRead(read_buf);
-                                    continue;
-                                }
-
-                                // Handshake complete - send any remaining encrypted output
-                                if (tls_conn_mut.hasEncryptedOutput()) {
-                                    const write_buf_tls = buffer_pool.acquireWrite() orelse {
-                                        buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
-                                        continue;
-                                    };
-                                    // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
-                                    const encrypted_len = tls_conn_mut.getAllEncryptedOutput(write_buf_tls) catch |err| {
-                                        std.log.warn("Failed to get TLS encrypted output: {}", .{err});
-                                        buffer_pool.releaseWrite(write_buf_tls);
-                                        buffer_pool.releaseRead(read_buf);
-                                        _ = c.close(client_fd);
-                                        continue;
-                                    };
-
-                                    if (connections.getPtr(client_fd)) |conn_ptr| {
-                                        conn_ptr.write_buffer = write_buf_tls;
-                                    }
-
-                                    const sqe_opt_tls_write2 = blitz_io_uring_get_sqe(&ring);
-                                    if (sqe_opt_tls_write2 == null) {
-                                        buffer_pool.releaseRead(read_buf);
-                                        continue;
-                                    }
-                                    sqe = sqe_opt_tls_write2.?;
-                                    c.io_uring_prep_write(sqe, client_fd, write_buf_tls.ptr, @as(c_uint, @intCast(encrypted_len)), 0);
-                                    setSqeData(sqe, encodeUserData(client_fd, .write));
-                                    _ = c.io_uring_submit(&ring);
-                                }
-
-                                // Handshake complete - wait for encrypted application data
-                                // Don't try to read immediately - wait for next io_uring read event
-                                // The client will send encrypted HTTP request in next packet
-                                buffer_pool.releaseRead(read_buf);
-                                continue;
-                            } else |err| {
-                                std.log.warn("Failed to create TLS connection: {} (treating as plaintext)", .{err});
-                                // Fall through to plaintext HTTP/1.1
-                            }
-                        }
-                    }
-                    // If not TLS (first byte != TLS_RECORD_TYPE_HANDSHAKE), fall through to plaintext HTTP/1.1
-                }
+                // TLS detection disabled for PicoTLS migration
+                // TLS will be handled by PicoTLS in QUIC implementation
 
                 // Handle TLS handshake if in progress (continuation after initial detection)
+                // Note: TLS is currently disabled (PicoTLS migration)
+                // When TLS is re-enabled, tls_conn should be properly typed
                 if (conn.is_tls) {
-                    if (conn.tls_conn) |*tls_conn| {
+                    if (conn.tls_conn) |tls_conn_opaque| {
+                        // Cast opaque pointer to TlsConnectionStub to access protocol field
+                        // When TLS is re-enabled, this should be properly typed
+                        // Note: This is unsafe casting - TLS is currently disabled
+                        // In Zig 0.15.2, use @as for type assertion
+                        const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                         if (tls_conn.state == .handshake) {
                             // Feed new data to TLS connection
                             tls_conn.feedData(read_buf[0..bytes_read]) catch |err| {
@@ -598,9 +467,7 @@ pub fn runEchoServer(port: u16) !void {
                             // Handshake complete - WAIT for next read event (encrypted HTTP request)
                             // Don't try to decrypt yet - client will send encrypted HTTP GET in next packet
                             // CRITICAL: Clear read_bio before releasing buffer to prevent "bad record mac" errors
-                            if (conn.tls_conn) |*tls_conn_ptr| {
-                                tls_conn_ptr.clearReadBio();
-                            }
+                            tls_conn.clearReadBio();
                             buffer_pool.releaseRead(read_buf);
                             continue;
                         }
@@ -1351,6 +1218,7 @@ pub fn runEchoServer(port: u16) !void {
                         tls_conn.deinit();
                     }
                     if (conn.http2_conn) |http2_conn| {
+                        http2_conn.deinit();
                         backing_allocator.destroy(http2_conn);
                     }
                     _ = c.close(entry.key_ptr.*);
@@ -1370,6 +1238,7 @@ pub fn runEchoServer(port: u16) !void {
                         tls_conn.deinit();
                     }
                     if (conn.http2_conn) |http2_conn| {
+                        http2_conn.deinit();
                         backing_allocator.destroy(http2_conn);
                     }
                     _ = c.close(entry.key_ptr.*);

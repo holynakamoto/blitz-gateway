@@ -55,6 +55,9 @@ pub fn build(b: *std.Build) void {
         // Add include paths for headers
         exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         exe.addIncludePath(.{ .cwd_relative = "src" });
+        
+        // Add picotls include paths (needed for openssl_wrapper.c)
+        exe.addIncludePath(b.path("deps/picotls/include"));
     }
 
     // Install the binary
@@ -228,6 +231,9 @@ pub fn build(b: *std.Build) void {
 
         quic_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         quic_server_exe.addIncludePath(.{ .cwd_relative = "src" });
+        
+        // Add picotls include paths (needed for openssl_wrapper.c)
+        quic_server_exe.addIncludePath(b.path("deps/picotls/include"));
     }
 
     b.installArtifact(quic_server_exe);
@@ -290,18 +296,19 @@ pub fn build(b: *std.Build) void {
 
         // Link picotls C files - full set for TLS 1.3
         quic_handshake_exe.addCSourceFiles(.{
+            .root = b.path("deps/picotls/lib"),
             .files = &.{
-                "deps/picotls/lib/picotls.c",
-                "deps/picotls/lib/openssl.c",
-                "deps/picotls/lib/pembase64.c",
-                "deps/picotls/lib/asn1.c",
-                "deps/picotls/lib/certificate_compression.c",
-                "deps/picotls/lib/ffx.c",
-                "deps/picotls/lib/fusion.c",
-                "deps/picotls/lib/hpke.c",
-                "deps/picotls/lib/minicrypto-pem.c",
-                "deps/picotls/lib/ptlsbcrypt.c",
-                "deps/picotls/lib/uecc.c",
+                "picotls.c",
+                "openssl.c",
+                "pembase64.c",
+                "asn1.c",
+                "certificate_compression.c",
+                "ffx.c",
+                "fusion.c",
+                "hpke.c",
+                "minicrypto-pem.c",
+                "ptlsbcrypt.c",
+                "uecc.c",
             },
             .flags = &[_][]const u8{
                 "-std=c99",

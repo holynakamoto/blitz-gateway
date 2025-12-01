@@ -91,9 +91,10 @@ pub const ConnectionPool = struct {
         }
 
         // Count active connections to this backend
+        // Only count valid, active connections (skip deinitialized entries with fd == -1)
         var count: usize = 0;
         for (self.connections.items) |*conn| {
-            if (conn.backend == backend_server and !conn.is_idle) {
+            if (conn.backend == backend_server and !conn.is_idle and conn.fd != -1) {
                 count += 1;
             }
         }

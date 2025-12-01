@@ -15,7 +15,7 @@ const c = @cImport({
 });
 
 pub const Backend = struct {
-    host: []const u8,
+    host: [:0]const u8,
     port: u16,
     weight: u32 = 1, // For weighted round-robin (future)
 
@@ -33,7 +33,7 @@ pub const Backend = struct {
     failed_requests: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, host: []const u8, port: u16) !Backend {
-        const host_copy = try allocator.dupe(u8, host);
+        const host_copy = try allocator.dupeZ(u8, host);
         errdefer allocator.free(host_copy);
 
         return Backend{
@@ -60,6 +60,7 @@ pub const Backend = struct {
         addr.sin_port = c.htons(self.port);
 
         // Parse host (IP address or hostname)
+        // self.host is null-terminated, so .ptr is safe for inet_pton
         if (c.inet_pton(c.AF_INET, self.host.ptr, &addr.sin_addr) == 1) {
             // Successfully parsed as IP address
             return addr;

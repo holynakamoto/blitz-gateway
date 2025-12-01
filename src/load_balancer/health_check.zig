@@ -86,10 +86,10 @@ pub const HealthChecker = struct {
         // Loop until all bytes are sent (handle partial writes on non-blocking sockets)
         const health_request = "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
         var bytes_sent: usize = 0;
-        
+
         while (bytes_sent < health_request.len) {
             const result = c.send(sockfd, health_request.ptr + bytes_sent, health_request.len - bytes_sent, 0);
-            
+
             if (result > 0) {
                 // Partial or complete write - increment bytes_sent
                 bytes_sent += @intCast(result);
@@ -103,7 +103,7 @@ pub const HealthChecker = struct {
                     var send_write_fds: c.fd_set = undefined;
                     c.FD_ZERO(&send_write_fds);
                     c.FD_SET(sockfd, &send_write_fds);
-                    
+
                     var send_timeout: c.struct_timeval = timeout;
                     const send_select_result = c.select(sockfd + 1, null, &send_write_fds, null, &send_timeout);
                     if (send_select_result <= 0) {

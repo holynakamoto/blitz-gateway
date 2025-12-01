@@ -55,7 +55,7 @@ pub fn build(b: *std.Build) void {
         // Add include paths for headers
         exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         exe.addIncludePath(.{ .cwd_relative = "src" });
-        
+
         // Add picotls include paths (needed for openssl_wrapper.c)
         exe.addIncludePath(b.path("deps/picotls/include"));
     }
@@ -231,7 +231,7 @@ pub fn build(b: *std.Build) void {
 
         quic_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         quic_server_exe.addIncludePath(.{ .cwd_relative = "src" });
-        
+
         // Add picotls include paths (needed for openssl_wrapper.c)
         quic_server_exe.addIncludePath(b.path("deps/picotls/include"));
     }

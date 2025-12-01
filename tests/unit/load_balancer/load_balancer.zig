@@ -212,7 +212,6 @@ pub const LoadBalancer = struct {
 
     /// Receive data with timeout
     fn receiveWithTimeout(self: *LoadBalancer, fd: c_int, timeout_ms: u64) ![]u8 {
-
         const sys = @cImport({
             @cDefine("_GNU_SOURCE", "1");
             @cInclude("sys/socket.h");
@@ -274,19 +273,19 @@ pub const LoadBalancer = struct {
 
         // Find "HTTP/" pattern
         const http_pos = std.mem.indexOf(u8, response, "HTTP/") orelse return LoadBalancerError.InvalidResponse;
-        
+
         // Find the first space character after http_pos (handles HTTP/1.1, HTTP/2, HTTP/3, etc.)
         const space_pos = std.mem.indexOfScalarPos(u8, response, http_pos, ' ') orelse return LoadBalancerError.InvalidResponse;
         const status_start = space_pos + 1;
-        
+
         // Validate bounds
         if (status_start >= response.len) {
             return LoadBalancerError.InvalidResponse;
         }
-        
+
         // Find the end of the status code (next space or end of response)
         const status_end = std.mem.indexOfScalarPos(u8, response, status_start, ' ') orelse response.len;
-        
+
         // Validate bounds
         if (status_end <= status_start) {
             return LoadBalancerError.InvalidResponse;

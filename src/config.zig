@@ -172,6 +172,7 @@ pub const Config = struct {
             }
         }
         self.backends.deinit(self.allocator);
+        self.jwt.deinit(self.allocator);
     }
 
     pub fn addBackend(self: *Config, backend: Backend) !void {

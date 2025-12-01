@@ -23,4 +23,3 @@ pub const Protocol = enum(u8) {
         try writer.writeAll(name);
     }
 };
-

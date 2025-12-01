@@ -282,4 +282,3 @@ test "JWT base64 URL encoding/decoding" {
     // For now, just ensure encoding produces expected output
     try testing.expect(encoded.len > 0);
 }
-

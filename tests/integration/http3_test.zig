@@ -16,7 +16,7 @@ test "HTTP/3 response payload structure validation" {
     // 2. DATA frame (0x00) with response body
 
     const expected_headers_frame_type: u8 = 0x01; // HEADERS
-    const expected_data_frame_type: u8 = 0x00;     // DATA
+    const expected_data_frame_type: u8 = 0x00; // DATA
 
     // Verify frame type constants are correct
     try testing.expect(expected_headers_frame_type == 0x01);
@@ -70,11 +70,11 @@ test "HTTP/3 protocol constants validation" {
 
     // HTTP/3 uses QUIC streams
     // Control streams use even stream IDs, request streams use odd stream IDs
-    const control_stream_id: u64 = 0x02;  // Server control stream
-    const request_stream_id: u64 = 0x01;  // Client request stream
+    const control_stream_id: u64 = 0x02; // Server control stream
+    const request_stream_id: u64 = 0x01; // Client request stream
 
-    try testing.expect(control_stream_id % 2 == 0);  // Even = control
-    try testing.expect(request_stream_id % 2 == 1);  // Odd = request
+    try testing.expect(control_stream_id % 2 == 0); // Even = control
+    try testing.expect(request_stream_id % 2 == 1); // Odd = request
 
     std.debug.print("✅ HTTP/3 stream ID conventions validated\n", .{});
 
@@ -104,9 +104,9 @@ test "HTTP/3 QUIC integration validation" {
 
     // HTTP/3 over QUIC uses streams
     // Control streams (even IDs) vs Request streams (odd IDs)
-    const control_stream_id: u64 = 0x02;  // Server's control stream
-    const client_request_stream_id: u64 = 0x01;  // Client's request stream
-    const server_response_stream_id: u64 = 0x04;  // Server's response stream
+    const control_stream_id: u64 = 0x02; // Server's control stream
+    const client_request_stream_id: u64 = 0x01; // Client's request stream
+    const server_response_stream_id: u64 = 0x04; // Server's response stream
 
     try testing.expect(control_stream_id % 2 == 0);
     try testing.expect(client_request_stream_id % 2 == 1);

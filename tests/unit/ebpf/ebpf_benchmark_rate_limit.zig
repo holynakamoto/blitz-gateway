@@ -275,7 +275,6 @@ pub const RateLimiter = struct {
         return manager;
     }
 
-
     /// Get current statistics
     pub fn getStats(self: *const RateLimiter) RateLimitStats {
         var stats = self.stats;

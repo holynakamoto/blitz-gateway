@@ -66,14 +66,13 @@ fn hkdfExpandLabel(out: []u8, secret: []const u8, label: []const u8, context: []
     const hash_value_iovec = c.ptls_iovec_t{ .base = @constCast(context.ptr), .len = context.len };
 
     // Call picotls HKDF-Expand-Label with correct signature
-    const rc = c.ptls_hkdf_expand_label(
-        &hash_algo,                    // ptls_hash_algorithm_t*
-        out.ptr,                       // output
-        out.len,                       // outlen
-        secret_iovec,                  // secret
-        full_label.ptr,                // label
-        hash_value_iovec,              // hash_value (context)
-        prefix.ptr                     // label_prefix
+    const rc = c.ptls_hkdf_expand_label(&hash_algo, // ptls_hash_algorithm_t*
+        out.ptr, // output
+        out.len, // outlen
+        secret_iovec, // secret
+        full_label.ptr, // label
+        hash_value_iovec, // hash_value (context)
+        prefix.ptr // label_prefix
     );
 
     if (rc != 0)
@@ -201,7 +200,7 @@ pub fn encryptPayload(
     @memcpy(ciphertext[0..copy_len], plaintext[0..copy_len]);
 
     // Add fake 16-byte auth tag
-    @memset(ciphertext[copy_len..copy_len + 16], 0);
+    @memset(ciphertext[copy_len .. copy_len + 16], 0);
 
     return copy_len + 16;
 }
@@ -322,11 +321,11 @@ pub fn deriveZeroRttSecrets(dcid: []const u8, psk_identity: []const u8) !ZeroRtt
     // Use DCID + PSK identity as input keying material
     var ikm: [64]u8 = undefined;
     @memcpy(ikm[0..dcid.len], dcid);
-    @memcpy(ikm[dcid.len..dcid.len + psk_identity.len], psk_identity);
+    @memcpy(ikm[dcid.len .. dcid.len + psk_identity.len], psk_identity);
 
     // Extract initial secret
     var initial_secret: [32]u8 = undefined;
-    try hkdfExtract(&initial_secret, &QUIC_V1_INITIAL_SALT, ikm[0..dcid.len + psk_identity.len]);
+    try hkdfExtract(&initial_secret, &QUIC_V1_INITIAL_SALT, ikm[0 .. dcid.len + psk_identity.len]);
 
     // Derive client and server secrets
     var client_secret: [32]u8 = undefined;

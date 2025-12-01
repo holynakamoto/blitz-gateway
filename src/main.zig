@@ -11,7 +11,7 @@ pub fn main() !void {
     // Use std.debug.print for immediate unbuffered output
     std.debug.print("Blitz Edge Gateway v0.1.0\n", .{});
     std.debug.print("Target: 10M+ RPS, <50µs p99 latency\n", .{});
-    
+
     std.log.info("Blitz Edge Gateway v0.1.0", .{});
     std.log.info("Target: 10M+ RPS, <50µs p99 latency", .{});
 
@@ -19,14 +19,13 @@ pub fn main() !void {
     if (builtin.os.tag == .linux) {
         try io_uring.init();
         defer io_uring.deinit();
-        
+
         std.log.info("io_uring initialized", .{});
         std.log.info("Starting echo server on port 8080...", .{});
-        
+
         try io_uring.runEchoServer(8080);
     } else {
         std.log.err("io_uring is only supported on Linux. Current OS: {}", .{builtin.os.tag});
         return error.UnsupportedPlatform;
     }
 }
-

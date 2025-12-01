@@ -21,36 +21,36 @@ pub const LongHeaderPacket = struct {
     dest_conn_id: []const u8,
     src_conn_id: []const u8,
     payload: []const u8,
-    
+
     pub fn parse(data: []const u8) !LongHeaderPacket {
         if (data.len < 7) {
             return error.IncompletePacket;
         }
-        
+
         const first_byte = data[0];
         const packet_type = (first_byte & PACKET_TYPE_MASK) >> 4;
-        
+
         // Version is next 4 bytes (network byte order)
         const version = std.mem.readInt(u32, data[1..][0..4], .big);
-        
+
         // Connection ID lengths (RFC 9000: DCID length, then SCID length, both at start)
         const dest_conn_id_len = data[5];
         const src_conn_id_len = data[6];
-        
+
         var offset: usize = 7;
-        
+
         if (offset + dest_conn_id_len > data.len) {
             return error.IncompletePacket;
         }
-        const dest_conn_id = data[offset..offset + dest_conn_id_len];
+        const dest_conn_id = data[offset .. offset + dest_conn_id_len];
         offset += dest_conn_id_len;
-        
+
         if (offset + src_conn_id_len > data.len) {
             return error.IncompletePacket;
         }
-        const src_conn_id = data[offset..offset + src_conn_id_len];
+        const src_conn_id = data[offset .. offset + src_conn_id_len];
         offset += src_conn_id_len;
-        
+
         // Token length (for INITIAL packets)
         var token_len: usize = 0;
         if (packet_type == PACKET_TYPE_INITIAL) {
@@ -59,7 +59,7 @@ pub const LongHeaderPacket = struct {
             }
             token_len = std.mem.readInt(u16, data[offset..][0..2], .big);
             offset += 2;
-            
+
             // Only check token space if token_len > 0
             if (token_len > 0) {
                 if (offset + token_len > data.len) {
@@ -68,26 +68,26 @@ pub const LongHeaderPacket = struct {
                 offset += token_len; // Skip token
             }
         }
-        
+
         // Length field (2 bytes) - must have at least 2 bytes remaining
         if (offset + 2 > data.len) {
             return error.IncompletePacket;
         }
         const payload_len = std.mem.readInt(u16, data[offset..][0..2], .big);
         offset += 2;
-        
+
         // Create payload slice
         // Handle empty payload (payload_len == 0) and non-empty payload
-        const payload: []const u8 = if (payload_len == 0) 
+        const payload: []const u8 = if (payload_len == 0)
             if (offset < data.len) data[offset..offset] else data[data.len..] // Empty slice
         else blk: {
             // Check if we have enough space for non-empty payload
             if (offset + payload_len > data.len) {
                 return error.IncompletePacket;
             }
-            break :blk data[offset..offset + payload_len];
+            break :blk data[offset .. offset + payload_len];
         };
-        
+
         return LongHeaderPacket{
             .packet_type = packet_type,
             .version = version,
@@ -103,15 +103,15 @@ pub const ShortHeaderPacket = struct {
     dest_conn_id: []const u8,
     packet_number: u64,
     payload: []const u8,
-    
+
     pub fn parse(data: []const u8, conn_id_len: usize) !ShortHeaderPacket {
         if (data.len < 1 + conn_id_len) {
             return error.IncompletePacket;
         }
-        
-        const dest_conn_id = data[1..1 + conn_id_len];
+
+        const dest_conn_id = data[1 .. 1 + conn_id_len];
         var offset: usize = 1 + conn_id_len;
-        
+
         // Packet number is variable length (1-4 bytes)
         // First byte after conn_id has packet number length in bits 0-1
         if (offset >= data.len) {
@@ -120,19 +120,19 @@ pub const ShortHeaderPacket = struct {
         const pn_byte = data[offset];
         const pn_len = ((pn_byte & 0x03) + 1);
         offset += 1;
-        
+
         if (offset + pn_len > data.len) {
             return error.IncompletePacket;
         }
-        
+
         var packet_number: u64 = 0;
         for (0..pn_len) |i| {
             packet_number |= @as(u64, data[offset + i]) << (@as(u6, @intCast(i)) * 8);
         }
         offset += pn_len;
-        
+
         const payload = data[offset..];
-        
+
         return ShortHeaderPacket{
             .dest_conn_id = dest_conn_id,
             .packet_number = packet_number,
@@ -150,12 +150,12 @@ pub fn isLongHeader(first_byte: u8) bool {
 pub const Packet = union(enum) {
     long: LongHeaderPacket,
     short: ShortHeaderPacket,
-    
+
     pub fn parse(data: []const u8, conn_id_len: usize) !Packet {
         if (data.len == 0) {
             return error.IncompletePacket;
         }
-        
+
         if (isLongHeader(data[0])) {
             const long = try LongHeaderPacket.parse(data);
             return Packet{ .long = long };
@@ -199,10 +199,10 @@ pub const CryptoFrame = struct {
     offset: u64,
     length: u64,
     data: []const u8,
-    
+
     pub fn parse(data: []const u8) !CryptoFrame {
         var offset: usize = 0;
-        
+
         // Frame type (1 byte) - should be 0x06
         if (data.len < 1) {
             return error.IncompleteFrame;
@@ -211,25 +211,25 @@ pub const CryptoFrame = struct {
             return error.InvalidFrameType;
         }
         offset += 1;
-        
+
         // Offset (variable length)
         const offset_len = try readVarInt(data[offset..]);
         offset += offset_len.bytes_read;
         const frame_offset = offset_len.value;
-        
+
         // Length (variable length)
         const length_len = try readVarInt(data[offset..]);
         offset += length_len.bytes_read;
         const frame_length = length_len.value;
-        
+
         if (offset + frame_length > data.len) {
             return error.IncompleteFrame;
         }
-        
+
         return CryptoFrame{
             .offset = frame_offset,
             .length = frame_length,
-            .data = data[offset..offset + frame_length],
+            .data = data[offset .. offset + frame_length],
         };
     }
 };
@@ -244,10 +244,10 @@ fn readVarInt(data: []const u8) !VarIntResult {
     if (data.len == 0) {
         return error.IncompleteVarInt;
     }
-    
+
     const first_byte = data[0];
     const prefix = (first_byte & 0xC0) >> 6;
-    
+
     return switch (prefix) {
         0 => VarIntResult{
             .value = @as(u64, first_byte & 0x3F),
@@ -292,27 +292,27 @@ fn readVarInt(data: []const u8) !VarIntResult {
 // Generate INITIAL packet with CRYPTO frame payload
 // Returns the number of bytes written to out_buf
 pub fn generateInitialPacket(
-    dest_conn_id: []const u8,  // Client's connection ID (destination from server perspective)
-    src_conn_id: []const u8,   // Server's connection ID (source from server perspective)
-    payload: []const u8,        // CRYPTO frame(s) to include
+    dest_conn_id: []const u8, // Client's connection ID (destination from server perspective)
+    src_conn_id: []const u8, // Server's connection ID (source from server perspective)
+    payload: []const u8, // CRYPTO frame(s) to include
     out_buf: []u8,
 ) !usize {
     var offset: usize = 0;
-    
+
     // Check buffer size (rough estimate: header + payload)
     const min_size = 1 + 4 + 1 + dest_conn_id.len + 1 + src_conn_id.len + 2 + 2 + payload.len;
     if (out_buf.len < min_size) {
         return error.BufferTooSmall;
     }
-    
+
     // First byte: Long header (0x80) + INITIAL (0x00) = 0x80
     out_buf[offset] = 0x80; // Long header bit + INITIAL type
     offset += 1;
-    
+
     // Version (4 bytes, network byte order)
     std.mem.writeInt(u32, out_buf[offset..][0..4], QUIC_VERSION_1, .big);
     offset += 4;
-    
+
     // Connection ID lengths (both at bytes 5 and 6, before the actual IDs)
     if (dest_conn_id.len > 255) {
         return error.InvalidConnIdLength;
@@ -326,28 +326,28 @@ pub fn generateInitialPacket(
     out_buf[offset] = @truncate(dest_conn_id.len);
     out_buf[offset + 1] = @truncate(src_conn_id.len);
     offset += 2;
-    
+
     // Destination Connection ID
     if (offset + dest_conn_id.len > out_buf.len) {
         return error.BufferTooSmall;
     }
-    @memcpy(out_buf[offset..offset + dest_conn_id.len], dest_conn_id);
+    @memcpy(out_buf[offset .. offset + dest_conn_id.len], dest_conn_id);
     offset += dest_conn_id.len;
-    
+
     // Source Connection ID
     if (offset + src_conn_id.len > out_buf.len) {
         return error.BufferTooSmall;
     }
-    @memcpy(out_buf[offset..offset + src_conn_id.len], src_conn_id);
+    @memcpy(out_buf[offset .. offset + src_conn_id.len], src_conn_id);
     offset += src_conn_id.len;
-    
+
     // Token length (2 bytes, big-endian) - 0 for server response
     if (offset + 2 > out_buf.len) {
         return error.BufferTooSmall;
     }
     std.mem.writeInt(u16, out_buf[offset..][0..2], 0, .big);
     offset += 2;
-    
+
     // Payload length (2 bytes, big-endian)
     if (offset + 2 > out_buf.len) {
         return error.BufferTooSmall;
@@ -357,41 +357,41 @@ pub fn generateInitialPacket(
     }
     std.mem.writeInt(u16, out_buf[offset..][0..2], @truncate(payload.len), .big);
     offset += 2;
-    
+
     // Payload (CRYPTO frame(s))
     if (offset + payload.len > out_buf.len) {
         return error.BufferTooSmall;
     }
-    @memcpy(out_buf[offset..offset + payload.len], payload);
+    @memcpy(out_buf[offset .. offset + payload.len], payload);
     offset += payload.len;
-    
+
     return offset;
 }
 
 // Generate HANDSHAKE packet with CRYPTO frame payload
 // Returns the number of bytes written to out_buf
 pub fn generateHandshakePacket(
-    dest_conn_id: []const u8,  // Client's connection ID
-    src_conn_id: []const u8,   // Server's connection ID
-    payload: []const u8,       // CRYPTO frame(s) to include
+    dest_conn_id: []const u8, // Client's connection ID
+    src_conn_id: []const u8, // Server's connection ID
+    payload: []const u8, // CRYPTO frame(s) to include
     out_buf: []u8,
 ) !usize {
     var offset: usize = 0;
-    
+
     // Check buffer size
     const min_size = 1 + 4 + 1 + dest_conn_id.len + 1 + src_conn_id.len + 2 + payload.len;
     if (out_buf.len < min_size) {
         return error.BufferTooSmall;
     }
-    
+
     // First byte: Long header (0x80) + HANDSHAKE (0x20) = 0xA0
     out_buf[offset] = 0xA0; // Long header bit + HANDSHAKE type
     offset += 1;
-    
+
     // Version (4 bytes, network byte order)
     std.mem.writeInt(u32, out_buf[offset..][0..4], QUIC_VERSION_1, .big);
     offset += 4;
-    
+
     // Connection ID lengths (both at bytes 5 and 6, before the actual IDs)
     if (dest_conn_id.len > 255) {
         return error.InvalidConnIdLength;
@@ -405,23 +405,23 @@ pub fn generateHandshakePacket(
     out_buf[offset] = @truncate(dest_conn_id.len);
     out_buf[offset + 1] = @truncate(src_conn_id.len);
     offset += 2;
-    
+
     // Destination Connection ID
     if (offset + dest_conn_id.len > out_buf.len) {
         return error.BufferTooSmall;
     }
-    @memcpy(out_buf[offset..offset + dest_conn_id.len], dest_conn_id);
+    @memcpy(out_buf[offset .. offset + dest_conn_id.len], dest_conn_id);
     offset += dest_conn_id.len;
-    
+
     // Source Connection ID
     if (offset + src_conn_id.len > out_buf.len) {
         return error.BufferTooSmall;
     }
-    @memcpy(out_buf[offset..offset + src_conn_id.len], src_conn_id);
+    @memcpy(out_buf[offset .. offset + src_conn_id.len], src_conn_id);
     offset += src_conn_id.len;
-    
+
     // No token field for HANDSHAKE packets
-    
+
     // Payload length (2 bytes, big-endian)
     if (offset + 2 > out_buf.len) {
         return error.BufferTooSmall;
@@ -431,14 +431,14 @@ pub fn generateHandshakePacket(
     }
     std.mem.writeInt(u16, out_buf[offset..][0..2], @truncate(payload.len), .big);
     offset += 2;
-    
+
     // Payload (CRYPTO frame(s))
     if (offset + payload.len > out_buf.len) {
         return error.BufferTooSmall;
     }
-    @memcpy(out_buf[offset..offset + payload.len], payload);
+    @memcpy(out_buf[offset .. offset + payload.len], payload);
     offset += payload.len;
-    
+
     return offset;
 }
 
@@ -469,4 +469,3 @@ pub fn writeVarInt(writer: anytype, value: u64) !usize {
         return 8;
     }
 }
-

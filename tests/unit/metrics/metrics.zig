@@ -225,7 +225,7 @@ pub const MetricsServer = struct {
         if (self.running) return;
 
         self.running = true;
-        self.server_thread = try std.Thread.spawn(.{}, metricsServerThread, .{self, port});
+        self.server_thread = try std.Thread.spawn(.{}, metricsServerThread, .{ self, port });
     }
 
     pub fn stop(self: *MetricsServer) void {
@@ -351,18 +351,14 @@ pub const BlitzMetrics = struct {
     pub fn recordHttpResponse(self: *BlitzMetrics, status_code: u16) void {
         self.http_responses_total.inc();
 
-    // Get or create status-specific counter
-    const status_key = status_code / 100 * 100; // Group by hundreds (2xx, 3xx, etc.)
-    const status_key_str = std.fmt.allocPrint(self.allocator, "{d}", .{status_key}) catch return;
-    defer self.allocator.free(status_key_str);
+        // Get or create status-specific counter
+        const status_key = status_code / 100 * 100; // Group by hundreds (2xx, 3xx, etc.)
+        const status_key_str = std.fmt.allocPrint(self.allocator, "{d}", .{status_key}) catch return;
+        defer self.allocator.free(status_key_str);
 
-    const status_counter = self.http_responses_by_status.getOrPutValue(status_key_str, Counter.init(
-        std.fmt.allocPrint(self.allocator, "blitz_http_responses_{d}xx_total", .{status_key / 100}) catch "blitz_http_responses_unknown_total",
-        std.fmt.allocPrint(self.allocator, "HTTP {d}xx responses", .{status_key / 100}) catch "HTTP responses",
-        "responses"
-    )) catch return;
+        const status_counter = self.http_responses_by_status.getOrPutValue(status_key_str, Counter.init(std.fmt.allocPrint(self.allocator, "blitz_http_responses_{d}xx_total", .{status_key / 100}) catch "blitz_http_responses_unknown_total", std.fmt.allocPrint(self.allocator, "HTTP {d}xx responses", .{status_key / 100}) catch "HTTP responses", "responses")) catch return;
 
-    status_counter.value_ptr.inc();
+        status_counter.value_ptr.inc();
     }
 
     // Connection metrics methods
@@ -402,11 +398,7 @@ pub const BlitzMetrics = struct {
         const backend_key = std.fmt.allocPrint(self.allocator, "backend_{s}", .{backend_host}) catch return;
         defer self.allocator.free(backend_key);
 
-        const backend_counter = self.lb_requests_backend.getOrPutValue(backend_key, Counter.init(
-            std.fmt.allocPrint(self.allocator, "blitz_lb_requests_backend_{s}_total", .{backend_host}) catch "blitz_lb_requests_backend_unknown_total",
-            std.fmt.allocPrint(self.allocator, "Requests to backend {s}", .{backend_host}) catch "Requests to backend",
-            "requests"
-        )) catch return;
+        const backend_counter = self.lb_requests_backend.getOrPutValue(backend_key, Counter.init(std.fmt.allocPrint(self.allocator, "blitz_lb_requests_backend_{s}_total", .{backend_host}) catch "blitz_lb_requests_backend_unknown_total", std.fmt.allocPrint(self.allocator, "Requests to backend {s}", .{backend_host}) catch "Requests to backend", "requests")) catch return;
 
         backend_counter.value_ptr.inc();
     }
@@ -415,11 +407,7 @@ pub const BlitzMetrics = struct {
         const backend_key = std.fmt.allocPrint(self.allocator, "backend_{s}", .{backend_host}) catch return;
         defer self.allocator.free(backend_key);
 
-        const health_gauge = self.lb_backend_healthy.getOrPutValue(backend_key, Gauge.init(
-            std.fmt.allocPrint(self.allocator, "blitz_lb_backend_{s}_healthy", .{backend_host}) catch "blitz_lb_backend_unknown_healthy",
-            std.fmt.allocPrint(self.allocator, "Backend {s} health status", .{backend_host}) catch "Backend health status",
-            "status"
-        )) catch return;
+        const health_gauge = self.lb_backend_healthy.getOrPutValue(backend_key, Gauge.init(std.fmt.allocPrint(self.allocator, "blitz_lb_backend_{s}_healthy", .{backend_host}) catch "blitz_lb_backend_unknown_healthy", std.fmt.allocPrint(self.allocator, "Backend {s} health status", .{backend_host}) catch "Backend health status", "status")) catch return;
 
         health_gauge.value_ptr.set(if (healthy) 1.0 else 0.0);
     }

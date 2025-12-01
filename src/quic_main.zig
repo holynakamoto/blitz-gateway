@@ -144,9 +144,7 @@ pub fn main() !void {
         // Check for reload signal
         if (reload_manager) |*rm| {
             if (try rm.checkForReloadSignal()) |reload_req| {
-                std.log.info("Reload signal received ({s}), restarting server...", .{
-                    @tagName(reload_req.signal)
-                });
+                std.log.info("Reload signal received ({s}), restarting server...", .{@tagName(reload_req.signal)});
 
                 // Load new configuration
                 var new_config = try config.loadConfig(allocator, cfg_path);
@@ -177,12 +175,10 @@ fn reloadCallback(new_config: *config.Config) anyerror!void {
     std.log.info("Reload callback: New configuration applied", .{});
 
     if (new_config.mode == .load_balancer) {
-        std.log.info("Load balancer config: {} backends, listen on {s}:{}",
-            .{new_config.backends.items.len, new_config.listen_addr, new_config.listen_port});
+        std.log.info("Load balancer config: {} backends, listen on {s}:{}", .{ new_config.backends.items.len, new_config.listen_addr, new_config.listen_port });
 
         for (new_config.backends.items, 0..) |backend, i| {
-            std.log.info("  Backend [{}]: {s}:{} (weight: {})",
-                .{i + 1, backend.host, backend.port, backend.weight});
+            std.log.info("  Backend [{}]: {s}:{} (weight: {})", .{ i + 1, backend.host, backend.port, backend.weight });
         }
     }
 }
@@ -190,13 +186,11 @@ fn reloadCallback(new_config: *config.Config) anyerror!void {
 /// Run load balancer server
 fn runLoadBalancer(allocator: std.mem.Allocator, cfg: *const config.Config, _: ?*metrics.BlitzMetrics) !void {
     std.debug.print("Starting QUIC/HTTP3 Load Balancer\n", .{});
-    std.debug.print("Listen: {s}:{d}\n", .{cfg.listen_addr, cfg.listen_port});
+    std.debug.print("Listen: {s}:{d}\n", .{ cfg.listen_addr, cfg.listen_port });
     std.debug.print("Backends: {}\n", .{cfg.backends.items.len});
 
     for (cfg.backends.items, 0..) |backend, i| {
-        std.debug.print("  [{d}] {s}:{d} (weight: {})\n", .{
-            i + 1, backend.host, backend.port, backend.weight
-        });
+        std.debug.print("  [{d}] {s}:{d} (weight: {})\n", .{ i + 1, backend.host, backend.port, backend.weight });
         if (backend.health_check_path) |path| {
             std.debug.print("      Health check: {s}\n", .{path});
         }
@@ -273,4 +267,3 @@ fn printUsage() void {
         \\
     , .{});
 }
-

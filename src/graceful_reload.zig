@@ -16,7 +16,7 @@ pub const GracefulReload = struct {
     signal_channel: SignalChannel,
 
     /// Reload callback
-    reload_callback: ?*const fn(*config.Config) anyerror!void,
+    reload_callback: ?*const fn (*config.Config) anyerror!void,
 
     /// Whether reload is in progress
     reloading: bool = false,
@@ -32,11 +32,7 @@ pub const GracefulReload = struct {
     /// Initialize graceful reload manager
     pub fn init(allocator: std.mem.Allocator, initial_config: config.Config) !GracefulReload {
         // Create signal pipe
-        var pipe_fds: [2]std.posix.fd_t = undefined;
-        const rc = std.posix.pipe2(&pipe_fds, std.posix.O.CLOEXEC);
-        if (rc != 0) {
-            return error.PipeCreationFailed;
-        }
+        const pipe_fds = try std.posix.pipe2(.{ .CLOEXEC = true });
 
         const gr = GracefulReload{
             .allocator = allocator,
@@ -65,7 +61,7 @@ pub const GracefulReload = struct {
     }
 
     /// Set the reload callback function
-    pub fn setReloadCallback(self: *GracefulReload, callback: *const fn(*config.Config) anyerror!void) void {
+    pub fn setReloadCallback(self: *GracefulReload, callback: *const fn (*config.Config) anyerror!void) void {
         self.reload_callback = callback;
     }
 
@@ -130,7 +126,7 @@ pub const GracefulReload = struct {
     fn setupSignalHandlers(write_fd: std.posix.fd_t) !void {
         // Set up SIGHUP handler (configuration reload)
         const sighup_handler = struct {
-            fn handler(sig: c_int) callconv(.C) void {
+            fn handler(sig: c_int) callconv(.c) void {
                 _ = sig;
                 // Write signal type to pipe
                 const signal_byte = @intFromEnum(SignalType.sighup);
@@ -140,7 +136,7 @@ pub const GracefulReload = struct {
 
         // Set up SIGUSR2 handler (alternative reload signal)
         const sigusr2_handler = struct {
-            fn handler(sig: c_int) callconv(.C) void {
+            fn handler(sig: c_int) callconv(.c) void {
                 _ = sig;
                 // Write signal type to pipe
                 const signal_byte = @intFromEnum(SignalType.sigusr2);
@@ -173,8 +169,8 @@ pub const ReloadRequest = struct {
 
 /// Signal types that trigger reload
 pub const SignalType = enum(u8) {
-    sighup = 1,   // Standard configuration reload signal
-    sigusr2 = 2,  // Alternative reload signal (Nginx style)
+    sighup = 1, // Standard configuration reload signal
+    sigusr2 = 2, // Alternative reload signal (Nginx style)
 };
 
 /// Graceful reload error types

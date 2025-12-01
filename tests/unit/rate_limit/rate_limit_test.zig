@@ -289,9 +289,7 @@ test "Rate Limit: Statistics tracking is accurate" {
     const r4 = limiter.checkRequest(ip2); // Deny (ip2's second request - per-IP limit)
 
     // Debug output
-    std.debug.print("Results: r1={}, r2={}, r3={}, r4={}\n", .{
-        @intFromEnum(r1), @intFromEnum(r2), @intFromEnum(r3), @intFromEnum(r4)
-    });
+    std.debug.print("Results: r1={}, r2={}, r3={}, r4={}\n", .{ @intFromEnum(r1), @intFromEnum(r2), @intFromEnum(r3), @intFromEnum(r4) });
 
     const stats = limiter.getStats();
 

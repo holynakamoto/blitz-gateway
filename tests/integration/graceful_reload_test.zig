@@ -247,9 +247,7 @@ test "Graceful Reload Performance: Config reload speed" {
     const total_time = end_time - start_time;
     const avg_time = @as(f64, @floatFromInt(total_time)) / 10.0;
 
-    std.debug.print("Graceful reload performance: 10 reloads in {} ms (avg: {d:.2} ms/reload)\n", .{
-        total_time, avg_time
-    });
+    std.debug.print("Graceful reload performance: 10 reloads in {} ms (avg: {d:.2} ms/reload)\n", .{ total_time, avg_time });
 
     // Should complete quickly (< 5ms per reload on average)
     try testing.expect(avg_time < 5.0);

@@ -35,29 +35,29 @@ pub const FrameType = enum(u8) {
 // CRYPTO Frame (RFC 9000 Section 19.6)
 // Used to carry TLS handshake messages
 pub const CryptoFrame = struct {
-    offset: u64,      // Byte offset in crypto stream
-    length: u64,      // Length of crypto data
+    offset: u64, // Byte offset in crypto stream
+    length: u64, // Length of crypto data
     data: []const u8, // Crypto data (TLS messages)
-    
+
     pub fn parse(payload: []const u8) !CryptoFrame {
         var offset: usize = 0;
-        
+
         // Frame type should already be consumed by caller
         // But we'll check if it's present
         if (payload.len == 0) {
             return error.IncompleteFrame;
         }
-        
+
         // If first byte is frame type, skip it
         if (payload[0] == @intFromEnum(FrameType.crypto)) {
             offset += 1;
         }
-        
+
         // Read offset (VarInt)
         const offset_result = try readVarInt(payload[offset..]);
         offset += offset_result.bytes_read;
         const frame_offset = offset_result.value;
-        
+
         // Read length (VarInt)
         if (offset >= payload.len) {
             return error.IncompleteFrame;
@@ -65,24 +65,24 @@ pub const CryptoFrame = struct {
         const length_result = try readVarInt(payload[offset..]);
         offset += length_result.bytes_read;
         const frame_length = length_result.value;
-        
+
         // Extract data
         if (offset + frame_length > payload.len) {
             return error.IncompleteFrame;
         }
-        
+
         return CryptoFrame{
             .offset = frame_offset,
             .length = frame_length,
-            .data = payload[offset..offset + frame_length],
+            .data = payload[offset .. offset + frame_length],
         };
     }
-    
+
     // Parse from packet payload (assumes frame type already identified)
     pub fn parseFromPayload(payload: []const u8) !CryptoFrame {
         return parse(payload);
     }
-    
+
     // Generate CRYPTO frame
     // Returns the number of bytes written to out_buf
     pub fn generate(
@@ -91,27 +91,27 @@ pub const CryptoFrame = struct {
         out_buf: []u8,
     ) !usize {
         var offset: usize = 0;
-        
+
         // Write frame type (0x06 = CRYPTO)
         if (offset >= out_buf.len) return error.BufferTooSmall;
         out_buf[offset] = @intFromEnum(FrameType.crypto);
         offset += 1;
-        
+
         // Write offset (VarInt)
         const offset_bytes = try writeVarInt(out_buf[offset..], frame_offset);
         offset += offset_bytes;
-        
+
         // Write length (VarInt)
         const length_bytes = try writeVarInt(out_buf[offset..], @intCast(data.len));
         offset += length_bytes;
-        
+
         // Write data
         if (offset + data.len > out_buf.len) {
             return error.BufferTooSmall;
         }
-        @memcpy(out_buf[offset..offset + data.len], data);
+        @memcpy(out_buf[offset .. offset + data.len], data);
         offset += data.len;
-        
+
         return offset;
     }
 };
@@ -127,10 +127,10 @@ fn readVarInt(data: []const u8) !VarIntResult {
     if (data.len == 0) {
         return error.IncompleteVarInt;
     }
-    
+
     const first_byte = data[0];
     const prefix = (first_byte & 0xC0) >> 6;
-    
+
     return switch (prefix) {
         0 => VarIntResult{
             .value = @as(u64, first_byte & 0x3F),
@@ -210,9 +210,9 @@ pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !s
     // Zig 0.15.2: Use initCapacity for managed ArrayList
     var frames = std.ArrayList(CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
     errdefer frames.deinit(allocator);
-    
+
     var offset: usize = 0;
-    
+
     while (offset < payload.len) {
         // Check frame type
         if (payload[offset] == @intFromEnum(FrameType.crypto)) {
@@ -220,16 +220,16 @@ pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !s
             const frame = try CryptoFrame.parseFromPayload(payload[offset..]);
             // Zig 0.15.2: append requires allocator
             try frames.append(allocator, frame);
-            
+
             // Move offset past this frame
             // Frame type (1) + offset VarInt + length VarInt + data
             var frame_size: usize = 1; // Frame type
-            const offset_result = try readVarInt(payload[offset + frame_size..]);
+            const offset_result = try readVarInt(payload[offset + frame_size ..]);
             frame_size += offset_result.bytes_read;
-            const length_result = try readVarInt(payload[offset + frame_size..]);
+            const length_result = try readVarInt(payload[offset + frame_size ..]);
             frame_size += length_result.bytes_read;
             frame_size += @intCast(length_result.value);
-            
+
             offset += frame_size;
         } else {
             // Skip other frame types for now
@@ -237,7 +237,6 @@ pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !s
             offset += 1;
         }
     }
-    
+
     return frames;
 }
-

@@ -14,24 +14,24 @@ pub fn createUdpSocket(port: u16) !c_int {
     if (sockfd < 0) {
         return error.SocketCreationFailed;
     }
-    
+
     // Enable SO_REUSEADDR
     const opt: c_int = 1;
     _ = c.setsockopt(sockfd, c.SOL_SOCKET, c.SO_REUSEADDR, &opt, @sizeOf(c_int));
-    
+
     // Bind to port
     var addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in);
     addr.sin_family = c.AF_INET;
     addr.sin_addr.s_addr = c.INADDR_ANY;
     addr.sin_port = c.htons(port);
-    
+
     // Use the C wrapper for bind to avoid glibc type issues
     if (io_uring_mod.blitz_bind(sockfd, &addr) < 0) {
         std.log.err("bind() failed on UDP port {}", .{port});
         _ = c.close(sockfd);
         return error.BindFailed;
     }
-    
+
     return sockfd;
 }
 
@@ -41,7 +41,7 @@ pub const UdpConnection = struct {
     client_addr: c.struct_sockaddr_in,
     client_addr_len: c.socklen_t,
     read_buffer: ?[]u8 = null,
-    
+
     pub fn init(fd: c_int, client_addr: c.struct_sockaddr_in, client_addr_len: c.socklen_t) UdpConnection {
         return UdpConnection{
             .fd = fd,
@@ -89,4 +89,3 @@ pub fn prepSendTo(
         addr_len,
     );
 }
-

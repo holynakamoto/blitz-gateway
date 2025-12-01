@@ -26,7 +26,7 @@ pub const SlabAllocator = struct {
         while (i > 0) {
             i -= 1;
             const node = try arena.allocator().create(Node);
-            node.data = chunk[i * slot_size..][0..slot_size];
+            node.data = chunk[i * slot_size ..][0..slot_size];
             node.next = free_list;
             free_list = node;
         }
@@ -87,12 +87,12 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(read_buffers);
 
         var read_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init read_free list");
-        errdefer read_free.deinit();
+        errdefer read_free.deinit(backing_allocator);
 
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             read_buffers[i] = buf;
-            try read_free.append(i);
+            try read_free.append(backing_allocator, i);
         }
 
         // Pre-allocate all write buffers
@@ -100,12 +100,12 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(write_buffers);
 
         var write_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init write_free list");
-        errdefer write_free.deinit();
+        errdefer write_free.deinit(backing_allocator);
 
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             write_buffers[i] = buf;
-            try write_free.append(i);
+            try write_free.append(backing_allocator, i);
         }
 
         return BufferPool{
@@ -131,23 +131,25 @@ pub const BufferPool = struct {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.read_pool.buffers);
-        self.read_pool.free_indices.deinit();
+        self.read_pool.free_indices.deinit(self.backing_allocator);
 
         for (self.write_pool.buffers) |buf| {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.write_pool.buffers);
-        self.write_pool.free_indices.deinit();
+        self.write_pool.free_indices.deinit(self.backing_allocator);
     }
 
     pub fn acquireRead(self: *BufferPool) ?[]u8 {
         self.read_pool.mutex.lock();
         defer self.read_pool.mutex.unlock();
 
-        if (self.read_pool.free_indices.popOrNull()) |idx| {
-            return self.read_pool.buffers[idx];
+        // Check if list is empty before popping to avoid panic
+        if (self.read_pool.free_indices.items.len == 0) {
+            return null;
         }
-        return null;
+        const idx = self.read_pool.free_indices.pop();
+        return self.read_pool.buffers[idx];
     }
 
     pub fn releaseRead(self: *BufferPool, buf: []u8) void {
@@ -157,7 +159,7 @@ pub const BufferPool = struct {
         // Find the buffer index
         for (self.read_pool.buffers, 0..) |pool_buf, idx| {
             if (pool_buf.ptr == buf.ptr) {
-                self.read_pool.free_indices.append(idx) catch return;
+                self.read_pool.free_indices.append(self.backing_allocator, idx) catch return;
                 return;
             }
         }
@@ -167,10 +169,12 @@ pub const BufferPool = struct {
         self.write_pool.mutex.lock();
         defer self.write_pool.mutex.unlock();
 
-        if (self.write_pool.free_indices.popOrNull()) |idx| {
-            return self.write_pool.buffers[idx];
+        // Check if list is empty before popping to avoid panic
+        if (self.write_pool.free_indices.items.len == 0) {
+            return null;
         }
-        return null;
+        const idx = self.write_pool.free_indices.pop();
+        return self.write_pool.buffers[idx];
     }
 
     pub fn releaseWrite(self: *BufferPool, buf: []u8) void {
@@ -180,10 +184,9 @@ pub const BufferPool = struct {
         // Find the buffer index
         for (self.write_pool.buffers, 0..) |pool_buf, idx| {
             if (pool_buf.ptr == buf.ptr) {
-                self.write_pool.free_indices.append(idx) catch return;
+                self.write_pool.free_indices.append(self.backing_allocator, idx) catch return;
                 return;
             }
         }
     }
 };
-

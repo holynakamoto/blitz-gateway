@@ -32,9 +32,9 @@ pub const Payload = struct {
     iss: ?[]const u8 = null, // Issuer
     sub: ?[]const u8 = null, // Subject
     aud: ?[]const u8 = null, // Audience
-    exp: ?i64 = null,        // Expiration time
-    nbf: ?i64 = null,        // Not before
-    iat: ?i64 = null,        // Issued at
+    exp: ?i64 = null, // Expiration time
+    nbf: ?i64 = null, // Not before
+    iat: ?i64 = null, // Issued at
     jti: ?[]const u8 = null, // JWT ID
 
     // Custom claims can be added via additional JSON parsing
@@ -317,7 +317,8 @@ pub const Validator = struct {
             if (mem.eql(u8, key, "iss") or mem.eql(u8, key, "sub") or
                 mem.eql(u8, key, "aud") or mem.eql(u8, key, "exp") or
                 mem.eql(u8, key, "nbf") or mem.eql(u8, key, "iat") or
-                mem.eql(u8, key, "jti")) {
+                mem.eql(u8, key, "jti"))
+            {
                 continue;
             }
 

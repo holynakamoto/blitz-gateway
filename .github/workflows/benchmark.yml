@@ -5,17 +5,7 @@ name: Benchmark
 
 on:
   push:
-    branches: [ main, benchmark ]
-    paths:
-      - 'src/**'
-      - 'scripts/bench/**'
-      - 'benches/**'
-  pull_request:
     branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'scripts/bench/**'
-      - 'benches/**'
   workflow_dispatch:
     inputs:
       duration:
@@ -26,17 +16,20 @@ on:
         description: 'Number of concurrent connections'
         required: false
         default: '100'
+  schedule:
+    - cron: '0 3 * * *'   # Every day at 03:00 UTC
 
 jobs:
   # Comprehensive benchmarking
   benchmark-comprehensive:
     name: Comprehensive Benchmark
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest-8-core
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
@@ -86,12 +79,13 @@ jobs:
   # Performance regression test
   performance-regression:
     name: Performance Regression Test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest-8-core
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
@@ -142,12 +136,13 @@ jobs:
   # Memory and resource usage test
   resource-usage:
     name: Resource Usage Test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest-8-core
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
@@ -192,7 +187,8 @@ jobs:
   # Benchmark infrastructure validation
   benchmark-validation:
     name: Benchmark Infrastructure Check
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest-8-core
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

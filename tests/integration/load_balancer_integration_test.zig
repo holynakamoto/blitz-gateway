@@ -320,8 +320,8 @@ test "Load Balancer Integration: Complete Workflow" {
     const backend1_ratio = @as(f32, @floatFromInt(backend1_selections)) / @as(f32, @floatFromInt(total_selections));
     const backend2_ratio = @as(f32, @floatFromInt(backend2_selections)) / @as(f32, @floatFromInt(total_selections));
 
-    std.debug.print("     Backend 1 selections: {} (ratio: {d:.2})\n", .{backend1_selections, backend1_ratio});
-    std.debug.print("     Backend 2 selections: {} (ratio: {d:.2})\n", .{backend2_selections, backend2_ratio});
+    std.debug.print("     Backend 1 selections: {} (ratio: {d:.2})\n", .{ backend1_selections, backend1_ratio });
+    std.debug.print("     Backend 2 selections: {} (ratio: {d:.2})\n", .{ backend2_selections, backend2_ratio });
 
     try std.testing.expect(backend1_ratio > 0.65); // Should be ~75%
     try std.testing.expect(backend2_ratio < 0.35); // Should be ~25%

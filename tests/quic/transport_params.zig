@@ -40,12 +40,12 @@ pub const TransportParameters = struct {
     max_ack_delay: u64 = 25, // 25ms
     disable_active_migration: bool = true,
     active_connection_id_limit: u64 = 2,
-    
+
     // Encode transport parameters as TLV (Type-Length-Value) format
     // Returns number of bytes written
     pub fn encode(self: TransportParameters, buf: []u8) !usize {
         var offset: usize = 0;
-        
+
         // Encode each parameter as: VarInt ID, VarInt Length, Value
         const params = [_]struct { id: TransportParameterId, value: u64 }{
             .{ .id = .max_idle_timeout, .value = self.max_idle_timeout },
@@ -60,16 +60,16 @@ pub const TransportParameters = struct {
             .{ .id = .max_ack_delay, .value = self.max_ack_delay },
             .{ .id = .active_connection_id_limit, .value = self.active_connection_id_limit },
         };
-        
+
         for (params) |param| {
             // Write parameter ID (VarInt)
             const id_bytes = try writeVarInt(buf[offset..], @intFromEnum(param.id));
             offset += id_bytes;
-            
+
             // Write parameter length (VarInt) - 8 bytes for u64 value
             const len_bytes = try writeVarInt(buf[offset..], 8);
             offset += len_bytes;
-            
+
             // Write parameter value (8 bytes, big-endian)
             if (offset + 8 > buf.len) {
                 return error.BufferTooSmall;
@@ -77,44 +77,44 @@ pub const TransportParameters = struct {
             std.mem.writeInt(u64, buf[offset..][0..8], param.value, .big);
             offset += 8;
         }
-        
+
         // Encode disable_active_migration (boolean, 0 bytes value)
         const disable_id_bytes = try writeVarInt(buf[offset..], @intFromEnum(TransportParameterId.disable_active_migration));
         offset += disable_id_bytes;
         const disable_len_bytes = try writeVarInt(buf[offset..], 0);
         offset += disable_len_bytes;
-        
+
         return offset;
     }
-    
+
     // Decode transport parameters from TLV format
     pub fn decode(data: []const u8) !TransportParameters {
         var params = TransportParameters{};
         var offset: usize = 0;
-        
+
         while (offset < data.len) {
             // Read parameter ID (VarInt)
             const id_result = try readVarInt(data[offset..]);
             offset += id_result.bytes_read;
             const param_id = @as(TransportParameterId, @enumFromInt(id_result.value));
-            
+
             // Read parameter length (VarInt)
             const len_result = try readVarInt(data[offset..]);
             offset += len_result.bytes_read;
             const param_len = len_result.value;
-            
+
             // Read parameter value
             if (offset + param_len > data.len) {
                 return error.IncompleteTransportParameters;
             }
-            
-            const value: u64 = if (param_len == 0) 0 else if (param_len == 8) 
+
+            const value: u64 = if (param_len == 0) 0 else if (param_len == 8)
                 std.mem.readInt(u64, data[offset..][0..8], .big)
             else
                 return error.InvalidParameterLength;
-            
+
             offset += param_len;
-            
+
             // Set parameter value
             switch (param_id) {
                 .max_idle_timeout => params.max_idle_timeout = value,
@@ -134,7 +134,7 @@ pub const TransportParameters = struct {
                 },
             }
         }
-        
+
         return params;
     }
 };
@@ -144,10 +144,10 @@ fn readVarInt(data: []const u8) !struct { value: u64, bytes_read: usize } {
     if (data.len == 0) {
         return error.IncompleteVarInt;
     }
-    
+
     const first_byte = data[0];
     const prefix = (first_byte & 0xC0) >> 6;
-    
+
     return switch (prefix) {
         0 => .{ .value = @as(u64, first_byte & 0x3F), .bytes_read = 1 },
         1 => blk: {
@@ -196,4 +196,3 @@ fn writeVarInt(buf: []u8, value: u64) !usize {
         return 8;
     }
 }
-

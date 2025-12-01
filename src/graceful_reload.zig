@@ -16,7 +16,7 @@ pub const GracefulReload = struct {
     signal_channel: SignalChannel,
 
     /// Reload callback
-    reload_callback: ?*const fn(*config.Config) anyerror!void,
+    reload_callback: ?*const fn (*config.Config) anyerror!void,
 
     /// Whether reload is in progress
     reloading: bool = false,
@@ -65,7 +65,7 @@ pub const GracefulReload = struct {
     }
 
     /// Set the reload callback function
-    pub fn setReloadCallback(self: *GracefulReload, callback: *const fn(*config.Config) anyerror!void) void {
+    pub fn setReloadCallback(self: *GracefulReload, callback: *const fn (*config.Config) anyerror!void) void {
         self.reload_callback = callback;
     }
 
@@ -173,8 +173,8 @@ pub const ReloadRequest = struct {
 
 /// Signal types that trigger reload
 pub const SignalType = enum(u8) {
-    sighup = 1,   // Standard configuration reload signal
-    sigusr2 = 2,  // Alternative reload signal (Nginx style)
+    sighup = 1, // Standard configuration reload signal
+    sigusr2 = 2, // Alternative reload signal (Nginx style)
 };
 
 /// Graceful reload error types

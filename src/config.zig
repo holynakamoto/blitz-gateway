@@ -152,7 +152,7 @@ pub const Config = struct {
     allocator: std.mem.Allocator,
 
     pub const Mode = enum {
-        origin,     // Single origin server
+        origin, // Single origin server
         load_balancer, // Load balancer mode
     };
 
@@ -240,7 +240,7 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
 
             // Remove quotes if present
             const clean_value = if (value.len >= 2 and ((value[0] == '"' and value[value.len - 1] == '"') or
-                                                         (value[0] == '\'' and value[value.len - 1] == '\'')))
+                (value[0] == '\'' and value[value.len - 1] == '\'')))
                 value[1 .. value.len - 1]
             else
                 value;
@@ -263,45 +263,45 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
             } else {
                 return error.InvalidListenFormat;
             }
-        } else             if (std.mem.eql(u8, key, "mode")) {
-                if (std.mem.eql(u8, value, "load_balancer") or std.mem.eql(u8, value, "lb")) {
-                    config.mode = .load_balancer;
-                } else if (std.mem.eql(u8, value, "origin")) {
-                    config.mode = .origin;
-                } else {
-                    return error.InvalidMode;
-                }
-            } else if (std.mem.eql(u8, key, "rate_limit")) {
-                // Parse rate limit as "1000 req/s" format
-                if (std.mem.indexOf(u8, value, "req/s")) |pos| {
-                    const rate_str = value[0..pos];
-                    const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
-                    config.rate_limit.global_rps = rate;
-                } else {
-                    return error.InvalidRateLimitFormat;
-                }
-            } else if (std.mem.eql(u8, key, "rate_limit_per_ip")) {
-                // Parse per-IP rate limit as "100 req/s" format
-                if (std.mem.indexOf(u8, value, "req/s")) |pos| {
-                    const rate_str = value[0..pos];
-                    const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
-                    config.rate_limit.per_ip_rps = rate;
-                } else {
-                    return error.InvalidRateLimitFormat;
-                }
-            } else if (std.mem.eql(u8, key, "rate_limit_burst_multiplier")) {
-                config.rate_limit.burst_multiplier = try std.fmt.parseFloat(f32, value);
-            } else if (std.mem.eql(u8, key, "rate_limit_enable_ebpf")) {
-                config.rate_limit.enable_ebpf = std.mem.eql(u8, value, "true");
-            } else if (std.mem.eql(u8, key, "metrics_enabled")) {
-                config.metrics.enabled = std.mem.eql(u8, value, "true");
-            } else if (std.mem.eql(u8, key, "metrics_port")) {
-                config.metrics.port = try std.fmt.parseInt(u16, value, 10);
-            } else if (std.mem.eql(u8, key, "metrics_otlp_endpoint")) {
-                config.metrics.otlp_endpoint = try config.allocator.dupe(u8, value);
-            } else if (std.mem.eql(u8, key, "metrics_prometheus_enabled")) {
-                config.metrics.prometheus_enabled = std.mem.eql(u8, value, "true");
+        } else if (std.mem.eql(u8, key, "mode")) {
+            if (std.mem.eql(u8, value, "load_balancer") or std.mem.eql(u8, value, "lb")) {
+                config.mode = .load_balancer;
+            } else if (std.mem.eql(u8, value, "origin")) {
+                config.mode = .origin;
+            } else {
+                return error.InvalidMode;
             }
+        } else if (std.mem.eql(u8, key, "rate_limit")) {
+            // Parse rate limit as "1000 req/s" format
+            if (std.mem.indexOf(u8, value, "req/s")) |pos| {
+                const rate_str = value[0..pos];
+                const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
+                config.rate_limit.global_rps = rate;
+            } else {
+                return error.InvalidRateLimitFormat;
+            }
+        } else if (std.mem.eql(u8, key, "rate_limit_per_ip")) {
+            // Parse per-IP rate limit as "100 req/s" format
+            if (std.mem.indexOf(u8, value, "req/s")) |pos| {
+                const rate_str = value[0..pos];
+                const rate = try std.fmt.parseInt(u32, std.mem.trim(u8, rate_str, &std.ascii.whitespace), 10);
+                config.rate_limit.per_ip_rps = rate;
+            } else {
+                return error.InvalidRateLimitFormat;
+            }
+        } else if (std.mem.eql(u8, key, "rate_limit_burst_multiplier")) {
+            config.rate_limit.burst_multiplier = try std.fmt.parseFloat(f32, value);
+        } else if (std.mem.eql(u8, key, "rate_limit_enable_ebpf")) {
+            config.rate_limit.enable_ebpf = std.mem.eql(u8, value, "true");
+        } else if (std.mem.eql(u8, key, "metrics_enabled")) {
+            config.metrics.enabled = std.mem.eql(u8, value, "true");
+        } else if (std.mem.eql(u8, key, "metrics_port")) {
+            config.metrics.port = try std.fmt.parseInt(u16, value, 10);
+        } else if (std.mem.eql(u8, key, "metrics_otlp_endpoint")) {
+            config.metrics.otlp_endpoint = try config.allocator.dupe(u8, value);
+        } else if (std.mem.eql(u8, key, "metrics_prometheus_enabled")) {
+            config.metrics.prometheus_enabled = std.mem.eql(u8, value, "true");
+        }
     } else if (std.mem.startsWith(u8, section.?, "backends.")) {
         // Backend configuration
         // For simplicity, we'll just add all backends in order

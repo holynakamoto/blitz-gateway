@@ -43,7 +43,7 @@ pub const Config = struct {
     allocator: std.mem.Allocator,
 
     pub const Mode = enum {
-        origin,     // Single origin server
+        origin, // Single origin server
         load_balancer, // Load balancer mode
     };
 
@@ -130,7 +130,7 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
 
             // Remove quotes if present
             const clean_value = if (value.len >= 2 and ((value[0] == '"' and value[value.len - 1] == '"') or
-                                                         (value[0] == '\'' and value[value.len - 1] == '\'')))
+                (value[0] == '\'' and value[value.len - 1] == '\'')))
                 value[1 .. value.len - 1]
             else
                 value;

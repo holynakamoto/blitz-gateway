@@ -198,7 +198,8 @@ pub const JWTAuthMiddleware = struct {
         // Skip authentication for certain paths
         if (std.mem.eql(u8, req.path, "/health") or
             std.mem.eql(u8, req.path, "/metrics") or
-            std.mem.startsWith(u8, req.path, "/.well-known/")) {
+            std.mem.startsWith(u8, req.path, "/.well-known/"))
+        {
             return .next;
         }
 
@@ -220,11 +221,7 @@ pub const JWTAuthMiddleware = struct {
         // Try to authenticate
         const token = temp_jwt_middleware.authenticateRequest(req.headers) catch |err| {
             switch (err) {
-                jwt.ValidationError.InvalidToken,
-                jwt.ValidationError.InvalidSignature,
-                jwt.ValidationError.TokenExpired,
-                jwt.ValidationError.InvalidIssuer,
-                jwt.ValidationError.InvalidAudience => {
+                jwt.ValidationError.InvalidToken, jwt.ValidationError.InvalidSignature, jwt.ValidationError.TokenExpired, jwt.ValidationError.InvalidIssuer, jwt.ValidationError.InvalidAudience => {
                     res.setStatus(401);
                     try res.setHeader("WWW-Authenticate", "Bearer");
                     try res.setHeader("Content-Type", "application/json");

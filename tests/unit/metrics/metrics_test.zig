@@ -53,10 +53,10 @@ test "Metrics: Histogram basic functionality" {
     try testing.expectEqual(@as(f64, 0.0), histogram.getSum());
 
     // Observe some values
-    histogram.observe(0.5);  // bucket 0
-    histogram.observe(1.5);  // bucket 1
-    histogram.observe(3.0);  // bucket 2
-    histogram.observe(7.0);  // bucket 2
+    histogram.observe(0.5); // bucket 0
+    histogram.observe(1.5); // bucket 1
+    histogram.observe(3.0); // bucket 2
+    histogram.observe(7.0); // bucket 2
     histogram.observe(15.0); // bucket 3 (last)
 
     // Check counts
@@ -125,12 +125,12 @@ test "Metrics: Prometheus exporter" {
     // Update metrics
     counter.incBy(100);
     gauge.set(5.0);
-    histogram.observe(0.05);  // bucket 0
-    histogram.observe(0.5);   // bucket 1
-    histogram.observe(5.0);   // bucket 2
+    histogram.observe(0.05); // bucket 0
+    histogram.observe(0.5); // bucket 1
+    histogram.observe(5.0); // bucket 2
 
     // Export to Prometheus format
-        var buffer = std.ArrayList(u8).initCapacity(allocator, 1024);
+    var buffer = std.ArrayList(u8).initCapacity(allocator, 1024);
     defer buffer.deinit();
 
     const exporter = metrics.PrometheusExporter.init(&registry);
@@ -156,7 +156,7 @@ test "Metrics: BlitzMetrics integration" {
 
     // Test HTTP request recording
     blitz_metrics.recordHttpRequest(0.025); // 25ms request
-    blitz_metrics.recordHttpResponse(200);  // 200 OK
+    blitz_metrics.recordHttpResponse(200); // 200 OK
 
     // Test connection tracking
     blitz_metrics.incrementActiveConnections();
@@ -167,7 +167,7 @@ test "Metrics: BlitzMetrics integration" {
     blitz_metrics.recordQuicHandshake(0.01); // 10ms handshake
 
     // Test rate limiting metrics
-    blitz_metrics.recordRateLimitRequest(true, 42);  // dropped, 42 active IPs
+    blitz_metrics.recordRateLimitRequest(true, 42); // dropped, 42 active IPs
 
     // Test load balancer metrics
     blitz_metrics.recordLbRequest("backend-1");
@@ -219,11 +219,11 @@ test "Metrics: Histogram quantile calculation" {
     defer histogram.deinit();
 
     // Add observations
-    histogram.observe(0.05);  // bucket 0
-    histogram.observe(0.05);  // bucket 0
-    histogram.observe(0.5);   // bucket 1
-    histogram.observe(5.0);   // bucket 2
-    histogram.observe(50.0);  // bucket 3
+    histogram.observe(0.05); // bucket 0
+    histogram.observe(0.05); // bucket 0
+    histogram.observe(0.5); // bucket 1
+    histogram.observe(5.0); // bucket 2
+    histogram.observe(50.0); // bucket 3
     histogram.observe(500.0); // overflow
 
     // Check bucket counts (cumulative)
@@ -283,20 +283,12 @@ test "Metrics: Memory management" {
     var gauges: [3]metrics.Gauge = undefined;
 
     for (&counters, 0..) |*counter, i| {
-        counter.* = metrics.Counter.init(
-            std.fmt.allocPrint(allocator, "counter_{d}", .{i}) catch "counter",
-            "Test counter",
-            "ops"
-        );
+        counter.* = metrics.Counter.init(std.fmt.allocPrint(allocator, "counter_{d}", .{i}) catch "counter", "Test counter", "ops");
         try registry.registerCounter(counter);
     }
 
     for (&gauges, 0..) |*gauge, i| {
-        gauge.* = metrics.Gauge.init(
-            std.fmt.allocPrint(allocator, "gauge_{d}", .{i}) catch "gauge",
-            "Test gauge",
-            "value"
-        );
+        gauge.* = metrics.Gauge.init(std.fmt.allocPrint(allocator, "gauge_{d}", .{i}) catch "gauge", "Test gauge", "value");
         try registry.registerGauge(gauge);
     }
 

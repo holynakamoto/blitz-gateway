@@ -23,27 +23,27 @@ pub const FrameType = enum(u64) {
 // DATA Frame (RFC 9114 Section 7.2.1)
 pub const DataFrame = struct {
     data: []const u8,
-    
+
     pub fn parse(data: []const u8) !DataFrame {
         // DATA frame format: Type (varint) + Payload
         var offset: usize = 0;
-        
+
         // Read frame type (should be 0x00)
         const type_result = try readVarInt(data[offset..]);
         offset += type_result.bytes_read;
-        
+
         if (type_result.value != @intFromEnum(FrameType.data)) {
             return error.InvalidFrameType;
         }
-        
+
         // Remaining data is payload
         const payload = data[offset..];
-        
+
         return DataFrame{
             .data = payload,
         };
     }
-    
+
     pub fn generate(writer: anytype, data: []const u8) !void {
         // Write frame type (0x00 = DATA)
         _ = try writeVarInt(writer, @intFromEnum(FrameType.data));
@@ -55,26 +55,26 @@ pub const DataFrame = struct {
 // HEADERS Frame (RFC 9114 Section 7.2.2)
 pub const HeadersFrame = struct {
     header_block: []const u8, // QPACK-encoded header block
-    
+
     pub fn parse(data: []const u8) !HeadersFrame {
         var offset: usize = 0;
-        
+
         // Read frame type (should be 0x01)
         const type_result = try readVarInt(data[offset..]);
         offset += type_result.bytes_read;
-        
+
         if (type_result.value != @intFromEnum(FrameType.headers)) {
             return error.InvalidFrameType;
         }
-        
+
         // Remaining data is QPACK-encoded header block
         const header_block = data[offset..];
-        
+
         return HeadersFrame{
             .header_block = header_block,
         };
     }
-    
+
     pub fn generate(writer: anytype, header_block: []const u8) !void {
         // Write frame type (0x01 = HEADERS)
         _ = try writeVarInt(writer, @intFromEnum(FrameType.headers));
@@ -88,7 +88,7 @@ pub const HeadersFrame = struct {
         // Encode headers with QPACK
         const encoded = try encoder.encode(headers);
         defer encoder.allocator.free(encoded);
-        
+
         // Write frame type (0x01 = HEADERS)
         _ = try writeVarInt(writer, @intFromEnum(FrameType.headers));
         // Write QPACK-encoded header block
@@ -105,12 +105,12 @@ pub const HeadersFrame = struct {
 pub const SettingsFrame = struct {
     settings: std.ArrayList(Setting),
     allocator: std.mem.Allocator,
-    
+
     pub const Setting = struct {
         identifier: u64,
         value: u64,
     };
-    
+
     pub fn init(allocator: std.mem.Allocator) SettingsFrame {
         return SettingsFrame{
             // Zig 0.15.2: Use initCapacity
@@ -118,44 +118,44 @@ pub const SettingsFrame = struct {
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *SettingsFrame) void {
         // Zig 0.15.2: deinit requires allocator
         self.settings.deinit(self.allocator);
     }
-    
+
     pub fn parse(data: []const u8, allocator: std.mem.Allocator) !SettingsFrame {
         var frame = SettingsFrame.init(allocator);
         var offset: usize = 0;
-        
+
         // Read frame type (should be 0x04)
         const type_result = try readVarInt(data[offset..]);
         offset += type_result.bytes_read;
-        
+
         if (type_result.value != @intFromEnum(FrameType.settings)) {
             return error.InvalidFrameType;
         }
-        
+
         // Parse settings (varint pairs)
         while (offset < data.len) {
             const id_result = try readVarInt(data[offset..]);
             offset += id_result.bytes_read;
-            
+
             if (offset >= data.len) break;
-            
+
             const value_result = try readVarInt(data[offset..]);
             offset += value_result.bytes_read;
-            
+
             // Zig 0.15.2: append requires allocator
             try frame.settings.append(allocator, Setting{
                 .identifier = id_result.value,
                 .value = value_result.value,
             });
         }
-        
+
         return frame;
     }
-    
+
     pub fn generate(writer: anytype, settings: []const Setting) !void {
         // Write frame type (0x04 = SETTINGS)
         _ = try writeVarInt(writer, @intFromEnum(FrameType.settings));
@@ -170,26 +170,26 @@ pub const SettingsFrame = struct {
 // GOAWAY Frame (RFC 9114 Section 7.2.6)
 pub const GoawayFrame = struct {
     stream_id: u64,
-    
+
     pub fn parse(data: []const u8) !GoawayFrame {
         var offset: usize = 0;
-        
+
         // Read frame type (should be 0x07)
         const type_result = try readVarInt(data[offset..]);
         offset += type_result.bytes_read;
-        
+
         if (type_result.value != @intFromEnum(FrameType.goaway)) {
             return error.InvalidFrameType;
         }
-        
+
         // Read stream ID
         const stream_id_result = try readVarInt(data[offset..]);
-        
+
         return GoawayFrame{
             .stream_id = stream_id_result.value,
         };
     }
-    
+
     pub fn generate(writer: anytype, stream_id: u64) !void {
         // Write frame type (0x07 = GOAWAY)
         _ = try writeVarInt(writer, @intFromEnum(FrameType.goaway));
@@ -208,10 +208,10 @@ fn readVarInt(data: []const u8) !VarIntResult {
     if (data.len == 0) {
         return error.IncompleteVarInt;
     }
-    
+
     const first_byte = data[0];
     const prefix = (first_byte & 0xC0) >> 6;
-    
+
     return switch (prefix) {
         0 => VarIntResult{
             .value = @as(u64, first_byte & 0x3F),
@@ -278,4 +278,3 @@ fn writeVarInt(writer: anytype, value: u64) !usize {
         return 8;
     }
 }
-

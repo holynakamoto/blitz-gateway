@@ -568,4 +568,3 @@ test "prefix integer encoding" {
     const written = fbs.getWritten();
     try std.testing.expect(written.len > 1);
 }
-

@@ -171,9 +171,7 @@ pub const EbpfManager = struct {
         // TODO: Attach XDP program using netlink or ioctl
         // This would use the XDP socket or netlink interface
 
-        std.log.info("XDP program attached to interface {s} (ifindex: {})", .{
-            interface_name, self.ifindex
-        });
+        std.log.info("XDP program attached to interface {s} (ifindex: {})", .{ interface_name, self.ifindex });
     }
 
     /// Detach XDP program
@@ -188,9 +186,7 @@ pub const EbpfManager = struct {
     pub fn updateConfig(self: *EbpfManager, config: EbpfRateLimitConfig) !void {
         const key: u32 = 0;
         try self.updateMapElement(self.config_map_fd, &key, &config);
-        std.log.info("Rate limiting config updated: global={} RPS, per_ip={} RPS", .{
-            config.global_rps, config.per_ip_rps
-        });
+        std.log.info("Rate limiting config updated: global={} RPS, per_ip={} RPS", .{ config.global_rps, config.per_ip_rps });
     }
 
     /// Get rate limiting statistics
@@ -283,7 +279,7 @@ pub fn compileEbpfProgram(source_path: []const u8, output_path: []const u8) !voi
         return error.CompilationFailed;
     }
 
-    std.log.info("eBPF program compiled successfully: {s} -> {s}", .{source_path, output_path});
+    std.log.info("eBPF program compiled successfully: {s} -> {s}", .{ source_path, output_path });
 }
 
 // Error types

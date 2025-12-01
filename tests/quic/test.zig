@@ -9,7 +9,7 @@ test "parse long header INITIAL packet" {
     // First byte: 0xE0 (long header 0x80 + HANDSHAKE 0x20) = 0xA0, but fixed bit makes it 0xE0
     // Actually, let's check: 0x80 (fixed) | 0x20 (HANDSHAKE) = 0xA0
     // But RFC says fixed bit is separate, so: 0x80 | 0x20 = 0xA0
-    
+
     // For now, let's test with a simpler structure - skip the token complexity
     // HANDSHAKE packet: no token field, so structure is simpler
     var test_packet = [_]u8{
@@ -22,9 +22,9 @@ test "parse long header INITIAL packet" {
         0x00, 0x00, // Length (0) - 2 bytes big-endian
         // Total: 25 bytes (1 + 4 + 1 + 8 + 1 + 8 + 2)
     };
-    
+
     const parsed = try packet.Packet.parse(test_packet[0..], 8);
-    
+
     try std.testing.expect(parsed == .long);
     try std.testing.expect(parsed.long.packet_type == packet.PACKET_TYPE_HANDSHAKE);
     try std.testing.expect(parsed.long.version == packet.QUIC_VERSION_1);
@@ -34,13 +34,13 @@ test "parse long header INITIAL packet" {
 
 test "variable-length integer encoding" {
     var buf: [8]u8 = undefined;
-    
+
     // Test 1-byte encoding (0-63)
     var stream = std.io.fixedBufferStream(&buf);
     const writer = stream.writer();
     _ = try packet.writeVarInt(writer, 42);
     try std.testing.expect(buf[0] == 42);
-    
+
     // Test 2-byte encoding (64-16383)
     stream.reset();
     _ = try packet.writeVarInt(writer, 1000);
@@ -139,4 +139,3 @@ test "QPACK header encoding/decoding" {
 
     std.debug.print("✅ QPACK header encoding/decoding test passed\n", .{});
 }
-

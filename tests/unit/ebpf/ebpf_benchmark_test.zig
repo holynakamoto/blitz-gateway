@@ -261,8 +261,8 @@ test "eBPF Rate Limiting: Comprehensive Benchmark Suite" {
     // Test different configurations
     const configs = [_]rate_limit.RateLimitConfig{
         .{ .global_rps = 1000, .enable_ebpf = false }, // Userspace baseline
-        .{ .global_rps = 1000, .enable_ebpf = true },  // eBPF (will fallback)
-        .{ .per_ip_rps = 100, .enable_ebpf = false },  // Per-IP limiting
+        .{ .global_rps = 1000, .enable_ebpf = true }, // eBPF (will fallback)
+        .{ .per_ip_rps = 100, .enable_ebpf = false }, // Per-IP limiting
         .{ .global_rps = 10000, .per_ip_rps = 1000, .enable_ebpf = false }, // Both limits
     };
 

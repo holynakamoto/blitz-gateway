@@ -26,7 +26,7 @@ pub const SlabAllocator = struct {
         while (i > 0) {
             i -= 1;
             const node = try arena.allocator().create(Node);
-            node.data = chunk[i * slot_size..][0..slot_size];
+            node.data = chunk[i * slot_size ..][0..slot_size];
             node.next = free_list;
             free_list = node;
         }

@@ -19,7 +19,7 @@ pub const BackendConnection = struct {
     backend: *backend.Backend,
     last_used: i64,
     is_idle: bool = true,
-    
+
     pub fn init(fd: c_int, backend_server: *backend.Backend) BackendConnection {
         return BackendConnection{
             .fd = fd,
@@ -28,24 +28,24 @@ pub const BackendConnection = struct {
             .is_idle = true,
         };
     }
-    
+
     pub fn deinit(self: *BackendConnection) void {
         if (self.fd >= 0) {
             _ = c.close(self.fd);
             self.fd = -1;
         }
     }
-    
+
     pub fn markUsed(self: *BackendConnection) void {
         self.last_used = std.time.milliTimestamp();
         self.is_idle = false;
     }
-    
+
     pub fn markIdle(self: *BackendConnection) void {
         self.is_idle = true;
         self.last_used = std.time.milliTimestamp();
     }
-    
+
     pub fn isStale(self: *const BackendConnection, max_idle_time: i64) bool {
         const now = std.time.milliTimestamp();
         return (now - self.last_used) > max_idle_time;
@@ -57,7 +57,7 @@ pub const ConnectionPool = struct {
     allocator: std.mem.Allocator,
     max_connections_per_backend: usize = 10,
     max_idle_time: i64 = 30000, // 30 seconds
-    
+
     pub fn init(allocator: std.mem.Allocator) ConnectionPool {
         return ConnectionPool{
             .connections = .{},
@@ -66,14 +66,14 @@ pub const ConnectionPool = struct {
             .max_idle_time = 30000,
         };
     }
-    
+
     pub fn deinit(self: *ConnectionPool) void {
         for (self.connections.items) |*conn| {
             conn.deinit();
         }
         self.connections.deinit(self.allocator);
     }
-    
+
     /// Get or create a connection to a backend
     pub fn getConnection(self: *ConnectionPool, backend_server: *backend.Backend) !?*BackendConnection {
         // First, try to find an idle connection to this backend
@@ -89,7 +89,7 @@ pub const ConnectionPool = struct {
                 }
             }
         }
-        
+
         // Count active connections to this backend
         var count: usize = 0;
         for (self.connections.items) |*conn| {
@@ -97,58 +97,58 @@ pub const ConnectionPool = struct {
                 count += 1;
             }
         }
-        
+
         // Check if we've reached the limit
         if (count >= self.max_connections_per_backend) {
             return null; // Connection limit reached
         }
-        
+
         // Create new connection
         const sockfd = try self.createConnection(backend_server);
         errdefer _ = c.close(sockfd);
-        
+
         const conn = BackendConnection.init(sockfd, backend_server);
         try self.connections.append(self.allocator, conn);
-        
+
         const conn_ptr = &self.connections.items[self.connections.items.len - 1];
         conn_ptr.markUsed();
-        
+
         return conn_ptr;
     }
-    
+
     /// Create a new TCP connection to a backend
     fn createConnection(self: *ConnectionPool, backend_server: *backend.Backend) !c_int {
         _ = self;
-        
+
         const sockfd = c.socket(c.AF_INET, c.SOCK_STREAM, 0);
         if (sockfd < 0) {
             return error.SocketCreationFailed;
         }
-        
+
         // Set socket options
         const reuse = 1;
         _ = c.setsockopt(sockfd, c.SOL_SOCKET, c.SO_REUSEADDR, &reuse, @sizeOf(c_int));
-        
+
         // Get backend address
         const addr = try backend_server.getAddress();
         const addr_ptr: *const c.struct_sockaddr = @ptrCast(&addr);
-        
+
         // Connect
         const connect_result = c.connect(sockfd, addr_ptr, @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
             _ = c.close(sockfd);
             return error.ConnectionFailed;
         }
-        
+
         return sockfd;
     }
-    
+
     /// Return a connection to the pool (mark as idle)
     pub fn returnConnection(self: *ConnectionPool, conn: *BackendConnection) void {
         _ = self; // Method signature requires self
         conn.markIdle();
     }
-    
+
     /// Remove a connection from the pool (e.g., on error)
     pub fn removeConnection(self: *ConnectionPool, conn: *BackendConnection) void {
         for (self.connections.items, 0..) |*connection, i| {
@@ -159,7 +159,7 @@ pub const ConnectionPool = struct {
             }
         }
     }
-    
+
     /// Clean up stale connections
     pub fn cleanupStaleConnections(self: *ConnectionPool) void {
         var i: usize = 0;
@@ -174,4 +174,3 @@ pub const ConnectionPool = struct {
         }
     }
 };
-

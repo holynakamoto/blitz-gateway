@@ -57,11 +57,11 @@ pub fn main() !void {
     var http3_offset: usize = 0;
 
     // Add headers frame
-    @memcpy(http3_payload[http3_offset..http3_offset + headers_len], headers_buf[0..headers_len]);
+    @memcpy(http3_payload[http3_offset .. http3_offset + headers_len], headers_buf[0..headers_len]);
     http3_offset += headers_len;
 
     // Add data frame
-    @memcpy(http3_payload[http3_offset..http3_offset + data_len], data_buf[0..data_len]);
+    @memcpy(http3_payload[http3_offset .. http3_offset + data_len], data_buf[0..data_len]);
     http3_offset += data_len;
 
     std.debug.print("   ✅ Complete HTTP/3 payload: {} bytes\n", .{http3_offset});

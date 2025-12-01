@@ -62,7 +62,7 @@ pub fn parseRequest(buffer: []const u8) !Request {
     if (buffer.len > MAX_REQUEST_SIZE) {
         return error.RequestTooLarge;
     }
-    
+
     if (buffer.len == 0) {
         return error.EmptyRequest;
     }
@@ -93,12 +93,12 @@ pub fn parseRequest(buffer: []const u8) !Request {
     const path_start = method_end + 1;
     const path_end = std.mem.indexOfScalarPos(u8, request_line, path_start, ' ') orelse return error.InvalidRequestLine;
     const full_path = request_line[path_start..path_end];
-    
+
     // Validate path length (DoS protection)
     if (full_path.len > MAX_PATH_LENGTH) {
         return error.PathTooLong;
     }
-    
+
     // Strip query string (everything after '?')
     const query_start = std.mem.indexOfScalar(u8, full_path, '?');
     request.path = if (query_start) |qs| full_path[0..qs] else full_path;
@@ -231,4 +231,3 @@ pub const CommonResponses = struct {
     pub const INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
     pub const METHOD_NOT_ALLOWED = "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
 };
-

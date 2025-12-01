@@ -1,0 +1,73 @@
+# Automatic labeling based on file changes
+
+'area: core':
+  - 'src/core/**/*'
+
+'area: io_uring':
+  - 'src/io_uring/**/*'
+
+'area: http':
+  - 'src/http/**/*'
+  - 'src/http_server.zig'
+
+'area: proxy':
+  - 'src/proxy/**/*'
+  - 'src/load_balancer/**/*'
+
+'area: auth':
+  - 'src/auth/**/*'
+  - 'src/jwt.zig'
+  - 'src/middleware.zig'
+
+'area: rate-limiting':
+  - 'src/ratelimit/**/*'
+  - 'src/ebpf/**/*'
+
+'area: quic':
+  - 'src/quic/**/*'
+  - 'src/http3/**/*'
+  - 'src/quic_handshake_server.zig'
+
+'area: wasm':
+  - 'src/wasm/**/*'
+
+'area: metrics':
+  - 'src/metrics/**/*'
+
+'area: config':
+  - 'src/config/**/*'
+  - '*.toml'
+
+'documentation':
+  - '**/*.md'
+  - 'docs/**/*'
+
+'tests':
+  - 'tests/**/*'
+  - '**/*_test.zig'
+
+'ci/cd':
+  - '.github/**/*'
+  - '.coderabbit.yaml'
+
+'dependencies':
+  - 'build.zig.zon'
+  - 'build.zig'
+
+'performance':
+  - 'bench/**/*'
+  - 'benches/**/*'
+  - 'scripts/bench/**/*'
+
+'security':
+  - 'src/auth/**/*'
+  - 'src/jwt.zig'
+  - 'src/middleware.zig'
+  - 'src/ratelimit/**/*'
+  - 'src/ebpf/**/*'
+
+'packaging':
+  - 'packaging/**/*'
+  - 'nfpm.yaml'
+  - 'install.sh'
+

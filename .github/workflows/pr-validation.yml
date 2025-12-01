@@ -14,7 +14,7 @@ jobs:
     name: Validate PR Structure
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check PR Title Convention
         uses: amannn/action-semantic-pull-request@v5
@@ -94,7 +94,7 @@ jobs:
     name: Detect Breaking Changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -149,7 +149,7 @@ jobs:
     name: Code Quality Gates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
@@ -185,7 +185,7 @@ jobs:
       contains(github.event.pull_request.title, 'perf') ||
       contains(github.event.pull_request.title, '[perf]')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
@@ -217,7 +217,7 @@ jobs:
     name: Security Review
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Security-sensitive Files Check
         id: security-check

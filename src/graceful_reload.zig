@@ -122,25 +122,36 @@ pub const GracefulReload = struct {
         return &self.current_config;
     }
 
+    /// Global write_fd for signal handlers (set during initialization)
+    var global_write_fd: std.posix.fd_t = -1;
+
     /// Setup signal handlers (Linux only)
     fn setupSignalHandlers(write_fd: std.posix.fd_t) !void {
+        // Store write_fd in global variable for signal handlers
+        global_write_fd = write_fd;
+
         // Set up SIGHUP handler (configuration reload)
+        // sigaction expects: fn (i32, *const os.linux.siginfo_t, ?*anyopaque) callconv(.c) void
         const sighup_handler = struct {
-            fn handler(sig: c_int) callconv(.c) void {
+            fn handler(sig: i32, _: *const std.posix.siginfo_t, _: ?*anyopaque) callconv(.c) void {
                 _ = sig;
                 // Write signal type to pipe
-                const signal_byte = @intFromEnum(SignalType.sighup);
-                _ = std.posix.write(write_fd, &[_]u8{signal_byte}) catch {};
+                if (global_write_fd != -1) {
+                    const signal_byte = @intFromEnum(SignalType.sighup);
+                    _ = std.posix.write(global_write_fd, &[_]u8{signal_byte}) catch {};
+                }
             }
         }.handler;
 
         // Set up SIGUSR2 handler (alternative reload signal)
         const sigusr2_handler = struct {
-            fn handler(sig: c_int) callconv(.c) void {
+            fn handler(sig: i32, _: *const std.posix.siginfo_t, _: ?*anyopaque) callconv(.c) void {
                 _ = sig;
                 // Write signal type to pipe
-                const signal_byte = @intFromEnum(SignalType.sigusr2);
-                _ = std.posix.write(write_fd, &[_]u8{signal_byte}) catch {};
+                if (global_write_fd != -1) {
+                    const signal_byte = @intFromEnum(SignalType.sigusr2);
+                    _ = std.posix.write(global_write_fd, &[_]u8{signal_byte}) catch {};
+                }
             }
         }.handler;
 
@@ -151,11 +162,11 @@ pub const GracefulReload = struct {
         };
 
         // Register SIGHUP
-        std.posix.sigaction(std.posix.SIG.HUP, &act, null);
+        try std.posix.sigaction(std.posix.SIG.HUP, &act, null);
 
         // Register SIGUSR2
         act.handler = .{ .sigaction = sigusr2_handler };
-        std.posix.sigaction(std.posix.SIG.USR2, &act, null);
+        try std.posix.sigaction(std.posix.SIG.USR2, &act, null);
 
         std.log.info("Signal handlers registered for graceful reload (SIGHUP, SIGUSR2)", .{});
     }

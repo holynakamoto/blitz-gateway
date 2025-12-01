@@ -7,8 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
-#include "picotls.h"
-#include "picotls/minicrypto.h"
+#include <picotls.h>
+#include <picotls/minicrypto.h>
 
 // Global picotls context (allocated in C to avoid Zig opaque struct issues)
 static ptls_context_t g_ptls_ctx_storage;

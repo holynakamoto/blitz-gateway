@@ -126,7 +126,7 @@ pub const GracefulReload = struct {
     fn setupSignalHandlers(write_fd: std.posix.fd_t) !void {
         // Set up SIGHUP handler (configuration reload)
         const sighup_handler = struct {
-            fn handler(sig: c_int) callconv(.C) void {
+            fn handler(sig: c_int) callconv(.c) void {
                 _ = sig;
                 // Write signal type to pipe
                 const signal_byte = @intFromEnum(SignalType.sighup);
@@ -136,7 +136,7 @@ pub const GracefulReload = struct {
 
         // Set up SIGUSR2 handler (alternative reload signal)
         const sigusr2_handler = struct {
-            fn handler(sig: c_int) callconv(.C) void {
+            fn handler(sig: c_int) callconv(.c) void {
                 _ = sig;
                 // Write signal type to pipe
                 const signal_byte = @intFromEnum(SignalType.sigusr2);

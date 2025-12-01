@@ -43,12 +43,60 @@ const http2 = @import("http2/connection.zig");
 // TLS Connection stub type (for when TLS is re-enabled)
 // This defines the structure that tls_conn should have, including the protocol field
 const TlsConnectionStub = struct {
+    pub const State = enum { handshake, connected, tls_error, closed };
+
     protocol: protocol.Protocol = .http1_1,
+    state: State = .handshake,
     // Other fields would be added when TLS is re-implemented
-    // state: TlsState,
     // read_bio: ?*anyopaque,
     // write_bio: ?*anyopaque,
     // etc.
+
+    pub fn deinit(self: *TlsConnectionStub) void {
+        _ = self; // TLS is disabled, no cleanup needed
+    }
+
+    pub fn clearReadBio(self: *TlsConnectionStub) void {
+        _ = self; // TLS is disabled
+    }
+
+    pub fn clearEncryptedOutput(self: *TlsConnectionStub) void {
+        _ = self; // TLS is disabled
+    }
+
+    pub fn feedData(self: *TlsConnectionStub, data: []const u8) !void {
+        _ = self;
+        _ = data;
+        return {}; // TLS is disabled
+    }
+
+    pub fn doHandshake(self: *TlsConnectionStub) !void {
+        _ = self;
+        return {}; // TLS is disabled
+    }
+
+    pub fn hasEncryptedOutput(self: *TlsConnectionStub) bool {
+        _ = self;
+        return false; // TLS is disabled
+    }
+
+    pub fn getAllEncryptedOutput(self: *TlsConnectionStub, buf: []u8) !usize {
+        _ = self;
+        _ = buf;
+        return 0; // TLS is disabled
+    }
+
+    pub fn read(self: *TlsConnectionStub, buf: []u8) !usize {
+        _ = self;
+        _ = buf;
+        return 0; // TLS is disabled
+    }
+
+    pub fn write(self: *TlsConnectionStub, buf: []const u8) !void {
+        _ = self;
+        _ = buf;
+        return {}; // TLS is disabled
+    }
 };
 
 // Connection state
@@ -94,7 +142,9 @@ fn closeConnection(
         }
 
         // Clean up TLS connection if present
-        if (conn.tls_conn) |*tls_conn| {
+        if (conn.tls_conn) |tls_conn_opaque| {
+            // Cast opaque pointer to TlsConnectionStub for cleanup
+            const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
             tls_conn.deinit();
             conn.tls_conn = null;
         }
@@ -386,6 +436,7 @@ pub fn runEchoServer(port: u16) !void {
                             };
 
                             // Check handshake state after doHandshake
+                            // TLS is disabled - state check is a no-op
                             if (tls_conn.state == .handshake) {
                                 // Check for encrypted output to send
                                 if (tls_conn.hasEncryptedOutput()) {
@@ -473,6 +524,7 @@ pub fn runEchoServer(port: u16) !void {
                         }
 
                         // Check if TLS is now connected (after handshake or if already connected)
+                        // TLS is disabled - state check is a no-op
                         if (tls_conn.state == .connected) {
                             // This is encrypted application data (HTTP request)
                             // Feed encrypted data from io_uring to OpenSSL read_bio
@@ -1214,7 +1266,8 @@ pub fn runEchoServer(port: u16) !void {
                     if (conn.write_buffer) |buf| {
                         buffer_pool.releaseWrite(buf);
                     }
-                    if (conn.tls_conn) |*tls_conn| {
+                    if (conn.tls_conn) |tls_conn_opaque| {
+                        const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                         tls_conn.deinit();
                     }
                     if (conn.http2_conn) |http2_conn| {
@@ -1234,7 +1287,8 @@ pub fn runEchoServer(port: u16) !void {
                     if (conn.write_buffer) |buf| {
                         buffer_pool.releaseWrite(buf);
                     }
-                    if (conn.tls_conn) |*tls_conn| {
+                    if (conn.tls_conn) |tls_conn_opaque| {
+                        const tls_conn = @as(*TlsConnectionStub, @ptrFromInt(@intFromPtr(tls_conn_opaque)));
                         tls_conn.deinit();
                     }
                     if (conn.http2_conn) |http2_conn| {

@@ -144,7 +144,7 @@ pub const BufferPool = struct {
         self.read_pool.mutex.lock();
         defer self.read_pool.mutex.unlock();
 
-        if (self.read_pool.free_indices.popOrNull()) |idx| {
+        if (self.read_pool.free_indices.pop()) |idx| {
             return self.read_pool.buffers[idx];
         }
         return null;
@@ -167,7 +167,7 @@ pub const BufferPool = struct {
         self.write_pool.mutex.lock();
         defer self.write_pool.mutex.unlock();
 
-        if (self.write_pool.free_indices.popOrNull()) |idx| {
+        if (self.write_pool.free_indices.pop()) |idx| {
             return self.write_pool.buffers[idx];
         }
         return null;

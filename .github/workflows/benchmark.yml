@@ -5,18 +5,10 @@ name: Benchmark
 
 on:
   push:
-    branches: [ main, benchmark ]
-    paths:
-      - 'src/**'
-      - 'scripts/bench/**'
-      - 'benches/**'
-  pull_request:
     branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'scripts/bench/**'
-      - 'benches/**'
   workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'   # Every day at 03:00 UTC
     inputs:
       duration:
         description: 'Benchmark duration in seconds'
@@ -32,6 +24,7 @@ jobs:
   benchmark-comprehensive:
     name: Comprehensive Benchmark
     runs-on: ubuntu-latest-8-core
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -87,6 +80,7 @@ jobs:
   performance-regression:
     name: Performance Regression Test
     runs-on: ubuntu-latest-8-core
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -143,6 +137,7 @@ jobs:
   resource-usage:
     name: Resource Usage Test
     runs-on: ubuntu-latest-8-core
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -193,6 +188,7 @@ jobs:
   benchmark-validation:
     name: Benchmark Infrastructure Check
     runs-on: ubuntu-latest-8-core
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

@@ -204,7 +204,7 @@ jobs:
     name: Performance Benchmarks
     runs-on: ubuntu-latest-8-core
     needs: [build]
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
         with:

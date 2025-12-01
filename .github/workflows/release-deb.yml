@@ -21,27 +21,30 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        fetch-depth: 0  # Fetch full history for submodules
     
-    - name: Verify submodules
+    - name: Initialize submodules
       run: |
-        echo "Checking for picotls..."
-        # Checkout already has submodules: recursive, but verify they're there
-        if [ ! -f deps/picotls/include/picotls.h ]; then
-          echo "picotls.h not found, checking submodule status..."
-          ls -la deps/ 2>/dev/null || echo "deps/ doesn't exist"
+        echo "Initializing submodules..."
+        git submodule update --init --recursive --depth 1 || {
+          echo "Submodule init failed, checking if picotls is in repo..."
+          git ls-files deps/picotls 2>/dev/null | head -5 || echo "picotls not in git"
+          # If it's not a submodule, it should be in the repo
           if [ -d deps/picotls ]; then
-            echo "deps/picotls exists, checking contents..."
-            ls -la deps/picotls/ | head -10
-            find deps/picotls -name "*.h" -type f 2>/dev/null | head -5
+            echo "✅ picotls directory exists"
+          else
+            echo "❌ picotls directory not found"
+            exit 1
           fi
-          echo "Initializing submodules..."
-          git submodule update --init --recursive --depth 1
-        fi
-        # Final check
+        }
+    
+    - name: Verify picotls
+      run: |
         if [ ! -f deps/picotls/include/picotls.h ]; then
           echo "ERROR: picotls.h not found"
-          echo "Directory structure:"
-          find deps -type f -name "*.h" 2>/dev/null | head -10
+          echo "Checking deps structure:"
+          ls -la deps/ 2>/dev/null || echo "deps/ doesn't exist"
+          find . -name "picotls.h" 2>/dev/null | head -5 || echo "No picotls.h found"
           exit 1
         fi
         echo "✅ picotls.h verified"

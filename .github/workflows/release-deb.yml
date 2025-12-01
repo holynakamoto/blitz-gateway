@@ -25,28 +25,27 @@ jobs:
     - name: Verify submodules
       run: |
         echo "Checking for picotls..."
+        # Checkout already has submodules: recursive, but verify they're there
         if [ ! -f deps/picotls/include/picotls.h ]; then
-          echo "Submodules not initialized, initializing..."
-          git submodule update --init --recursive || {
-            echo "Submodule update failed, checking if picotls exists..."
-            if [ -d deps/picotls ]; then
-              echo "picotls directory exists, checking contents..."
-              find deps/picotls -name "picotls.h" 2>/dev/null | head -5
-            fi
-            echo "Attempting to initialize submodules again..."
-            git submodule sync --recursive
-            git submodule update --init --recursive --force
-          }
+          echo "picotls.h not found, checking submodule status..."
+          ls -la deps/ 2>/dev/null || echo "deps/ doesn't exist"
+          if [ -d deps/picotls ]; then
+            echo "deps/picotls exists, checking contents..."
+            ls -la deps/picotls/ | head -10
+            find deps/picotls -name "*.h" -type f 2>/dev/null | head -5
+          fi
+          echo "Initializing submodules..."
+          git submodule update --init --recursive --depth 1
         fi
+        # Final check
         if [ ! -f deps/picotls/include/picotls.h ]; then
-          echo "ERROR: picotls.h still not found after submodule init"
-          echo "Checking deps/picotls structure:"
-          ls -la deps/picotls/ 2>/dev/null || echo "deps/picotls doesn't exist"
-          find deps -name "picotls.h" 2>/dev/null || echo "No picotls.h found anywhere"
+          echo "ERROR: picotls.h not found"
+          echo "Directory structure:"
+          find deps -type f -name "*.h" 2>/dev/null | head -10
           exit 1
         fi
-        echo "✅ picotls.h found"
-        ls -la deps/picotls/include/picotls.h
+        echo "✅ picotls.h verified"
+        ls -lh deps/picotls/include/picotls.h
     
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2

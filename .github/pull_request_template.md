@@ -1,6 +1,6 @@
 ## Description
 
-<!-- Provide a brief description of the changes in this PR -->
+<!-- Provide a clear and concise description of your changes -->
 
 
 
@@ -8,125 +8,168 @@
 
 <!-- Mark the relevant option with an "x" -->
 
-
-
-- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
-
-- [ ] ✨ New feature (non-breaking change which adds functionality)
-
-- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
-
-- [ ] 📚 Documentation update
-
-- [ ] 🎨 Code style update (formatting, renaming)
-
+- [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
+- [ ] ✨ New feature (non-breaking change that adds functionality)
+- [ ] ⚡ Performance improvement
 - [ ] ♻️ Code refactoring (no functional changes)
-
-- [ ] ⚡ Performance improvements
-
-- [ ] ✅ Test updates
-
-- [ ] 🔧 Build/CI configuration changes
-
-
-
-## Motivation and Context
-
-<!-- Why is this change required? What problem does it solve? -->
-
-<!-- If it fixes an open issue, please link to the issue here -->
-
-
-
-Fixes #(issue)
-
-
-
-## How Has This Been Tested?
-
-<!-- Please describe the tests that you ran to verify your changes -->
-
-
-
-- [ ] Unit tests
-
-- [ ] Integration tests
-
-- [ ] Manual testing
-
-- [ ] Performance benchmarks
-
-
-
-**Test Configuration**:
-
-- OS: 
-
-- Architecture: 
-
-- Zig version: 
-
-
+- [ ] 📝 Documentation update
+- [ ] 🧪 Test additions or updates
+- [ ] 🔧 Configuration changes
+- [ ] 🚨 Breaking change (fix or feature that would cause existing functionality to change)
 
 ## Performance Impact
 
-<!-- For performance-related changes, include benchmark results -->
+<!-- Mark the relevant option and provide benchmarks if applicable -->
 
+- [ ] No performance impact
+- [ ] Improves performance
+- [ ] May degrade performance (justified below)
 
+### Benchmarks
 
-**Before:**
-
-```
-
-[benchmark results]
-
-```
-
-
-
-**After:**
+<!-- If performance-related, include before/after benchmarks -->
 
 ```
+Before:
+  Throughput: X req/s
+  Latency p99: Y µs
+  Memory: Z MB
 
-[benchmark results]
-
+After:
+  Throughput: X req/s
+  Latency p99: Y µs
+  Memory: Z MB
 ```
 
+## Breaking Changes
 
+<!-- Mark and describe any breaking changes -->
 
-## Screenshots (if appropriate)
+- [ ] This PR introduces NO breaking changes
+- [ ] This PR introduces breaking changes (described below)
 
-<!-- Add screenshots to help explain your changes -->
+### Breaking Change Details
 
+<!-- If applicable, describe:
+  - What breaks
+  - Why it was necessary
+  - Migration path for users
+-->
 
+### Migration Guide
+
+<!-- If breaking, provide step-by-step migration instructions -->
+
+## Security Considerations
+
+<!-- Mark if this PR has security implications -->
+
+- [ ] This PR has no security implications
+- [ ] This PR affects authentication/authorization
+- [ ] This PR affects rate limiting or DoS protection
+- [ ] This PR modifies cryptographic operations
+- [ ] This PR changes input validation
+
+### Security Review Notes
+
+<!-- If security-related, explain the security considerations -->
+
+## Testing
+
+<!-- Describe the tests you ran and how to reproduce -->
+
+### Test Coverage
+
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+- [ ] E2E tests added/updated
+- [ ] Performance benchmarks run
+- [ ] Manual testing performed
+
+### Test Results
+
+<!-- Paste relevant test output -->
+
+```
+$ zig build test
+All tests passed (XX/XX)
+```
+
+### Manual Testing Steps
+
+1. 
+2. 
+3. 
 
 ## Checklist
 
-<!-- Mark completed items with an "x" -->
+<!-- Ensure all items are complete before requesting review -->
 
+- [ ] Code follows the project's style guidelines (run `zig fmt`)
+- [ ] Self-reviewed the code
+- [ ] Commented complex or non-obvious code
+- [ ] Updated documentation (if applicable)
+- [ ] No new warnings introduced
+- [ ] Added tests that prove the fix/feature works
+- [ ] New and existing tests pass locally
+- [ ] No performance regressions (benchmarked)
+- [ ] Considered memory safety (proper alloc/free patterns)
+- [ ] Updated CHANGELOG.md (if user-facing change)
+- [ ] Linked related issues (closes #XXX)
 
+## Memory Safety Review
 
-- [ ] My code follows the style guidelines of this project
+<!-- For any code that allocates memory -->
 
-- [ ] I have performed a self-review of my own code
+- [ ] All allocations have clear ownership
+- [ ] Proper use of `defer` or `errdefer` for cleanup
+- [ ] No potential memory leaks identified
+- [ ] Tested with memory leak detection tools
+- [ ] Arena allocator used appropriately for request-scoped allocations
 
-- [ ] I have commented my code, particularly in hard-to-understand areas
+## Additional Context
 
-- [ ] I have made corresponding changes to the documentation
+<!-- Add any other context, screenshots, or relevant information -->
 
-- [ ] My changes generate no new warnings
+## Related Issues
 
-- [ ] I have added tests that prove my fix is effective or that my feature works
+<!-- Link related issues -->
 
-- [ ] New and existing unit tests pass locally with my changes
+Closes #
+Relates to #
 
-- [ ] Any dependent changes have been merged and published
+---
 
-- [ ] I have checked my code and corrected any misspellings
+## For Reviewers
 
+<!-- Guidance for reviewers -->
 
+### Focus Areas
 
-## Additional Notes
+<!-- Highlight specific areas that need careful review -->
 
-<!-- Add any additional notes or context about the PR here -->
+- 
+- 
 
+### Potential Concerns
+
+<!-- Any concerns or areas of uncertainty -->
+
+- 
+- 
+
+---
+
+<!-- 
+PR Title Convention:
+  type(scope): description
+  
+  Types: feat, fix, perf, refactor, docs, test, chore, ci
+  Scopes: core, io_uring, http, proxy, auth, ratelimit, wasm, metrics, config, quic, load_balancer
+  
+  Examples:
+    feat(http): Add HTTP/3 support
+    fix(proxy): Resolve connection pool leak
+    perf(io_uring): Optimize batch submission
+    feat(auth)!: Migrate to new JWT validation (breaking change)
+-->

@@ -92,7 +92,7 @@ pub const BufferPool = struct {
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             read_buffers[i] = buf;
-            try read_free.append(i);
+            try read_free.append(backing_allocator, i);
         }
 
         // Pre-allocate all write buffers

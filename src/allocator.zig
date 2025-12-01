@@ -144,10 +144,12 @@ pub const BufferPool = struct {
         self.read_pool.mutex.lock();
         defer self.read_pool.mutex.unlock();
 
-        if (self.read_pool.free_indices.pop()) |idx| {
-            return self.read_pool.buffers[idx];
+        // Check if list is empty before popping to avoid panic
+        if (self.read_pool.free_indices.items.len == 0) {
+            return null;
         }
-        return null;
+        const idx = self.read_pool.free_indices.pop();
+        return self.read_pool.buffers[idx];
     }
 
     pub fn releaseRead(self: *BufferPool, buf: []u8) void {
@@ -167,10 +169,12 @@ pub const BufferPool = struct {
         self.write_pool.mutex.lock();
         defer self.write_pool.mutex.unlock();
 
-        if (self.write_pool.free_indices.pop()) |idx| {
-            return self.write_pool.buffers[idx];
+        // Check if list is empty before popping to avoid panic
+        if (self.write_pool.free_indices.items.len == 0) {
+            return null;
         }
-        return null;
+        const idx = self.write_pool.free_indices.pop();
+        return self.write_pool.buffers[idx];
     }
 
     pub fn releaseWrite(self: *BufferPool, buf: []u8) void {

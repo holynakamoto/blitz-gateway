@@ -23,28 +23,26 @@ jobs:
         submodules: recursive
         fetch-depth: 0  # Fetch full history for submodules
     
-    - name: Initialize submodules
+    - name: Initialize submodules and verify
       run: |
+        echo "Checking repository structure..."
+        ls -la | grep deps || echo "No deps in root"
         echo "Initializing submodules..."
-        git submodule update --init --recursive --depth 1 || {
-          echo "Submodule init failed, checking if picotls is in repo..."
-          git ls-files deps/picotls 2>/dev/null | head -5 || echo "picotls not in git"
-          # If it's not a submodule, it should be in the repo
-          if [ -d deps/picotls ]; then
-            echo "✅ picotls directory exists"
-          else
-            echo "❌ picotls directory not found"
-            exit 1
-          fi
-        }
-    
-    - name: Verify picotls
-      run: |
+        git submodule update --init --recursive --depth 1
+        echo "Checking if deps/picotls exists..."
+        if [ ! -d deps/picotls ]; then
+          echo "deps/picotls not found, checking what's in deps..."
+          ls -la deps/ 2>/dev/null || echo "deps/ directory doesn't exist"
+          echo "Checking if picotls files are tracked..."
+          git ls-files | grep picotls | head -5 || echo "No picotls files tracked"
+          echo "Since picotls is tracked in git, it should be in the checkout"
+          echo "Listing all files in repo..."
+          git ls-files deps/ 2>/dev/null | head -10 || echo "No deps files in git"
+        fi
+        # Final verification
         if [ ! -f deps/picotls/include/picotls.h ]; then
-          echo "ERROR: picotls.h not found"
-          echo "Checking deps structure:"
-          ls -la deps/ 2>/dev/null || echo "deps/ doesn't exist"
-          find . -name "picotls.h" 2>/dev/null | head -5 || echo "No picotls.h found"
+          echo "ERROR: picotls.h not found after submodule init"
+          find . -type d -name "picotls" 2>/dev/null | head -5
           exit 1
         fi
         echo "✅ picotls.h verified"

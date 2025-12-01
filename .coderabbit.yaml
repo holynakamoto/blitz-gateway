@@ -235,6 +235,11 @@ ignore:
   - "vendor/**"
   - "*.lock"
 
+# Skip review for Dependabot PRs
+ignore_author_patterns:
+  - "dependabot"
+  - "dependabot[bot]"
+
 # Review focus areas
 focus_areas:
   - memory_safety

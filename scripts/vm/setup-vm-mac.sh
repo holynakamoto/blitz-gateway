@@ -78,6 +78,6 @@ echo ""
 echo "After Ubuntu is installed, in the VM run:"
 echo "  curl -sL https://raw.githubusercontent.com/blitz-gateway/blitz/main/scripts/vm-setup.sh | bash"
 echo ""
-echo "Or see benches/VM-QUICK-START.md for detailed instructions"
+echo "Or see docs/benchmark/QUICK-START-BARE-METAL.md for bare metal benchmarking"
 echo ""
 

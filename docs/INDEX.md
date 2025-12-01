@@ -34,10 +34,8 @@ Quick navigation to all Blitz Gateway documentation.
 ## 📊 Benchmarking
 
 - **[Benchmarking Guide](benchmark/README.md)** - Performance testing
-- **[VM Setup](benchmark/VM-SETUP.md)** - Benchmark VM setup
-- **[VM Quick Start](benchmark/VM-QUICK-START.md)** - Quick VM setup
-- **[Bare Metal Setup](benchmark/QUICK-START-BARE-METAL.md)** - Production benchmarking
-- **[VM Benchmarking](benchmark/BENCHMARKING-VM.md)** - VM-specific guide
+- **[Bare Metal Quick Start](benchmark/QUICK-START-BARE-METAL.md)** - Production benchmarking
+- **[Hardware Specifications](benchmark/benchmark-machine-spec.md)** - Recommended hardware
 
 ## 🔧 Architecture & Technical
 

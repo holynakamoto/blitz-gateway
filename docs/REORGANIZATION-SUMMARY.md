@@ -16,7 +16,6 @@
 - `TEST-INSTALL-QUICKSTART.md` → `docs/packaging/TEST-INSTALL-QUICKSTART.md`
 
 ### Benchmarking → `docs/benchmark/` and `scripts/bench/`
-- `BENCHMARKING-VM.md` → `docs/benchmark/BENCHMARKING-VM.md`
 - `run-vm-benchmarks.sh` → `scripts/bench/run-vm-benchmarks.sh`
 
 ### Infrastructure → `infra/monitoring/`

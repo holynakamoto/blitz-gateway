@@ -21,6 +21,15 @@ reviews:
     base_branches:
       - main
       - develop
+    # Skip auto-review for Dependabot PRs (they're just dependency updates)
+    ignore_labels:
+      - "ci/cd"
+    # Ignore Dependabot PRs (they only update dependencies)
+    ignore_labels:
+      - "ci/cd"
+    # Reduce review intensity for dependency-only changes
+    ignore_files:
+      - ".github/workflows/**"
   
   # Path-based review intensity
   path_filters:

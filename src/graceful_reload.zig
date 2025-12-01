@@ -155,9 +155,8 @@ pub const GracefulReload = struct {
             }
         }.handler;
 
-        // Create empty sigset (Zig 0.15.2 API)
-        var empty_mask: std.posix.sigset_t = undefined;
-        std.posix.sigemptyset(&empty_mask);
+        // Create empty sigset (Zig 0.15.2 API - returns sigset_t, doesn't take arguments)
+        const empty_mask = std.posix.sigemptyset();
 
         var act = std.posix.Sigaction{
             .handler = .{ .sigaction = sighup_handler },

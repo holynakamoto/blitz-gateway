@@ -100,12 +100,12 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(write_buffers);
 
         var write_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init write_free list");
-        errdefer write_free.deinit();
+        errdefer write_free.deinit(backing_allocator);
 
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             write_buffers[i] = buf;
-            try write_free.append(i);
+            try write_free.append(backing_allocator, i);
         }
 
         return BufferPool{
@@ -131,13 +131,13 @@ pub const BufferPool = struct {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.read_pool.buffers);
-        self.read_pool.free_indices.deinit();
+        self.read_pool.free_indices.deinit(self.backing_allocator);
 
         for (self.write_pool.buffers) |buf| {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.write_pool.buffers);
-        self.write_pool.free_indices.deinit();
+        self.write_pool.free_indices.deinit(self.backing_allocator);
     }
 
     pub fn acquireRead(self: *BufferPool) ?[]u8 {

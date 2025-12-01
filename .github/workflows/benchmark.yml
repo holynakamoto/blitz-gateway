@@ -36,7 +36,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
@@ -91,7 +91,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
@@ -147,7 +147,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2

@@ -24,11 +24,29 @@ jobs:
     
     - name: Verify submodules
       run: |
+        echo "Checking for picotls..."
         if [ ! -f deps/picotls/include/picotls.h ]; then
           echo "Submodules not initialized, initializing..."
-          git submodule update --init --recursive
+          git submodule update --init --recursive || {
+            echo "Submodule update failed, checking if picotls exists..."
+            if [ -d deps/picotls ]; then
+              echo "picotls directory exists, checking contents..."
+              find deps/picotls -name "picotls.h" 2>/dev/null | head -5
+            fi
+            echo "Attempting to initialize submodules again..."
+            git submodule sync --recursive
+            git submodule update --init --recursive --force
+          }
         fi
-        ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
+        if [ ! -f deps/picotls/include/picotls.h ]; then
+          echo "ERROR: picotls.h still not found after submodule init"
+          echo "Checking deps/picotls structure:"
+          ls -la deps/picotls/ 2>/dev/null || echo "deps/picotls doesn't exist"
+          find deps -name "picotls.h" 2>/dev/null || echo "No picotls.h found anywhere"
+          exit 1
+        fi
+        echo "✅ picotls.h found"
+        ls -la deps/picotls/include/picotls.h
     
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2

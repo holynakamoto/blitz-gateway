@@ -105,10 +105,10 @@ jobs:
         include:
           - os: linux
             arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-latest-8-core
           - os: linux
             arch: aarch64
-            runner: ubuntu-latest
+            runner: ubuntu-latest-8-core
           - os: macos
             arch: aarch64
             runner: macos-14

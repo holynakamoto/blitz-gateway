@@ -121,9 +121,14 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
     // Load configuration if provided
     if (config_path) |cfg_path| {
         std.debug.print("Loading configuration from: {s}\n", .{cfg_path});
-        // TODO: Implement config loading from file
-        // For now, use default config
-        std.log.warn("Config file loading not yet implemented, using defaults", .{});
+        var cfg = try config.Config.loadConfig(allocator, cfg_path);
+        defer cfg.deinit(allocator);
+
+        if (cfg.mode == .load_balancer) {
+            std.debug.print("Starting in Load Balancer mode\n", .{});
+            try runLoadBalancerMode(allocator, &cfg);
+            return;
+        }
     }
 
     // Default: Run QUIC server on port 8443
@@ -320,9 +325,9 @@ fn runLoadBalancerMode(allocator: std.mem.Allocator, cfg: *const config.Config) 
     var lb = try load_balancer.LoadBalancer.initFromConfig(allocator, cfg.*);
     defer lb.deinit();
 
-    // Parse listen address
-    const listen_addr = cfg.listen_addr orelse "0.0.0.0";
-    const listen_port = cfg.listen_port;
+    // Parse listen address from config (default to 0.0.0.0:4433)
+    const listen_addr = "0.0.0.0"; // TODO: Parse from cfg.listen if available
+    const listen_port: u16 = 4433; // TODO: Parse from cfg.listen if available
 
     std.debug.print("Load balancer configuration:\n", .{});
     std.debug.print("  Listen: {s}:{d}\n", .{ listen_addr, listen_port });

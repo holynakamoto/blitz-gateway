@@ -364,30 +364,6 @@ pub fn build(b: *std.Build) void {
     const wasm_test_step = b.step("test-wasm", "Run WASM plugin tests");
     wasm_test_step.dependOn(&run_wasm_tests.step);
 
-    // HTTP server with JWT tests
-    const http_server_tests = b.addTest(.{
-        .root_module = b.addModule("http_server_root", .{
-            .root_source_file = b.path("src/http_server.zig"),
-            .target = target,
-        }),
-    });
-    http_server_tests.linkLibC();
-
-    const run_http_server_tests = b.addRunArtifact(http_server_tests);
-    const http_server_test_step = b.step("test-http-server", "Run HTTP server with JWT tests");
-    http_server_test_step.dependOn(&run_http_server_tests.step);
-
-    // HTTP server executable
-    const http_server_exe = b.addExecutable(.{
-        .name = "blitz-http-server",
-        .root_module = b.addModule("http_server", .{
-            .root_source_file = b.path("src/http_server.zig"),
-            .target = target,
-        }),
-    });
-    http_server_exe.linkLibC();
-
-    const run_http_server = b.addRunArtifact(http_server_exe);
-    const run_http_server_step = b.step("run-http-server", "Run HTTP server with JWT authentication demo");
-    run_http_server_step.dependOn(&run_http_server.step);
+    // HTTP server - REMOVED (consolidated into main.zig)
+    // Use: zig build run -- --mode http
 }

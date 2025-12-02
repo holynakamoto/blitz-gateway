@@ -51,7 +51,7 @@ jobs:
     - name: Build optimized binary
       run: |
         zig build -Doptimize=ReleaseFast
-        ls -lah zig-out/bin/blitz-quic
+        ls -lah zig-out/bin/blitz
     
     - name: Install nfpm
       run: |

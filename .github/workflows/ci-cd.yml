@@ -68,10 +68,10 @@ jobs:
           restore-keys: |
             pr-build-
 
-      - name: Build blitz-quic
+      - name: Build blitz
         run: |
           zig build -Doptimize=ReleaseFast
-          ls -lah zig-out/bin/blitz-quic
+          ls -lah zig-out/bin/blitz
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4

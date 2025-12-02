@@ -222,23 +222,28 @@ pub const Validator = struct {
         errdefer self.allocator.free(payload_json);
         const payload_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
         payload_decoder.decode(payload_json, payload_b64) catch return error.InvalidBase64;
-        // Find actual length
-        var payload_actual_len: usize = payload_decoded_len;
-        while (payload_actual_len > 0 and payload_json[payload_actual_len - 1] == 0) {
-            payload_actual_len -= 1;
+        // Calculate actual decoded length (accounting for padding)
+        var payload_padding: usize = 0;
+        if (payload_b64.len > 0) {
+            if (payload_b64[payload_b64.len - 1] == '=') payload_padding += 1;
+            if (payload_b64.len > 1 and payload_b64[payload_b64.len - 2] == '=') payload_padding += 1;
         }
-        const payload_json_slice = payload_json[0..payload_actual_len];
+        const payload_actual_len = (payload_b64.len * 3) / 4 - payload_padding;
 
-        var payload = try self.parsePayload(payload_json[0..payload_decoded_len]);
+        var payload = try self.parsePayload(payload_json[0..payload_actual_len]);
         defer payload.deinit(self.allocator);
 
         // Decode signature
-        const signature_decoded_len = (signature_b64.len * 3 + 3) / 4;
+        var signature_padding: usize = 0;
+        if (signature_b64.len > 0) {
+            if (signature_b64[signature_b64.len - 1] == '=') signature_padding += 1;
+            if (signature_b64.len > 1 and signature_b64[signature_b64.len - 2] == '=') signature_padding += 1;
+        }
+        const signature_decoded_len = (signature_b64.len * 3) / 4 - signature_padding;
         const signature = try self.allocator.alloc(u8, signature_decoded_len);
         errdefer self.allocator.free(signature);
         const signature_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
-        const signature_actual_len = signature_decoder.decode(signature, signature_b64) catch return error.InvalidBase64;
-        const signature_slice = signature[0..signature_actual_len];
+        signature_decoder.decode(signature, signature_b64) catch return error.InvalidBase64;
 
         // Validate algorithm matches config
         if (@intFromEnum(header.alg) != @intFromEnum(self.config.algorithm)) {
@@ -272,23 +277,30 @@ pub const Validator = struct {
 
     /// Parse JWT header from JSON
     fn parseHeader(self: *Validator, json_str: []const u8) !Header {
-        var parser = json.Parser.init(self.allocator, false);
-        defer parser.deinit();
-
-        var tree = try parser.parse(json_str);
+        const tree = try json.parseFromSlice(json.Value, self.allocator, json_str, .{});
         defer tree.deinit();
 
-        const root = tree.root.Object;
+        const root = tree.value.object;
 
         // Get algorithm
-        const alg_str = root.get("alg") orelse return ValidationError.InvalidHeader;
-        const alg = try self.parseAlgorithm(alg_str.String);
+        const alg_val = root.get("alg") orelse return ValidationError.InvalidHeader;
+        const alg_str = switch (alg_val) {
+            .string => |s| s,
+            else => return ValidationError.InvalidHeader,
+        };
+        const alg = try self.parseAlgorithm(alg_str);
 
         // Get type (optional)
-        const typ = if (root.get("typ")) |t| t.String else "JWT";
+        const typ = if (root.get("typ")) |t| switch (t) {
+            .string => |s| s,
+            else => "JWT",
+        } else "JWT";
 
         // Get key ID (optional)
-        const kid = if (root.get("kid")) |k| try self.allocator.dupe(u8, k.String) else null;
+        const kid = if (root.get("kid")) |k| switch (k) {
+            .string => |s| try self.allocator.dupe(u8, s),
+            else => null,
+        } else null;
 
         return Header{
             .alg = alg,

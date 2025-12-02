@@ -22,8 +22,14 @@ jobs:
       with:
         submodules: recursive
     
-    - name: Force checkout vendored picotls (fixes .gitignore conflict)
-      run: git checkout HEAD -- deps/picotls/
+    - name: Fetch picotls (vendored dependency)
+      run: |
+        if [ ! -d deps/picotls ]; then
+          echo "Fetching picotls from GitHub..."
+          mkdir -p deps
+          git clone --depth 1 --branch master https://github.com/h2o/picotls.git deps/picotls || \
+          git clone --depth 1 https://github.com/h2o/picotls.git deps/picotls
+        fi
     
     - name: Verify picotls header exists
       run: test -f deps/picotls/include/picotls.h || (echo "picotls missing!" && exit 1)

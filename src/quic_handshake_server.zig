@@ -294,7 +294,7 @@ pub fn main() !void {
     var timeout: std.posix.timeval = undefined;
     timeout.sec = @intCast(QUIC_TIMEOUTS.recv_timeout / 1000);
     timeout.usec = @intCast((QUIC_TIMEOUTS.recv_timeout % 1000) * 1000);
-    _ = std.posix.setsockopt(sockfd, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout));
+    std.posix.setsockopt(sockfd, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
 
     std.debug.print("[UDP] ✅ Listening on 0.0.0.0:8443/udp\n", .{});
     std.debug.print("\n", .{});

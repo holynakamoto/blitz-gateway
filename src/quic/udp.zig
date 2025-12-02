@@ -59,11 +59,13 @@ pub fn prepRecvFrom(
     addr: *c.struct_sockaddr_in,
     addr_len: *c.socklen_t,
 ) void {
-    // io_uring_prep_recvfrom is a macro - use recvmsg equivalent
-    // Set opcode to IORING_OP_RECV (5) for simpler buffer receive
+    // Use io_uring_prep_recv if available, otherwise manually set fields
+    // For IORING_OP_RECV (5), set buffer address
     sqe.opcode = 5; // IORING_OP_RECV
     sqe.fd = sockfd;
-    sqe.*.addr = @intFromPtr(buf.ptr);
+    // In liburing, addr is in a union - access via @field or use @ptrCast
+    // Try accessing through the anonymous union structure
+    @as(*usize, @ptrCast(@alignCast(@as([*]u8, @ptrCast(sqe)) + @offsetOf(c.struct_io_uring_sqe, "addr")))).* = @intFromPtr(buf.ptr);
     sqe.len = @intCast(buf.len);
     sqe.flags = 0;
     // Store addr info for later use

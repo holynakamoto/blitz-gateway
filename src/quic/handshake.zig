@@ -84,9 +84,9 @@ pub const QuicHandshake = struct {
     }
 
     pub fn deinit(self: *QuicHandshake) void {
-        if (self.tls_conn) |*tls_conn| {
-            tls_conn.*.deinit();
-        }
+        // tls_conn is disabled for PicoTLS migration (anyopaque type)
+        // No cleanup needed as it's not currently used
+        _ = self.tls_conn;
         self.initial_crypto_stream.deinit();
         self.handshake_crypto_stream.deinit();
     }

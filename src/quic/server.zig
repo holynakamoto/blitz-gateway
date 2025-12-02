@@ -29,7 +29,7 @@ pub const QuicServerConnection = struct {
         local_conn_id: []const u8,
         remote_conn_id: []const u8,
         client_addr: std.net.Ip4Address,
-    ) QuicServerConnection {
+    ) !QuicServerConnection {
         const local_conn_id_mut = try allocator.dupe(u8, local_conn_id);
         const quic_conn = connection.QuicConnection.init(allocator, local_conn_id_mut, remote_conn_id);
         const handshake_mgr = handshake.QuicHandshake.init(allocator, &quic_conn, local_conn_id, remote_conn_id);

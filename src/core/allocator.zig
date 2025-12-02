@@ -131,13 +131,13 @@ pub const BufferPool = struct {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.read_pool.buffers);
-        self.read_pool.free_indices.deinit();
+        self.read_pool.free_indices.deinit(self.backing_allocator);
 
         for (self.write_pool.buffers) |buf| {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.write_pool.buffers);
-        self.write_pool.free_indices.deinit();
+        self.write_pool.free_indices.deinit(self.backing_allocator);
     }
 
     pub fn acquireRead(self: *BufferPool) ?[]u8 {

@@ -19,7 +19,7 @@ pub const Backend = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{s}:{d} (weight: {})", .{ self.host, self.port, self.weight });
+        try writer.print("{s}:{d} (weight: {d})", .{ self.host, self.port, self.weight });
         if (self.health_check_path) |path| {
             try writer.print(" health:{s}", .{path});
         }

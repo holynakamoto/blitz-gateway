@@ -18,9 +18,9 @@ const c = @cImport({
 
 // Manual FD_SET implementation since Zig can't translate the macro
 fn FD_SET(fd: c_int, set: *c.fd_set) void {
-    const __NFDBITS = @sizeOf(c.long) * 8;
+    const __NFDBITS = @sizeOf(c_long) * 8;
     const fd_usize: usize = @intCast(fd);
-    set.__fds_bits[fd_usize / __NFDBITS] |= @as(c.long, 1) << @intCast(fd_usize % __NFDBITS);
+    set.__fds_bits[fd_usize / __NFDBITS] |= @as(c_long, 1) << @intCast(fd_usize % __NFDBITS);
 }
 
 // Helper to get errno at runtime (avoids comptime issue on Linux)

@@ -236,7 +236,7 @@ fn runOriginServer(allocator: std.mem.Allocator, port: u16) !void {
     std.debug.print("Listen: 0.0.0.0:{d} (UDP)\n", .{port});
     std.debug.print("Mode: Origin Server (single instance)\n\n", .{});
 
-    std.log.info("Origin server started on port {}", .{port});
+        std.log.info("Origin server started on port {d}", .{port});
     try udp_server.runQuicServer(&io_uring.ring, port);
 }
 

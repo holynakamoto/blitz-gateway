@@ -363,7 +363,7 @@ pub fn main() !void {
         var client_port: u16 = 0;
 
         if (src_addr.family == std.posix.AF.INET) {
-            const addr_in = @as(*std.posix.sockaddr.in, @ptrCast(&src_addr));
+            const addr_in = @as(*std.posix.sockaddr.in, @ptrCast(@alignCast(&src_addr)));
             client_ip = addr_in.addr;
             client_port = std.mem.bigToNative(u16, addr_in.port);
         }

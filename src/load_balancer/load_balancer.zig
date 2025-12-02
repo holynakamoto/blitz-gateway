@@ -59,7 +59,7 @@ pub const LoadBalancer = struct {
             }
         }
 
-        std.log.info("Load balancer initialized with {} backends", .{cfg.backends.items.len});
+        std.log.info("Load balancer initialized with {d} backends", .{cfg.backends.items.len});
         return lb;
     }
 
@@ -281,7 +281,7 @@ pub const LoadBalancer = struct {
     /// the QUIC handshake server to forward requests to backends
     pub fn serve(self: *LoadBalancer, host: []const u8, port: u16) !void {
         std.log.info("Load balancer server starting on {s}:{d}", .{ host, port });
-        std.log.info("Backends configured: {}", .{self.pool.backends.items.len});
+        std.log.info("Backends configured: {d}", .{self.pool.backends.items.len});
 
         // Start health checking in background
         self.startHealthChecking();
@@ -306,7 +306,7 @@ pub const LoadBalancer = struct {
 
     /// Start background health checking
     fn startHealthChecking(self: *LoadBalancer) void {
-        std.log.info("Starting health checks for {} backends", .{self.pool.backends.items.len});
+        std.log.info("Starting health checks for {d} backends", .{self.pool.backends.items.len});
 
         // Perform initial health check
         self.performHealthCheck();

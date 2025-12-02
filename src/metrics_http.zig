@@ -44,7 +44,7 @@ pub const MetricsHttpServer = struct {
         defer server.deinit();
 
         server.listen(address) catch |err| {
-            std.log.err("Failed to start metrics HTTP server on port {}: {}", .{ self.port, err });
+            std.log.err("Failed to start metrics HTTP server on port {d}: {any}", .{ self.port, err });
             return;
         };
 

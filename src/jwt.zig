@@ -201,15 +201,19 @@ pub const Validator = struct {
         if (parts.next() != null) return ValidationError.InvalidToken;
 
         // Decode header
-        // Base64 decoded size is at most 3/4 of encoded size (rounded up)
-        const header_decoded_len = (header_b64.len * 3 + 3) / 4;
+        // Base64 decoded size calculation: (len * 3) / 4, accounting for padding
+        var header_padding: usize = 0;
+        if (header_b64.len > 0) {
+            if (header_b64[header_b64.len - 1] == '=') header_padding += 1;
+            if (header_b64.len > 1 and header_b64[header_b64.len - 2] == '=') header_padding += 1;
+        }
+        const header_decoded_len = (header_b64.len * 3) / 4 - header_padding;
         const header_json = try self.allocator.alloc(u8, header_decoded_len);
         errdefer self.allocator.free(header_json);
         const header_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
-        const header_actual_len = header_decoder.decode(header_json, header_b64) catch return error.InvalidBase64;
-        const header_json_slice = header_json[0..header_actual_len];
+        header_decoder.decode(header_json, header_b64) catch return error.InvalidBase64;
 
-        var header = try self.parseHeader(header_json_slice);
+        var header = try self.parseHeader(header_json[0..header_decoded_len]);
         defer header.deinit(self.allocator);
 
         // Decode payload
@@ -217,10 +221,15 @@ pub const Validator = struct {
         const payload_json = try self.allocator.alloc(u8, payload_decoded_len);
         errdefer self.allocator.free(payload_json);
         const payload_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
-        const payload_actual_len = payload_decoder.decode(payload_json, payload_b64) catch return error.InvalidBase64;
+        payload_decoder.decode(payload_json, payload_b64) catch return error.InvalidBase64;
+        // Find actual length
+        var payload_actual_len: usize = payload_decoded_len;
+        while (payload_actual_len > 0 and payload_json[payload_actual_len - 1] == 0) {
+            payload_actual_len -= 1;
+        }
         const payload_json_slice = payload_json[0..payload_actual_len];
 
-        var payload = try self.parsePayload(payload_json_slice);
+        var payload = try self.parsePayload(payload_json[0..payload_decoded_len]);
         defer payload.deinit(self.allocator);
 
         // Decode signature
@@ -241,7 +250,7 @@ pub const Validator = struct {
         defer self.allocator.free(signing_input);
 
         // Verify signature
-        try self.verifySignature(signing_input, signature_slice, &header);
+        try self.verifySignature(signing_input, signature[0..signature_decoded_len], &header);
 
         // Validate claims
         try payload.validateClaims(self.config.issuer, self.config.audience);

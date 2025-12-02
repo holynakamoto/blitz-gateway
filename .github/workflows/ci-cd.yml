@@ -58,7 +58,7 @@ jobs:
           ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v3
+        uses: goto-bus-stop/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -107,7 +107,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v3
+        uses: goto-bus-stop/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 

@@ -252,7 +252,7 @@ fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const 
             if (user_claims) |claims| {
                 const user_id = claims.payload.sub orelse "unknown";
                 const is_admin = if (claims.payload.custom_claims.get("admin")) |admin_claim| {
-                    admin_claim == .Bool and admin_claim.Bool == true;
+                    admin_claim == .bool and admin_claim.bool == true;
                 } else false;
 
                 allocated_response = try std.fmt.allocPrint(allocator, "{{\"user_id\":\"{s}\",\"profile\":{{\"name\":\"John Doe\",\"email\":\"john@example.com\"}},\"authenticated\":true,\"is_admin\":{}}}", .{ user_id, is_admin });

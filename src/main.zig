@@ -325,9 +325,9 @@ fn runLoadBalancerMode(allocator: std.mem.Allocator, cfg: *const config.Config) 
     var lb = try load_balancer.LoadBalancer.initFromConfig(allocator, cfg.*);
     defer lb.deinit();
 
-    // Parse listen address from config (default to 0.0.0.0:4433)
-    const listen_addr = "0.0.0.0"; // TODO: Parse from cfg.listen if available
-    const listen_port: u16 = 4433; // TODO: Parse from cfg.listen if available
+    // Use listen address and port from config
+    const listen_addr = cfg.listen_addr;
+    const listen_port = cfg.listen_port;
 
     std.debug.print("Load balancer configuration:\n", .{});
     std.debug.print("  Listen: {s}:{d}\n", .{ listen_addr, listen_port });

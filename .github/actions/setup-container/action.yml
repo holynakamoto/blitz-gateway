@@ -1,0 +1,9 @@
+name: "Setup container essentials"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        apt-get update
+        apt-get install -y git ca-certificates curl
+

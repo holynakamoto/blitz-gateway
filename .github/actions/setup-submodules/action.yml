@@ -1,0 +1,7 @@
+name: "Init submodules"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: git submodule update --init --recursive
+

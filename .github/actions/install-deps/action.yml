@@ -1,0 +1,10 @@
+name: "Install deps"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        apt-get update
+        apt-get install -y \
+          liburing-dev libssl-dev pkg-config build-essential
+

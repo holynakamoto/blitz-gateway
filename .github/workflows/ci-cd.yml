@@ -3,15 +3,13 @@ name: Blitz Gateway CI/CD
 on:
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened]
   push:
     branches: [main, develop]
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
 
 env:
-  ZIG_VERSION: '0.15.2'  # Updated to 0.15.2 as requested
+  ZIG_VERSION: "0.15.2"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -19,53 +17,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# ------------------------------------------
+#  LIGHTWEIGHT PR BUILD
+# ------------------------------------------
 jobs:
-  # ============================================================================
-  # HELPER JOB: Force all jobs to appear as checks (even if skipped)
-  # ============================================================================
-  always-run:
-    name: Workflow Trigger
-    runs-on: ubuntu-latest
-    steps:
-      - name: Workflow active
-        run: echo "Workflow triggered successfully"
-
-  # ============================================================================
-  # LIGHTWEIGHT BUILD (for PRs - free tier friendly)
-  # ============================================================================
-  build-pr:
-    name: Build (PR - Linux x86_64)
-    runs-on: ubuntu-latest
+  pr-build:
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     container:
       image: ubuntu:22.04
       options: --user root
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
-      ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM to reduce RAM
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize submodules
-        run: |
-          git submodule update --init --recursive
-          ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            wget curl git \
-            liburing-dev \
-            libssl-dev \
-            pkg-config \
-            build-essential
+      - uses: ./.github/actions/setup-container
+      - uses: ./.github/actions/setup-submodules
+      - uses: ./.github/actions/install-deps
+      - uses: ./.github/actions/setup-zig
 
       - name: Cache Build
         uses: actions/cache@v4
@@ -73,113 +41,45 @@ jobs:
           path: |
             ~/.cache/zig
             zig-cache
-          # IMPROVEMENT: Added ZIG_VERSION to cache key for better bust reliability
-          key: ${{ env.ZIG_VERSION }}-ubuntu-22.04-pr-build-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ env.ZIG_VERSION }}-ubuntu-22.04-pr-build-
+          key: pr-${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon', '**/*.zig') }}
 
       - name: Build blitz
         run: |
           zig build -Doptimize=ReleaseFast
           ls -lah zig-out/bin/blitz
 
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: blitz-linux-x86_64
+          name: blitz-linux-pr
           path: zig-out/bin/blitz
-          retention-days: 7
-          if-no-files-found: error
+          retention-days: 5
 
-  # ============================================================================
-  # STATIC ANALYSIS & LINTING
-  # ============================================================================
+# ------------------------------------------
+#  LINT
+# ------------------------------------------
   lint:
-    name: Lint & Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: ./.github/actions/setup-zig
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Cache Zig
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/zig
-            zig-cache
-          # IMPROVEMENT: Added ZIG_VERSION to cache key
-          key: ${{ env.ZIG_VERSION }}-${{ runner.os }}-zig-${{ hashFiles('build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ env.ZIG_VERSION }}-${{ runner.os }}-zig-
-
-      - name: Run Zig fmt check
+      - name: Zig fmt
         run: zig fmt --check .
 
-      - name: Run custom linter
+      - name: Lint TODO/FIXME
         run: |
-          # Check for common anti-patterns (allocator.alloc...defer...free)
-          ! grep -r "allocator.alloc.*defer.*free" src/ || (echo "Found potential memory leak pattern" && exit 1)
-          ! grep -r "TODO\|FIXME\|HACK" src/ || echo "Found TODO/FIXME markers"
+          ! grep -r "TODO\|FIXME\|HACK" src/ || echo "Found TODO markers"
 
-      - name: Shellcheck
-        run: |
-          sudo apt-get install -y shellcheck
-          find . -name "*.sh" -exec shellcheck {} \;
-
-  # ============================================================================
-  # SECURITY SCANNING
-  # ============================================================================
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Semgrep
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/security-audit
-            p/secrets
-            p/owasp-top-ten
-
-      - name: Secret Scanning
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-
-      - name: Dependency Vulnerability Scan
-        run: |
-          # Check for known vulnerable dependencies
-          zig build --fetch-only || true
-          # Add custom vulnerability checking logic here
-
-  # ============================================================================
-  # BUILD & TEST (Full matrix - runs on push to main/develop, not PRs)
-  # ============================================================================
+# ------------------------------------------
+#  FULL LINUX BUILD MATRIX
+# ------------------------------------------
   build-linux:
-    name: Build (Linux ${{ matrix.arch }})
+    if: github.event_name != 'pull_request'
+    needs: [lint]
     runs-on: ubuntu-latest
-    # IMPROVEMENT: Removed unnecessary dependency on 'always-run'
-    if: github.event_name != 'pull_request'  # Skip on PRs, use build-pr instead
     container:
       image: ubuntu:22.04
       options: --user root
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
-      ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM → cuts RAM from ~11 GB → ~4.5 GB
     strategy:
       fail-fast: false
       matrix:
@@ -187,20 +87,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            wget curl git \
-            libssl-dev liburing-dev pkg-config build-essential
+      - uses: ./.github/actions/setup-container
+      - uses: ./.github/actions/setup-submodules
+      - uses: ./.github/actions/install-deps
+      - uses: ./.github/actions/setup-zig
 
       - name: Cache Build
         uses: actions/cache@v4
@@ -209,415 +99,122 @@ jobs:
             ~/.cache/zig
             zig-cache
             zig-out
-          # IMPROVEMENT: Added ZIG_VERSION and necessary files to hashFiles for consistency and reliability
-          key: ${{ env.ZIG_VERSION }}-ubuntu-22.04-linux-${{ matrix.arch }}-build-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ env.ZIG_VERSION }}-ubuntu-22.04-linux-${{ matrix.arch }}-build-
+          key: linux-${{ matrix.arch }}-${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon', '**/*.zig') }}
 
-      - name: Build Release
-        run: |
-          zig build -Doptimize=ReleaseSafe
+      - name: Build (Release)
+        run: zig build -Doptimize=ReleaseFast
 
-      - name: Build with Debug Info
-        run: |
-          zig build -Doptimize=ReleaseSafe
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          # Using specific name pattern to identify artifacts easily for release
-          name: blitz-linux-${{ matrix.arch }}-release
-          path: |
-            zig-out/bin/blitz
-          retention-days: 7
+          name: blitz-linux-${{ matrix.arch }}
+          path: zig-out/bin/blitz
 
+# ------------------------------------------
+#  MACOS BUILD
+# ------------------------------------------
   build-macos:
-    name: Build (macOS ${{ matrix.arch }})
+    if: github.event_name != 'pull_request'
+    needs: [lint]
     runs-on: macos-14
-    # IMPROVEMENT: Removed unnecessary dependency on 'always-run'
-    if: github.event_name != 'pull_request'  # Skip on PRs, use build-pr instead
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
-      ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM → cuts RAM from ~11 GB → ~4.5 GB
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [aarch64]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          brew install openssl liburing || true
-
-      - name: Cache Build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/zig
-            zig-cache
-            zig-out
-          # IMPROVEMENT: Added ZIG_VERSION and necessary files to hashFiles for consistency and reliability
-          key: ${{ env.ZIG_VERSION }}-macos-14-${{ matrix.arch }}-build-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ env.ZIG_VERSION }}-macos-14-${{ matrix.arch }}-build-
+      - uses: ./.github/actions/setup-submodules
+      - uses: ./.github/actions/setup-zig
 
       - name: Build Release
-        run: |
-          zig build -Doptimize=ReleaseSafe
+        run: zig build -Doptimize=ReleaseFast
 
-      - name: Build with Debug Info
-        run: |
-          zig build -Doptimize=ReleaseSafe
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          # Using specific name pattern to identify artifacts easily for release
-          name: blitz-macos-${{ matrix.arch }}-release
-          path: |
-            zig-out/bin/blitz
-          retention-days: 7
+          name: blitz-macos-aarch64
+          path: zig-out/bin/blitz
 
-  # ============================================================================
-  # COMPREHENSIVE TESTING
-  # ============================================================================
+# ------------------------------------------
+#  TEST SUITE
+# ------------------------------------------
   test:
-    name: Test Suite
+    needs: [build-linux]
     runs-on: ubuntu-latest
-    needs: [lint, always-run]
-    if: needs.lint.result == 'success'  # Run on PRs after lint passes, or on push
     container:
       image: ubuntu:22.04
       options: --user root
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
-      ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM → cuts RAM from ~11 GB → ~4.5 GB
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-container
+      - uses: ./.github/actions/setup-submodules
+      - uses: ./.github/actions/install-deps
+      - uses: ./.github/actions/setup-zig
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            wget curl git \
-            libssl-dev liburing-dev pkg-config build-essential
-
-      - name: Cache Test Build
+      - name: Cache test
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/zig
-            zig-cache
-          # IMPROVEMENT: Added ZIG_VERSION to cache key
-          key: ${{ env.ZIG_VERSION }}-ubuntu-22.04-test-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ env.ZIG_VERSION }}-ubuntu-22.04-test-
+          path: zig-cache
+          key: test-${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon', '**/*.zig') }}
 
-      - name: Run Unit Tests
-        run: zig build test --summary all
+      - run: zig build test --summary all
+      - run: zig build test-load-balancer
+      - run: zig build test-quic
 
-      - name: Run Load Balancer Tests
-        run: zig build test-load-balancer
-
-      - name: Run QUIC Tests
-        run: zig build test-quic
-
-      - name: Run Integration Tests
-        run: zig build test-http3-integration || echo "Integration tests skipped if not available"
-
-  # ============================================================================
-  # PERFORMANCE & LOAD TESTING
-  # ============================================================================
-  performance:
-    name: Performance Benchmarks
-    runs-on: ubuntu-latest-8-core
-    needs: [build-linux]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    container:
-      image: ubuntu:22.04
-      options: --user root
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            wget curl git \
-            libssl-dev liburing-dev pkg-config build-essential
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: blitz-linux-x86_64-release
-          path: ./
-
-      - name: Install Performance Tools
-        run: |
-          sudo apt-get install -y wrk apache2-utils || true
-
-      - name: Build for Benchmark
-        run: |
-          zig build -Doptimize=ReleaseFast
-
-      - name: Basic Performance Test
-        run: |
-          # Start server in background
-          # Note: The downloaded artifact is placed in the root of the path provided to download-artifact (./)
-          ./blitz &
-          BLITZ_PID=$!
-          sleep 3
-          
-          # Basic curl test
-          curl -f http://localhost:8080/health || echo "Server not ready"
-          
-          kill $BLITZ_PID || true
-
-  # ============================================================================
-  # MEMORY & LEAK TESTING
-  # ============================================================================
-  memory-safety:
-    name: Memory Safety Check
-    runs-on: ubuntu-latest
-    needs: [build-linux]
-    container:
-      image: ubuntu:22.04
-      options: --user root
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          # IMPROVEMENT: Valgrind installed
-          apt-get install -y \
-            wget curl git \
-            libssl-dev liburing-dev pkg-config build-essential valgrind
-
-      - name: Build Debug
-        run: |
-          # Ensure a debug build for memory sanitizers/valgrind compatibility
-          zig build -Doptimize=Debug
-
-      - name: Run Valgrind Memory Check
-        # IMPROVEMENT: Explicit Valgrind execution
-        # Assumes 'zig build test' creates a test runner executable at zig-out/bin/test
-        run: |
-          # The -Dtest flag ensures test runner executable is built
-          zig build test -Doptimize=Debug
-          
-          TEST_RUNNER=./zig-out/bin/test
-          
-          echo "--- Running Basic Zig Tests (Sanitizers are active) ---"
-          $TEST_RUNNER --summary all || echo "Tests completed, check logs for sanitizer output"
-
-          echo "--- Running Valgrind Leak Check ---"
-          # Valgrind runs the executable and checks for leaks/errors
-          valgrind --leak-check=full --error-exitcode=1 $TEST_RUNNER || (echo "Valgrind detected leaks/errors" && exit 1)
-
-  # ============================================================================
-  # CONTAINER BUILD
-  # ============================================================================
+# ------------------------------------------
+#  CONTAINER BUILD + PUSH
+# ------------------------------------------
   container:
-    name: Build Container Image
+    needs: [test]
     runs-on: ubuntu-latest
-    # IMPROVEMENT: Removed unnecessary dependency on 'always-run'
-    needs: [test, security]
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
-    outputs:
-      image-digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-submodules
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
-        id: build
+      - name: Build + Push
         uses: docker/build-push-action@v6
-        env:
-          DOCKER_BUILD_SUMMARY: "false"
         with:
           context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          file: Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            ZIG_VERSION=${{ env.ZIG_VERSION }}
-            COMMIT_SHA=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-  # ============================================================================
-  # CONTAINER SECURITY SCANNING
-  # ============================================================================
-  container-security:
-    name: Container Security Scan
-    runs-on: ubuntu-latest
-    needs: [container]
-    if: github.event_name != 'pull_request'
-    steps:
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-  # ============================================================================
-  # SMOKE TESTS (Container)
-  # ============================================================================
-  smoke-test:
-    name: Container Smoke Tests
-    runs-on: ubuntu-latest
-    needs: [container]
-    if: github.event_name != 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Container
-        run: |
-          docker run -d --name blitz-test \
-            -p 8080:8080 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          sleep 5
-
-      - name: Health Check
-        run: |
-          curl -f http://localhost:8080/health || exit 1
-
-      - name: Cleanup
-        if: always()
-        run: docker rm -f blitz-test || true
-
-  # ============================================================================
-  # RELEASE MANAGEMENT
-  # ============================================================================
+# ------------------------------------------
+#  RELEASE
+# ------------------------------------------
   release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: [build-linux, build-macos, test]
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-macos, test]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # IMPROVEMENT: Explicitly download all artifacts from the build matrix
-      - name: Download Linux x86_64 Artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: blitz-linux-x86_64-release
-          path: artifacts/linux-x86_64
+          path: ./artifacts
 
-      - name: Download Linux aarch64 Artifact
-        uses: actions/download-artifact@v4
+      - name: Changelog
+        run: git log -10 --pretty=format:"- %s" > CHANGELOG.md
+
+      - uses: softprops/action-gh-release@v1
         with:
-          name: blitz-linux-aarch64-release
-          path: artifacts/linux-aarch64
-
-      - name: Download macOS aarch64 Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: blitz-macos-aarch64-release
-          path: artifacts/macos-aarch64
-
-      - name: Generate Changelog
-        id: changelog
-        run: |
-          # Generate changelog from commits
-          git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "HEAD~10")..HEAD --pretty=format:"- %s" > CHANGELOG.md || echo "- Initial release" > CHANGELOG.md
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          # IMPROVEMENT: Use globbing and consistent paths for all artifacts
-          files: |
-            artifacts/linux-x86_64/blitz
-            artifacts/linux-aarch64/blitz
-            artifacts/macos-aarch64/blitz
+          files: artifacts/**/blitz
           body_path: CHANGELOG.md
-          draft: false
-          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

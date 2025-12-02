@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZIG_VERSION: '0.14.0'  # Downgraded for CI compatibility (glibc FD_SET translation issue in 0.15.2)
+  ZIG_VERSION: '0.15.1'  # Using 0.15.1 with Ubuntu 22.04 Docker container to avoid glibc header translation issues
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -27,6 +27,9 @@ jobs:
     name: Build (PR - Linux x86_64)
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    container:
+      image: ubuntu:22.04
+      options: --user root
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
@@ -45,14 +48,15 @@ jobs:
           ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
+            wget curl git \
             liburing-dev \
             libssl-dev \
             pkg-config \
@@ -64,9 +68,9 @@ jobs:
           path: |
             ~/.cache/zig
             zig-cache
-          key: pr-build-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
+          key: ubuntu-22.04-pr-build-${{ hashFiles('**/*.zig', 'build.zig', 'build.zig.zon') }}
           restore-keys: |
-            pr-build-
+            ubuntu-22.04-pr-build-
 
       - name: Build blitz
         run: |
@@ -93,7 +97,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -184,15 +188,20 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'linux'
+        container:
+          image: ubuntu:22.04
+          options: --user root
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev liburing-dev pkg-config
+          apt-get update
+          apt-get install -y \
+            wget curl git \
+            libssl-dev liburing-dev pkg-config build-essential
 
       - name: Install system dependencies (macOS)
         if: matrix.os == 'macos'
@@ -206,9 +215,9 @@ jobs:
             ~/.cache/zig
             zig-cache
             zig-out
-          key: ${{ matrix.os }}-${{ matrix.arch }}-build-${{ hashFiles('**/*.zig') }}
+          key: ubuntu-22.04-${{ matrix.os }}-${{ matrix.arch }}-build-${{ hashFiles('**/*.zig') }}
           restore-keys: |
-            ${{ matrix.os }}-${{ matrix.arch }}-build-
+            ubuntu-22.04-${{ matrix.os }}-${{ matrix.arch }}-build-
 
       - name: Build Release
         run: |
@@ -244,14 +253,19 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Install system dependencies
+        container:
+          image: ubuntu:22.04
+          options: --user root
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev liburing-dev pkg-config
+          apt-get update
+          apt-get install -y \
+            wget curl git \
+            libssl-dev liburing-dev pkg-config build-essential
 
       - name: Cache Test Build
         uses: actions/cache@v4
@@ -259,7 +273,9 @@ jobs:
           path: |
             ~/.cache/zig
             zig-cache
-          key: test-${{ hashFiles('**/*.zig') }}
+          key: ubuntu-22.04-test-${{ hashFiles('**/*.zig') }}
+          restore-keys: |
+            ubuntu-22.04-test-
 
       - name: Run Unit Tests
         run: zig build test --summary all
@@ -288,14 +304,19 @@ jobs:
           submodules: true
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Install system dependencies
+        container:
+          image: ubuntu:22.04
+          options: --user root
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev liburing-dev pkg-config
+          apt-get update
+          apt-get install -y \
+            wget curl git \
+            libssl-dev liburing-dev pkg-config build-essential
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -336,14 +357,19 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Install system dependencies
+        container:
+          image: ubuntu:22.04
+          options: --user root
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev liburing-dev pkg-config valgrind
+          apt-get update
+          apt-get install -y \
+            wget curl git \
+            libssl-dev liburing-dev pkg-config build-essential valgrind
 
       - name: Build Debug
         run: |

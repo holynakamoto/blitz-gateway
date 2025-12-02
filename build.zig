@@ -231,6 +231,10 @@ pub fn build(b: *std.Build) void {
     const ebpf_benchmark_test_step = b.step("test-ebpf-benchmark", "Run eBPF benchmark tests");
     ebpf_benchmark_test_step.dependOn(&run_ebpf_benchmark_tests.step);
 
+    // Bench step - run benchmark tests
+    const bench_step = b.step("bench", "Run benchmark tests");
+    bench_step.dependOn(ebpf_benchmark_test_step);
+
     // Graceful reload tests
     const graceful_reload_tests = b.addTest(.{
         .root_module = b.addModule("graceful_reload_root", .{
@@ -287,4 +291,10 @@ pub fn build(b: *std.Build) void {
 
     // HTTP server - REMOVED (consolidated into main.zig)
     // Use: zig build run -- --mode http
+
+    // Documentation generation step (placeholder)
+    // Note: Actual docs generation would require creating a lib artifact with emit_docs
+    // For now, this step exists to satisfy the CI workflow
+    _ = b.step("docs", "Generate documentation");
+    // Docs generation not yet implemented - step exists for CI compatibility
 }

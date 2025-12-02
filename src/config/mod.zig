@@ -171,7 +171,7 @@ pub const Config = struct {
                 self.allocator.free(path);
             }
         }
-        self.backends.deinit();
+        self.backends.deinit(self.allocator);
         self.jwt.deinit(self.allocator);
     }
 

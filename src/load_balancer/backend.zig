@@ -127,7 +127,7 @@ pub const BackendPool = struct {
             backend.deinit(self.allocator);
             self.allocator.destroy(backend);
         }
-        self.backends.deinit();
+        self.backends.deinit(self.allocator);
     }
 
     /// Add a backend to the pool

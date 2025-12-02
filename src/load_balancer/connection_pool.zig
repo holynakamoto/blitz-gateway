@@ -71,7 +71,7 @@ pub const ConnectionPool = struct {
         for (self.connections.items) |*conn| {
             conn.deinit();
         }
-        self.connections.deinit();
+        self.connections.deinit(self.allocator);
     }
 
     /// Get or create a connection to a backend

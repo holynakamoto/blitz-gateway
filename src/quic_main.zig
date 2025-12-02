@@ -212,10 +212,16 @@ fn runLoadBalancer(allocator: std.mem.Allocator, cfg: *const config.Config, _: ?
     defer lb.deinit();
 
     // Initialize rate limiter if configured
-    var rate_limiter = if (cfg.rate_limit.global_rps != null or cfg.rate_limit.per_ip_rps != null)
-        try rate_limit.RateLimiter.init(allocator, cfg.rate_limit)
-    else
-        null;
+    // Convert config.RateLimitConfig to rate_limit.RateLimitConfig
+    var rate_limiter = if (cfg.rate_limit.global_rps != null or cfg.rate_limit.per_ip_rps != null) blk: {
+        const rl_config = rate_limit.RateLimitConfig{
+            .global_rps = cfg.rate_limit.global_rps,
+            .per_ip_rps = cfg.rate_limit.per_ip_rps,
+            .burst_multiplier = cfg.rate_limit.burst_multiplier,
+            .enable_ebpf = cfg.rate_limit.enable_ebpf,
+        };
+        break :blk try rate_limit.RateLimiter.init(allocator, rl_config);
+    } else null;
     defer if (rate_limiter) |*rl| rl.deinit();
 
     std.log.info("Load balancer started successfully", .{});

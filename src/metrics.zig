@@ -245,7 +245,7 @@ pub const MetricsServer = struct {
         std.log.info("Metrics available at http://localhost:{}/metrics", .{port});
 
         while (self.running) {
-            std.time.sleep(1_000_000_000); // Sleep for 1 second
+            std.Thread.sleep(1_000_000_000); // Sleep for 1 second (Zig 0.15.2 API)
         }
     }
 };

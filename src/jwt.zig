@@ -55,7 +55,7 @@ pub const Payload = struct {
         var it = self.custom_claims.iterator();
         while (it.next()) |entry| {
             allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit();
+            // Note: json.Value doesn't need deinit in Zig 0.15.2
         }
         self.custom_claims.deinit();
     }
@@ -398,7 +398,7 @@ pub const Validator = struct {
         var expected_sig: [32]u8 = undefined;
         crypto.auth.hmac.sha2.HmacSha256.create(&expected_sig, data, secret);
 
-        if (!crypto.utils.timingSafeEql([32]u8, expected_sig, signature[0..32])) {
+        if (!std.mem.eql(u8, &expected_sig, signature[0..32])) {
             return ValidationError.InvalidSignature;
         }
     }

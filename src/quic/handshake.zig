@@ -277,4 +277,5 @@ pub const QuicHandshake = struct {
 // Note: OpenSSL/TLS integration is handled via picotls
 // The blitz_ssl_accept wrapper is defined in src/tls/openssl_wrapper.c
 // and linked via build.zig
-extern fn blitz_ssl_accept(ssl: ?*anyopaque) c_int;
+// Extern declaration removed - TLS code is disabled for PicoTLS migration
+// When re-enabled, declare: extern fn blitz_ssl_accept(ssl: ?*anyopaque) c_int;

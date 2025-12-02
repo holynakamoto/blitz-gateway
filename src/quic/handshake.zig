@@ -203,8 +203,6 @@ pub const QuicHandshake = struct {
         _ = self.tls_conn;
         _ = out_buf;
         return error.NoTlsOutput; // Temporarily disabled for PicoTLS migration
-
-        return frame_len;
     }
 
     // Process HANDSHAKE packet payload - extract and process CRYPTO frames
@@ -268,19 +266,6 @@ pub const QuicHandshake = struct {
         _ = out_buf;
         _ = stream_type;
         return null; // Temporarily disabled for PicoTLS migration
-        const stream_offset = crypto_stream.data.items.len;
-
-        // Wrap TLS output in CRYPTO frame
-        const frame_len = try frames.CryptoFrame.generate(
-            @intCast(stream_offset),
-            tls_output_buf[0..tls_output_len],
-            out_buf,
-        );
-
-        // Append to crypto stream
-        try crypto_stream.append(tls_output_buf[0..tls_output_len]);
-
-        return frame_len;
     }
 
     pub const CryptoStreamType = enum {

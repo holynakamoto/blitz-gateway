@@ -125,7 +125,7 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
     // Load configuration if provided
     if (config_path) |cfg_path| {
         std.debug.print("Loading configuration from: {s}\n", .{cfg_path});
-        var cfg = try config.Config.loadConfig(allocator, cfg_path);
+        var cfg = try config.loadConfig(allocator, cfg_path);
         defer cfg.deinit(allocator);
 
         if (cfg.mode == .load_balancer) {

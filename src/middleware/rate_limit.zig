@@ -224,7 +224,7 @@ pub const RateLimiter = struct {
         var manager = ebpf.EbpfManager.init(self.allocator);
 
         // Try to compile and load the eBPF program
-        const ebpf_source = "src/ebpf_rate_limit.c";
+        const ebpf_source = "src/middleware/ebpf_rate_limit.c";
         const ebpf_object = "ebpf_rate_limit.o";
 
         // Compile eBPF program (only if source exists and clang is available)

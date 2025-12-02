@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
 
         // Add C wrappers with proper flags
         exe.addCSourceFile(.{
-            .file = b.path("src/bind_wrapper.c"),
+            .file = b.path("src/core/bind_wrapper.c"),
             .flags = &[_][]const u8{
                 "-std=c99",
                 "-D_GNU_SOURCE",

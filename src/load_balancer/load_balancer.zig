@@ -5,7 +5,7 @@ const std = @import("std");
 const backend = @import("backend.zig");
 const health_check = @import("health_check.zig");
 const connection_pool = @import("connection_pool.zig");
-const config = @import("../config.zig");
+const config = @import("../config/mod.zig");
 
 pub const LoadBalancerError = error{
     NoBackendsAvailable,

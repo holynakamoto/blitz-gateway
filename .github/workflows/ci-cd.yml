@@ -187,7 +187,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup Zig
+      - name: Setup Zig (Linux)
+        if: matrix.os == 'linux'
+        container:
+          image: ubuntu:22.04
+          options: --user root
+        uses: goto-bus-stop/setup-zig@v3
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Setup Zig (macOS)
+        if: matrix.os == 'macos'
         uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -253,6 +263,9 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
+        container:
+          image: ubuntu:22.04
+          options: --user root
         uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -304,6 +317,9 @@ jobs:
           submodules: true
 
       - name: Setup Zig
+        container:
+          image: ubuntu:22.04
+          options: --user root
         uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -357,6 +373,9 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
+        container:
+          image: ubuntu:22.04
+          options: --user root
         uses: goto-bus-stop/setup-zig@v3
         with:
           version: ${{ env.ZIG_VERSION }}

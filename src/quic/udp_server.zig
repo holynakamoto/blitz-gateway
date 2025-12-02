@@ -5,7 +5,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // Import io_uring C bindings from parent module for type compatibility
-const io_uring_mod = @import("../io_uring.zig");
+const io_uring_mod = @import("../core/io_uring.zig");
 const c = io_uring_mod.c;
 
 const server_mod = @import("server.zig");

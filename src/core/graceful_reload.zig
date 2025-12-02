@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const config = @import("config/mod.zig");
+const config = @import("../config/mod.zig");
 
 /// Graceful reload manager
 pub const GracefulReload = struct {

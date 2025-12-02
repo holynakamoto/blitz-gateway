@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const net = std.net;
-const metrics = @import("metrics.zig");
+const metrics = @import("mod.zig");
 
 pub const MetricsHttpServer = struct {
     allocator: std.mem.Allocator,

@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const allocator = @import("allocator.zig");
-const http = @import("http/parser.zig");
+const http = @import("../http/parser.zig");
 const protocol = @import("protocol.zig");
 
 // Use liburing for io_uring support
@@ -38,7 +38,7 @@ const HTTP_RESPONSE = http.CommonResponses.OK;
 
 // Import TLS and HTTP/2 modules
 // const tls = @import("tls/tls.zig"); // Temporarily disabled for picotls migration
-const http2 = @import("http2/connection.zig");
+const http2 = @import("../http2/connection.zig");
 
 // TLS Connection stub type (for when TLS is re-enabled)
 // This defines the structure that tls_conn should have, including the protocol field

@@ -9,13 +9,17 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const io_uring = @import("io_uring.zig");
+const core = @import("core/mod.zig");
+const io_uring = core.io_uring;
+const graceful_reload = core.graceful_reload;
 const udp_server = @import("quic/udp_server.zig");
 const config = @import("config/mod.zig");
 const load_balancer = @import("load_balancer/mod.zig");
-const rate_limit = @import("rate_limit.zig");
-const graceful_reload = @import("graceful_reload.zig");
-const metrics = @import("metrics.zig");
+const middleware = @import("middleware/mod.zig");
+const rate_limit = middleware.rate_limit;
+const metrics = @import("metrics/mod.zig");
+const auth = @import("auth/mod.zig");
+const jwt = auth.jwt;
 
 const Mode = enum {
     quic, // QUIC/HTTP3 server (default)
@@ -157,7 +161,6 @@ fn runHttpServer(port: u16) !void {
     std.debug.print("Blitz HTTP/1.1 Server with JWT Authentication\n", .{});
     std.debug.print("==============================================\n\n", .{});
 
-    const jwt = @import("jwt.zig");
     const net = std.net;
 
     // Create JWT validator configuration
@@ -190,7 +193,7 @@ fn runHttpServer(port: u16) !void {
     }
 }
 
-fn handleHttpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, jwt_validator: *@import("jwt.zig").Validator) !void {
+fn handleHttpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, jwt_validator: *jwt.Validator) !void {
     var buffer: [8192]u8 = undefined;
     const bytes_read = try stream.read(&buffer);
     if (bytes_read == 0) return;
@@ -219,7 +222,7 @@ fn handleHttpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, jw
     try handleHttpRequest(allocator, method, path, &headers, jwt_validator, stream);
 }
 
-fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8), jwt_validator: *@import("jwt.zig").Validator, stream: std.net.Stream) !void {
+fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8), jwt_validator: *jwt.Validator, stream: std.net.Stream) !void {
     var status_code: u16 = 200;
     var response_body: []const u8 = "";
     var allocated_response: ?[]u8 = null;
@@ -227,13 +230,13 @@ fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const 
 
     const requires_auth = !std.mem.eql(u8, path, "/health");
     var authenticated = false;
-    var user_claims: ?@import("jwt.zig").Token = null;
+    var user_claims: ?jwt.Token = null;
 
     if (requires_auth) {
         const auth_header = headers.get("authorization") orelse headers.get("Authorization");
-        if (auth_header) |auth| {
-            if (std.mem.startsWith(u8, auth, "Bearer ")) {
-                const token_str = std.mem.trim(u8, auth["Bearer ".len..], &std.ascii.whitespace);
+        if (auth_header) |auth_token| {
+            if (std.mem.startsWith(u8, auth_token, "Bearer ")) {
+                const token_str = std.mem.trim(u8, auth_token["Bearer ".len..], &std.ascii.whitespace);
                 user_claims = jwt_validator.validateToken(token_str) catch null;
                 authenticated = user_claims != null;
             }

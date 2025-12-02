@@ -144,7 +144,7 @@ jobs:
     - name: Test build after update
       uses: goto-bus-stop/setup-zig@v2
       with:
-        version: 0.15.2
+        version: 0.14.0  # Downgraded for CI compatibility (glibc FD_SET translation issue in 0.15.2)
 
     - name: Install dependencies
       run: |

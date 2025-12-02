@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZIG_VERSION: '0.15.2'
+  ZIG_VERSION: '0.14.0'  # Downgraded for CI compatibility (glibc FD_SET translation issue in 0.15.2)
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 

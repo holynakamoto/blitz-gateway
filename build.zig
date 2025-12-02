@@ -95,8 +95,7 @@ pub fn build(b: *std.Build) void {
 
     // Foundation validation tests - REMOVED (validate_foundation.zig deleted)
     // Load balancer tests - REMOVED (duplicate test files deleted, use src/ directly)
-    const load_balancer_test_step = b.step("test-load-balancer", "Run load balancer tests");
-    load_balancer_test_step.dependOn(&run_load_balancer_tests.step);
+    // Load balancer tests removed (duplicate test files deleted)
 
     // QUIC tests
     const quic_root_module = b.addModule("quic_root", .{

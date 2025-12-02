@@ -262,7 +262,7 @@ pub fn build(b: *std.Build) void {
     // JWT tests
     const jwt_tests = b.addTest(.{
         .root_module = b.addModule("jwt_root", .{
-            .root_source_file = b.path("src/jwt.zig"),
+            .root_source_file = b.path("src/auth/jwt.zig"),
             .target = target,
         }),
     });

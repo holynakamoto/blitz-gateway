@@ -1,5 +1,5 @@
 //! Blitz Gateway - High-performance QUIC/HTTP3 reverse proxy and load balancer
-//! 
+//!
 //! Usage:
 //!   zig build run                    # Run QUIC/HTTP3 server (default)
 //!   zig build run -- --mode echo     # Run echo server demo
@@ -18,9 +18,9 @@ const graceful_reload = @import("graceful_reload.zig");
 const metrics = @import("metrics.zig");
 
 const Mode = enum {
-    quic,  // QUIC/HTTP3 server (default)
-    echo,  // Echo server demo
-    http,  // HTTP/1.1 server with JWT
+    quic, // QUIC/HTTP3 server (default)
+    echo, // Echo server demo
+    http, // HTTP/1.1 server with JWT
 };
 
 pub fn main() !void {

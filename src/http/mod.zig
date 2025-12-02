@@ -4,4 +4,3 @@
 pub const HttpParser = @import("parser.zig").HttpParser;
 pub const HttpRequest = @import("parser.zig").HttpRequest;
 pub const HttpResponse = @import("parser.zig").HttpResponse;
-

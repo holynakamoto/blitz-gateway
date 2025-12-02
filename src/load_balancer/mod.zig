@@ -12,4 +12,3 @@ pub const HealthChecker = @import("health_check.zig").HealthChecker;
 
 pub const BackendConnection = @import("connection_pool.zig").BackendConnection;
 pub const ConnectionPool = @import("connection_pool.zig").ConnectionPool;
-

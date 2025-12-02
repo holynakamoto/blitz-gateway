@@ -116,7 +116,7 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
     try io_uring.init();
     defer io_uring.deinit();
 
-    var ring = &io_uring.ring;
+    const ring = &io_uring.ring;
 
     // Load configuration if provided
     if (config_path) |cfg_path| {
@@ -157,7 +157,6 @@ fn runHttpServer(port: u16) !void {
     std.debug.print("Blitz HTTP/1.1 Server with JWT Authentication\n", .{});
     std.debug.print("==============================================\n\n", .{});
 
-    const http = @import("http/parser.zig");
     const jwt = @import("jwt.zig");
     const net = std.net;
 

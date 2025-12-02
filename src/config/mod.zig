@@ -2,7 +2,7 @@
 //! Supports both origin server and load balancer modes
 
 const std = @import("std");
-const rate_limit = @import("rate_limit.zig");
+// RateLimitConfig is defined in this file, no need to import
 
 /// Backend server configuration for load balancer mode
 pub const Backend = struct {

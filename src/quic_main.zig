@@ -95,7 +95,7 @@ pub fn main() !void {
     defer current_config.deinit();
 
     // Initialize graceful reload if enabled
-    var reload_manager = if (enable_graceful_reload and builtin.os.tag == .linux) blk: {
+    var reload_manager: ?graceful_reload.GracefulReload = if (enable_graceful_reload and builtin.os.tag == .linux) blk: {
         std.debug.print("Initializing graceful reload support...\n", .{});
         const gr = try graceful_reload.GracefulReload.init(allocator, current_config);
         current_config = config.Config.init(allocator); // Reset to empty since it's now owned by reload manager

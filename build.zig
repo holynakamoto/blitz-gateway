@@ -157,88 +157,9 @@ pub fn build(b: *std.Build) void {
     // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
 
     // QUIC Handshake Server (full TLS integration)
-    // Note: This tool imports from src/, so we use the workspace root as the module root
-    const quic_handshake_root_module = b.addModule("quic_handshake_root", .{
-        .root_source_file = b.path("tools/quic_handshake_server.zig"),
-        .target = target,
-    });
-    const quic_handshake_exe = b.addExecutable(.{
-        .name = "blitz-quic-handshake",
-        .root_module = quic_handshake_root_module,
-    });
-
-    quic_handshake_exe.linkLibC();
-
-    if (target.result.os.tag == .linux) {
-        quic_handshake_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
-        quic_handshake_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
-        quic_handshake_exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
-        quic_handshake_exe.addLibraryPath(.{ .cwd_relative = "/lib" });
-
-        quic_handshake_exe.linkSystemLibrary("uring");
-        // OpenSSL only used for certificate loading in minicrypto mode
-        // Could be removed with more work, but acceptable for now
-        quic_handshake_exe.linkSystemLibrary("ssl");
-        quic_handshake_exe.linkSystemLibrary("crypto");
-
-        quic_handshake_exe.addCSourceFile(.{
-            .file = b.path("src/bind_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
-
-        quic_handshake_exe.addCSourceFile(.{
-            .file = b.path("src/tls/openssl_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                // "-D_GNU_SOURCE", // Removed to avoid conflict with OpenSSL headers
-                "-fno-sanitize=undefined",
-            },
-        });
-
-        quic_handshake_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
-        quic_handshake_exe.addIncludePath(.{ .cwd_relative = "src" });
-
-        // Critical: tell Zig where to find picotls headers
-        quic_handshake_exe.addIncludePath(b.path("deps/picotls/include"));
-        quic_handshake_exe.addIncludePath(b.path("deps/picotls/deps/micro-ecc"));
-        quic_handshake_exe.addIncludePath(b.path("deps/picotls/deps/cifra/src"));
-
-        // OpenSSL headers (architecture-specific location)
-        quic_handshake_exe.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
-
-        // Link picotls C files - full set for TLS 1.3
-        quic_handshake_exe.addCSourceFiles(.{
-            .root = b.path("deps/picotls/lib"),
-            .files = &.{
-                "picotls.c",
-                "openssl.c",
-                "pembase64.c",
-                "asn1.c",
-                "certificate_compression.c",
-                "ffx.c",
-                "fusion.c",
-                "hpke.c",
-                "minicrypto-pem.c",
-                "ptlsbcrypt.c",
-                "uecc.c",
-            },
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-DPTLS_HAVE_OPENSSL=1",
-                "-Wno-everything",
-            },
-        });
-    }
-
-    b.installArtifact(quic_handshake_exe);
-
-    const run_quic_handshake_cmd = b.addRunArtifact(quic_handshake_exe);
-    const run_quic_handshake_step = b.step("run-quic-handshake", "Run QUIC handshake server (full TLS)");
-    run_quic_handshake_step.dependOn(&run_quic_handshake_cmd.step);
+    // NOTE: Disabled temporarily - tool has module path issues
+    // The tool needs to be refactored to work with Zig's module system
+    // Can be re-enabled once module imports are fixed
 
     // Transport parameters tests
     const transport_params_tests = b.addTest(.{

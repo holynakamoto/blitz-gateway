@@ -185,6 +185,9 @@ pub const EarlyDataContext = struct {
     /// Early data buffer
     data: std.ArrayList(u8),
 
+    /// Allocator for the buffer
+    allocator: std.mem.Allocator,
+
     /// Whether early data was accepted
     accepted: bool = false,
 
@@ -194,12 +197,13 @@ pub const EarlyDataContext = struct {
     pub fn init(allocator: std.mem.Allocator, max_size: usize) EarlyDataContext {
         return EarlyDataContext{
             .data = std.ArrayList(u8).initCapacity(allocator, max_size) catch std.ArrayList(u8).init(allocator),
+            .allocator = allocator,
             .max_size = max_size,
         };
     }
 
     pub fn deinit(self: *EarlyDataContext) void {
-        self.data.deinit();
+        self.data.deinit(self.allocator);
     }
 
     /// Add early data
@@ -208,7 +212,7 @@ pub const EarlyDataContext = struct {
             return false; // Would exceed max size
         }
 
-        try self.data.appendSlice(data);
+        try self.data.appendSlice(self.allocator, data);
         return true;
     }
 

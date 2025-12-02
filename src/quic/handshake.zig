@@ -52,7 +52,7 @@ pub const QuicHandshake = struct {
         }
 
         pub fn append(self: *CryptoStream, data: []const u8) !void {
-            try self.data.appendSlice(data);
+            try self.data.appendSlice(self.allocator, data);
         }
 
         pub fn getData(self: *const CryptoStream) []const u8 {

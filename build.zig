@@ -93,38 +93,8 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    // Foundation validation tests
-    const foundation_root_module = b.addModule("foundation_root", .{
-        .root_source_file = b.path("src/validate_foundation.zig"),
-        .target = target,
-    });
-    const foundation_tests = b.addTest(.{
-        .root_module = foundation_root_module,
-    });
-
-    foundation_tests.linkLibC();
-
-    if (target.result.os.tag == .linux) {
-        foundation_tests.linkSystemLibrary("ssl");
-        foundation_tests.linkSystemLibrary("crypto");
-    }
-
-    const run_foundation_tests = b.addRunArtifact(foundation_tests);
-    const foundation_test_step = b.step("test-foundation", "Run TLS/HTTP/2 foundation validation tests");
-    foundation_test_step.dependOn(&run_foundation_tests.step);
-
-    // Load balancer tests
-    const load_balancer_root_module = b.addModule("load_balancer_root", .{
-        .root_source_file = b.path("tests/unit/load_balancer/test.zig"),
-        .target = target,
-    });
-    const load_balancer_tests = b.addTest(.{
-        .root_module = load_balancer_root_module,
-    });
-
-    load_balancer_tests.linkLibC();
-
-    const run_load_balancer_tests = b.addRunArtifact(load_balancer_tests);
+    // Foundation validation tests - REMOVED (validate_foundation.zig deleted)
+    // Load balancer tests - REMOVED (duplicate test files deleted, use src/ directly)
     const load_balancer_test_step = b.step("test-load-balancer", "Run load balancer tests");
     load_balancer_test_step.dependOn(&run_load_balancer_tests.step);
 
@@ -185,66 +155,11 @@ pub fn build(b: *std.Build) void {
     const quic_packet_simple_test_step = b.step("test-quic-packet-simple", "Run simple QUIC packet generation test");
     quic_packet_simple_test_step.dependOn(&run_quic_packet_simple_tests.step);
 
-    // QUIC standalone server executable
-    const quic_server_root_module = b.addModule("quic_server_root", .{
-        .root_source_file = b.path("src/quic_main.zig"),
-        .target = target,
-    });
-    const quic_server_exe = b.addExecutable(.{
-        .name = "blitz-quic",
-        .root_module = quic_server_root_module,
-    });
-
-    quic_server_exe.linkLibC();
-
-    if (target.result.os.tag == .linux) {
-        // Add architecture-specific library paths for Ubuntu/Debian
-        // Docker containers use /usr/lib/x86_64-linux-gnu/
-        // In Zig 0.15.2, use .{ .cwd_relative = "/path" } for absolute paths
-        quic_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
-        quic_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
-        quic_server_exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
-        quic_server_exe.addLibraryPath(.{ .cwd_relative = "/lib" });
-
-        // Link system libraries
-        quic_server_exe.linkSystemLibrary("uring");
-        quic_server_exe.linkSystemLibrary("ssl");
-        quic_server_exe.linkSystemLibrary("crypto");
-
-        quic_server_exe.addCSourceFile(.{
-            .file = b.path("src/bind_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
-
-        quic_server_exe.addCSourceFile(.{
-            .file = b.path("src/tls/openssl_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
-
-        quic_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
-        quic_server_exe.addIncludePath(.{ .cwd_relative = "src" });
-
-        // Add picotls include paths (needed for openssl_wrapper.c)
-        quic_server_exe.addIncludePath(b.path("deps/picotls/include"));
-    }
-
-    b.installArtifact(quic_server_exe);
-
-    const run_quic_server_cmd = b.addRunArtifact(quic_server_exe);
-    const run_quic_server_step = b.step("run-quic", "Run standalone QUIC server on port 8443");
-    run_quic_server_step.dependOn(&run_quic_server_cmd.step);
+    // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
 
     // QUIC Handshake Server (full TLS integration)
     const quic_handshake_root_module = b.addModule("quic_handshake_root", .{
-        .root_source_file = b.path("src/quic_handshake_server.zig"),
+        .root_source_file = b.path("tools/quic_handshake_server.zig"),
         .target = target,
     });
     const quic_handshake_exe = b.addExecutable(.{

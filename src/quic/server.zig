@@ -31,7 +31,8 @@ pub const QuicServerConnection = struct {
         client_addr: std.net.Ip4Address,
     ) !QuicServerConnection {
         const local_conn_id_mut = try allocator.dupe(u8, local_conn_id);
-        const quic_conn = connection.QuicConnection.init(allocator, local_conn_id_mut, remote_conn_id);
+        const remote_conn_id_mut = try allocator.dupe(u8, remote_conn_id);
+        const quic_conn = connection.QuicConnection.init(allocator, local_conn_id_mut, remote_conn_id_mut);
         const handshake_mgr = handshake.QuicHandshake.init(allocator, &quic_conn, local_conn_id, remote_conn_id);
 
         return QuicServerConnection{
@@ -46,8 +47,9 @@ pub const QuicServerConnection = struct {
     pub fn deinit(self: *QuicServerConnection) void {
         self.handshake_mgr.deinit();
         self.quic_conn.deinit();
-        // Free the duplicated local_conn_id
+        // Free the duplicated connection IDs
         self.allocator.free(self.quic_conn.local_conn_id);
+        self.allocator.free(self.quic_conn.remote_conn_id);
     }
 
     // Process incoming QUIC packet
@@ -205,7 +207,7 @@ pub const QuicServer = struct {
 
         // Create new connection
         const conn = try self.allocator.create(QuicServerConnection);
-        conn.* = QuicServerConnection.init(
+        conn.* = try QuicServerConnection.init(
             self.allocator,
             &local_conn_id,
             remote_conn_id,

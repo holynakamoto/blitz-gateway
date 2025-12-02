@@ -255,7 +255,7 @@ fn getInterfaceIndex(interface_name: []const u8) !u32 {
 pub fn compileEbpfProgram(source_path: []const u8, output_path: []const u8) !void {
     // TODO: Compile C eBPF program using clang
     // Example command:
-    // clang -O2 -target bpf -c src/ebpf_rate_limit.c -o ebpf_rate_limit.o
+    // clang -O2 -target bpf -c src/middleware/ebpf_rate_limit.c -o ebpf_rate_limit.o
 
     const result = try std.process.Child.run(.{
         .allocator = std.heap.page_allocator,

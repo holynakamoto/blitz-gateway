@@ -164,12 +164,12 @@ pub const GracefulReload = struct {
             .flags = 0,
         };
 
-        // Register SIGHUP
-        try std.posix.sigaction(std.posix.SIG.HUP, &act, null);
+        // Register SIGHUP (sigaction returns void in Zig 0.15.2)
+        std.posix.sigaction(std.posix.SIG.HUP, &act, null);
 
         // Register SIGUSR2
         act.handler = .{ .sigaction = sigusr2_handler };
-        try std.posix.sigaction(std.posix.SIG.USR2, &act, null);
+        std.posix.sigaction(std.posix.SIG.USR2, &act, null);
 
         std.log.info("Signal handlers registered for graceful reload (SIGHUP, SIGUSR2)", .{});
     }

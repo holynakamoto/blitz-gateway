@@ -96,7 +96,7 @@ pub const LoadBalancer = struct {
                 // Exponential backoff before retry
                 if (attempt < self.max_retries - 1) {
                     const delay = self.retry_delay_ms * (@as(u64, 1) << @intCast(attempt));
-                    std.time.sleep(delay * 1_000_000); // Convert to nanoseconds
+                    std.Thread.sleep(delay * 1_000_000); // Convert to nanoseconds (Zig 0.15.2 API)
                 }
 
                 attempt += 1;
@@ -299,7 +299,7 @@ pub const LoadBalancer = struct {
 
         // For now, we'll just keep it running
         while (true) {
-            std.time.sleep(1_000_000_000); // Sleep for 1 second
+            std.Thread.sleep(1_000_000_000); // Sleep for 1 second (Zig 0.15.2 API)
             self.performHealthCheck();
         }
     }

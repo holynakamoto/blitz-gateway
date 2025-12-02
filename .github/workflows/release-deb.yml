@@ -22,13 +22,17 @@ jobs:
       with:
         submodules: recursive
     
-    - name: Verify submodules
+    - name: Fetch picotls (vendored dependency)
       run: |
-        if [ ! -f deps/picotls/include/picotls.h ]; then
-          echo "Submodules not initialized, initializing..."
-          git submodule update --init --recursive
+        if [ ! -d deps/picotls ]; then
+          echo "Fetching picotls from GitHub..."
+          mkdir -p deps
+          git clone --depth 1 --branch master https://github.com/h2o/picotls.git deps/picotls || \
+          git clone --depth 1 https://github.com/h2o/picotls.git deps/picotls
         fi
-        ls -la deps/picotls/include/picotls.h || (echo "ERROR: picotls.h not found" && exit 1)
+    
+    - name: Verify picotls header exists
+      run: test -f deps/picotls/include/picotls.h || (echo "picotls missing!" && exit 1)
     
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2

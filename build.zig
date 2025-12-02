@@ -157,12 +157,11 @@ pub fn build(b: *std.Build) void {
     // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
 
     // QUIC Handshake Server (full TLS integration)
+    // Note: This tool imports from src/, so we use the workspace root as the module root
     const quic_handshake_root_module = b.addModule("quic_handshake_root", .{
         .root_source_file = b.path("tools/quic_handshake_server.zig"),
         .target = target,
     });
-    // Add src/ to module search path so tools can import from src/
-    quic_handshake_root_module.addIncludePath(b.path("src"));
     const quic_handshake_exe = b.addExecutable(.{
         .name = "blitz-quic-handshake",
         .root_module = quic_handshake_root_module,

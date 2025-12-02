@@ -63,7 +63,7 @@ pub fn prepRecvFrom(
     // Set opcode to IORING_OP_RECV (5) for simpler buffer receive
     sqe.opcode = 5; // IORING_OP_RECV
     sqe.fd = sockfd;
-    sqe.*.anonymous_0.anonymous_0.addr = @intFromPtr(buf.ptr);
+    sqe.*.addr = @intFromPtr(buf.ptr);
     sqe.len = @intCast(buf.len);
     sqe.flags = 0;
     // Store addr info for later use

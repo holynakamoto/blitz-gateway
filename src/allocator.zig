@@ -149,7 +149,7 @@ pub const BufferPool = struct {
             return null;
         }
         const idx = self.read_pool.free_indices.pop();
-        return self.read_pool.buffers[idx];
+        return self.read_pool.buffers[idx.?];
     }
 
     pub fn releaseRead(self: *BufferPool, buf: []u8) void {
@@ -174,7 +174,7 @@ pub const BufferPool = struct {
             return null;
         }
         const idx = self.write_pool.free_indices.pop();
-        return self.write_pool.buffers[idx];
+        return self.write_pool.buffers[idx.?];
     }
 
     pub fn releaseWrite(self: *BufferPool, buf: []u8) void {

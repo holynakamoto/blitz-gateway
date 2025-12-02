@@ -41,7 +41,7 @@ pub const HealthChecker = struct {
         defer _ = c.close(sockfd);
 
         // Set non-blocking
-        const flags = c.fcntl(sockfd, c.F_GETFL, 0);
+        const flags = c.fcntl(sockfd, c.F_GETFL, @as(c_int, 0));
         _ = c.fcntl(sockfd, c.F_SETFL, flags | c.O_NONBLOCK);
 
         // Set timeout

@@ -289,7 +289,7 @@ pub fn build(b: *std.Build) void {
 
         // Critical: tell Zig where to find picotls headers
         quic_handshake_exe.addIncludePath(b.path("deps/picotls/include"));
-        quic_handshake_exe.addIncludePath(b.path("deps/picotls/deps/micro-ecc"));
+        quic_handshake_exe.addIncludePath(.{ .path = "deps/picotls/deps/micro-ecc" });
 
         // OpenSSL headers (architecture-specific location)
         quic_handshake_exe.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });

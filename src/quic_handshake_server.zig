@@ -292,8 +292,8 @@ pub fn main() !void {
 
     // Set socket receive timeout to prevent indefinite blocking
     var timeout: std.posix.timeval = undefined;
-    timeout.tv_sec = @intCast(QUIC_TIMEOUTS.recv_timeout / 1000);
-    timeout.tv_usec = @intCast((QUIC_TIMEOUTS.recv_timeout % 1000) * 1000);
+    timeout.sec = @intCast(QUIC_TIMEOUTS.recv_timeout / 1000);
+    timeout.usec = @intCast((QUIC_TIMEOUTS.recv_timeout % 1000) * 1000);
     _ = std.posix.setsockopt(sockfd, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout));
 
     std.debug.print("[UDP] ✅ Listening on 0.0.0.0:8443/udp\n", .{});

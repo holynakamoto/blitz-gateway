@@ -85,7 +85,7 @@ pub const QuicHandshake = struct {
 
     pub fn deinit(self: *QuicHandshake) void {
         if (self.tls_conn) |*tls_conn| {
-            tls_conn.deinit();
+            tls_conn.*.deinit();
         }
         self.initial_crypto_stream.deinit();
         self.handshake_crypto_stream.deinit();

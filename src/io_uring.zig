@@ -209,7 +209,7 @@ pub fn init() !void {
 
     const ret = c.io_uring_queue_init(SQ_RING_SIZE, &ring, 0);
     if (ret < 0) {
-        std.log.err("io_uring_queue_init failed: {}", .{ret});
+        std.log.err("io_uring_queue_init failed: {d}", .{ret});
         return error.IoUringInitFailed;
     }
 

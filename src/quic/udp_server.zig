@@ -123,7 +123,7 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
     var buffer_pool = try UdpBufferPool.init(allocator);
     defer buffer_pool.deinit();
 
-    std.log.info("QUIC server listening on UDP port {}", .{port});
+    std.log.info("QUIC server listening on UDP port {d}", .{port});
 
     // Submit initial recvfrom operations (multiple for better throughput)
     const initial_recvs = 32;
@@ -207,7 +207,7 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                     ring,
                     &buffer_pool,
                 ) catch |err| {
-                    std.log.debug("Error handling QUIC packet: {}", .{err});
+                    std.log.debug("Error handling QUIC packet: {any}", .{err});
                 };
 
                 // Resubmit recvfrom for next packet
@@ -272,7 +272,7 @@ fn handleQuicPacket(
 
     // Parse packet to get connection ID for lookup
     const parsed = packet.Packet.parse(data, 8) catch |err| {
-        std.log.debug("Failed to parse QUIC packet: {}", .{err});
+        std.log.debug("Failed to parse QUIC packet: {any}", .{err});
         return;
     };
 

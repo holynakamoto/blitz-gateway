@@ -48,17 +48,17 @@ pub const MetricsHttpServer = struct {
             return;
         };
 
-        std.log.info("Metrics HTTP server listening on http://127.0.0.1:{}", .{self.port});
+        std.log.info("Metrics HTTP server listening on http://127.0.0.1:{d}", .{self.port});
 
         while (self.running) {
             const connection = server.accept() catch |err| {
-                std.log.err("Failed to accept connection: {}", .{err});
+                std.log.err("Failed to accept connection: {any}", .{err});
                 continue;
             };
 
             // Handle connection in a separate thread
             std.Thread.spawn(.{}, handleConnection, .{ self, connection }) catch |err| {
-                std.log.err("Failed to spawn connection handler: {}", .{err});
+                std.log.err("Failed to spawn connection handler: {any}", .{err});
                 connection.stream.close();
             };
         }
@@ -70,7 +70,7 @@ pub const MetricsHttpServer = struct {
         // Read request (simple HTTP/1.0 parsing)
         var buffer: [4096]u8 = undefined;
         const bytes_read = connection.stream.read(&buffer) catch |err| {
-            std.log.err("Failed to read HTTP request: {}", .{err});
+            std.log.err("Failed to read HTTP request: {any}", .{err});
             return;
         };
 
@@ -80,12 +80,12 @@ pub const MetricsHttpServer = struct {
         if (std.mem.indexOf(u8, request, "GET /metrics")) |_| {
             // Serve metrics
             self.serveMetrics(connection.stream) catch |err| {
-                std.log.err("Failed to serve metrics: {}", .{err});
+                std.log.err("Failed to serve metrics: {any}", .{err});
             };
         } else {
             // Serve simple HTML page with links
             self.serveIndexPage(connection.stream) catch |err| {
-                std.log.err("Failed to serve index page: {}", .{err});
+                std.log.err("Failed to serve index page: {any}", .{err});
             };
         }
     }

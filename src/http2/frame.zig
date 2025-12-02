@@ -126,7 +126,7 @@ pub const SettingsFrame = struct {
 
         return SettingsFrame{
             .header = header,
-            .settings = try settings_list.toOwnedSlice(),
+            .settings = try settings_list.toOwnedSlice(allocator),
         };
     }
 

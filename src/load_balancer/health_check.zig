@@ -67,8 +67,7 @@ pub const HealthChecker = struct {
         }
 
         // Wait for connection with select
-        var write_fds: c.fd_set = undefined;
-        c.FD_ZERO(&write_fds);
+        var write_fds: c.fd_set = std.mem.zeroes(c.fd_set);
         c.FD_SET(sockfd, &write_fds);
 
         var select_timeout: c.struct_timeval = timeout;
@@ -102,8 +101,7 @@ pub const HealthChecker = struct {
                     continue;
                 } else if (err == c.EAGAIN or err == c.EWOULDBLOCK) {
                     // Socket would block - wait for it to become writable
-                    var send_write_fds: c.fd_set = undefined;
-                    c.FD_ZERO(&send_write_fds);
+                    var send_write_fds: c.fd_set = std.mem.zeroes(c.fd_set);
                     c.FD_SET(sockfd, &send_write_fds);
 
                     var send_timeout: c.struct_timeval = timeout;

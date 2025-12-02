@@ -133,6 +133,7 @@ pub const QuicHandshake = struct {
     // Extract CRYPTO frames from packet payload
     fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(frames.CryptoFrame) {
         var result = std.ArrayList(frames.CryptoFrame).init(allocator);
+        errdefer result.deinit();
         var offset: usize = 0;
 
         while (offset < payload.len) {

@@ -27,7 +27,7 @@ pub fn createUdpSocket(port: u16) !c_int {
 
     // Use the C wrapper for bind to avoid glibc type issues
     if (io_uring_mod.blitz_bind(sockfd, &addr) < 0) {
-        std.log.err("bind() failed on UDP port {}", .{port});
+        std.log.err("bind() failed on UDP port {d}", .{port});
         _ = c.close(sockfd);
         return error.BindFailed;
     }

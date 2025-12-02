@@ -241,8 +241,8 @@ pub const MetricsServer = struct {
     fn metricsServerThread(self: *MetricsServer, port: u16) void {
         // Simple HTTP server for /metrics endpoint
         // In a real implementation, this would integrate with the main HTTP server
-        std.log.info("Metrics server would start on port {}", .{port});
-        std.log.info("Metrics available at http://localhost:{}/metrics", .{port});
+        std.log.info("Metrics server would start on port {d}", .{port});
+        std.log.info("Metrics available at http://localhost:{d}/metrics", .{port});
 
         while (self.running) {
             std.Thread.sleep(1_000_000_000); // Sleep for 1 second (Zig 0.15.2 API)

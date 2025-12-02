@@ -87,7 +87,7 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(read_buffers);
 
         var read_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init read_free list");
-        errdefer read_free.deinit();
+        errdefer read_free.deinit(backing_allocator);
 
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);

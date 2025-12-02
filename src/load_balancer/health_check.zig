@@ -15,6 +15,18 @@ const c = @cImport({
     @cInclude("sys/time.h");
 });
 
+// Helper to get errno at runtime (avoids comptime issue on Linux)
+// On Linux, errno is a macro that expands to *__errno_location(), which can't be called at comptime
+fn getErrno() c_int {
+    // Declare the external function properly for Zig 0.15.2
+    const __errno_location = struct {
+        extern "c" fn __errno_location() *c_int;
+    }.__errno_location;
+
+    // Call it at runtime and dereference the pointer
+    return __errno_location().*;
+}
+
 pub const HealthChecker = struct {
     pool: *backend.BackendPool,
     allocator: std.mem.Allocator,
@@ -60,7 +72,7 @@ pub const HealthChecker = struct {
         sockaddr_arg.__sockaddr__ = addr_ptr;
         const connect_result = c.connect(sockfd, sockaddr_arg, @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
-            const err = c.errno;
+            const err = getErrno();
             if (err != c.EINPROGRESS) {
                 return false;
             }
@@ -95,7 +107,7 @@ pub const HealthChecker = struct {
                 // Partial or complete write - increment bytes_sent
                 bytes_sent += @intCast(result);
             } else if (result == -1) {
-                const err = c.errno;
+                const err = getErrno();
                 if (err == c.EINTR) {
                     // Interrupted by signal - retry
                     continue;

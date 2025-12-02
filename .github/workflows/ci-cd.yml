@@ -76,8 +76,8 @@ jobs:
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: blitz-quic-linux-x86_64
-          path: zig-out/bin/blitz-quic
+          name: blitz-linux-x86_64
+          path: zig-out/bin/blitz
           retention-days: 7
           if-no-files-found: error
 
@@ -223,7 +223,7 @@ jobs:
         with:
           name: blitz-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            zig-out/bin/blitz-quic
+            zig-out/bin/blitz
           retention-days: 7
 
   # ============================================================================
@@ -301,7 +301,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: blitz-linux-x86_64
-          pattern: '**/blitz-quic'
+          pattern: '**/blitz'
 
       - name: Install Performance Tools
         run: |
@@ -314,7 +314,7 @@ jobs:
       - name: Basic Performance Test
         run: |
           # Start server in background
-          ./zig-out/bin/blitz-quic &
+          ./zig-out/bin/blitz &
           BLITZ_PID=$!
           sleep 3
           
@@ -495,7 +495,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            blitz-linux-x86_64/zig-out/bin/blitz-quic
+            blitz-linux-x86_64/zig-out/bin/blitz
           body_path: CHANGELOG.md
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') }}

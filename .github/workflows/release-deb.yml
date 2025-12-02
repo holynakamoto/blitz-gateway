@@ -21,32 +21,12 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: recursive
-        fetch-depth: 0  # Fetch full history for submodules
     
-    - name: Initialize submodules and verify
-      run: |
-        echo "Checking repository structure..."
-        ls -la | grep deps || echo "No deps in root"
-        echo "Initializing submodules..."
-        git submodule update --init --recursive --depth 1
-        echo "Checking if deps/picotls exists..."
-        if [ ! -d deps/picotls ]; then
-          echo "deps/picotls not found, checking what's in deps..."
-          ls -la deps/ 2>/dev/null || echo "deps/ directory doesn't exist"
-          echo "Checking if picotls files are tracked..."
-          git ls-files | grep picotls | head -5 || echo "No picotls files tracked"
-          echo "Since picotls is tracked in git, it should be in the checkout"
-          echo "Listing all files in repo..."
-          git ls-files deps/ 2>/dev/null | head -10 || echo "No deps files in git"
-        fi
-        # Final verification
-        if [ ! -f deps/picotls/include/picotls.h ]; then
-          echo "ERROR: picotls.h not found after submodule init"
-          find . -type d -name "picotls" 2>/dev/null | head -5
-          exit 1
-        fi
-        echo "✅ picotls.h verified"
-        ls -lh deps/picotls/include/picotls.h
+    - name: Force checkout vendored picotls (fixes .gitignore conflict)
+      run: git checkout HEAD -- deps/picotls/
+    
+    - name: Verify picotls header exists
+      run: test -f deps/picotls/include/picotls.h || (echo "picotls missing!" && exit 1)
     
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2

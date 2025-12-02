@@ -264,7 +264,7 @@ fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const 
             var is_admin = false;
             if (user_claims) |claims| {
                 if (claims.payload.custom_claims.get("admin")) |admin_claim| {
-                    is_admin = admin_claim == .Bool and admin_claim.Bool == true;
+                    is_admin = admin_claim == .bool and admin_claim.bool == true;
                 }
             }
 

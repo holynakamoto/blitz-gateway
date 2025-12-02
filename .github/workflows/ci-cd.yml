@@ -194,6 +194,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libssl-dev liburing-dev pkg-config
 
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          brew install openssl liburing || true
+
       - name: Cache Build
         uses: actions/cache@v4
         with:

@@ -64,7 +64,7 @@ pub const UdpBufferPool = struct {
         const buffer_idx = idx / @sizeOf(UdpBuffer);
         if (buffer_idx < self.buffers.len) {
             self.buffers[buffer_idx].in_use = false;
-            self.free_list.append(buffer_idx) catch {};
+            self.free_list.append(self.allocator, buffer_idx) catch {};
         }
     }
 };

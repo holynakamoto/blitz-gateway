@@ -171,7 +171,7 @@ pub const Config = struct {
                 self.allocator.free(path);
             }
         }
-        self.backends.deinit(self.allocator);
+        self.backends.deinit();
         self.jwt.deinit(self.allocator);
     }
 
@@ -192,7 +192,7 @@ pub const Config = struct {
             .health_check_path = health_path,
         };
 
-        try self.backends.append(owned_backend);
+        try self.backends.append(self.allocator, owned_backend);
     }
 
     pub fn validate(self: *const Config) !void {

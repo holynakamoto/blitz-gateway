@@ -48,7 +48,7 @@ pub const QuicHandshake = struct {
         }
 
         pub fn deinit(self: *CryptoStream) void {
-            self.data.deinit(self.allocator);
+            self.data.deinit();
         }
 
         pub fn append(self: *CryptoStream, data: []const u8) !void {

@@ -87,12 +87,12 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(read_buffers);
 
         var read_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init read_free list");
-        errdefer read_free.deinit(backing_allocator);
+        errdefer read_free.deinit();
 
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             read_buffers[i] = buf;
-            try read_free.append(i);
+            try read_free.append(backing_allocator, i);
         }
 
         // Pre-allocate all write buffers
@@ -100,12 +100,12 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(write_buffers);
 
         var write_free = std.ArrayList(usize).initCapacity(backing_allocator, pool_size) catch @panic("Failed to init write_free list");
-        errdefer write_free.deinit(backing_allocator);
+        errdefer write_free.deinit();
 
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             write_buffers[i] = buf;
-            try write_free.append(i);
+            try write_free.append(backing_allocator, i);
         }
 
         return BufferPool{
@@ -131,13 +131,13 @@ pub const BufferPool = struct {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.read_pool.buffers);
-        self.read_pool.free_indices.deinit(self.backing_allocator);
+        self.read_pool.free_indices.deinit();
 
         for (self.write_pool.buffers) |buf| {
             self.backing_allocator.free(buf);
         }
         self.backing_allocator.free(self.write_pool.buffers);
-        self.write_pool.free_indices.deinit(self.backing_allocator);
+        self.write_pool.free_indices.deinit();
     }
 
     pub fn acquireRead(self: *BufferPool) ?[]u8 {
@@ -159,7 +159,7 @@ pub const BufferPool = struct {
         // Find the buffer index
         for (self.read_pool.buffers, 0..) |pool_buf, idx| {
             if (pool_buf.ptr == buf.ptr) {
-                self.read_pool.free_indices.append(idx) catch return;
+                self.read_pool.free_indices.append(self.backing_allocator, idx) catch return;
                 return;
             }
         }
@@ -184,7 +184,7 @@ pub const BufferPool = struct {
         // Find the buffer index
         for (self.write_pool.buffers, 0..) |pool_buf, idx| {
             if (pool_buf.ptr == buf.ptr) {
-                self.write_pool.free_indices.append(idx) catch return;
+                self.write_pool.free_indices.append(self.backing_allocator, idx) catch return;
                 return;
             }
         }

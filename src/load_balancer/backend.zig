@@ -127,7 +127,7 @@ pub const BackendPool = struct {
             backend.deinit(self.allocator);
             self.allocator.destroy(backend);
         }
-        self.backends.deinit(self.allocator);
+        self.backends.deinit();
     }
 
     /// Add a backend to the pool
@@ -136,7 +136,7 @@ pub const BackendPool = struct {
         errdefer self.allocator.destroy(backend);
 
         backend.* = try Backend.init(self.allocator, host, port);
-        try self.backends.append(backend);
+        try self.backends.append(self.allocator, backend);
 
         return backend;
     }

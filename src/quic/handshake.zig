@@ -96,7 +96,7 @@ pub const QuicHandshake = struct {
     pub fn processInitialPacket(
         self: *QuicHandshake,
         packet_payload: []const u8,
-        ssl: ?*c.SSL,
+        ssl: ?*anyopaque, // OpenSSL SSL* type (opaque pointer)
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
@@ -307,4 +307,5 @@ pub const QuicHandshake = struct {
 
 // Note: OpenSSL/TLS integration is handled via picotls
 // The blitz_ssl_accept wrapper is defined in src/tls/openssl_wrapper.c
-// and linked via build.zig, so we don't need to import OpenSSL headers here
+// and linked via build.zig
+extern fn blitz_ssl_accept(ssl: ?*anyopaque) c_int;

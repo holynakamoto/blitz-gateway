@@ -48,11 +48,11 @@ pub const QuicHandshake = struct {
         }
 
         pub fn deinit(self: *CryptoStream) void {
-            self.data.deinit();
+            self.data.deinit(self.allocator);
         }
 
         pub fn append(self: *CryptoStream, data: []const u8) !void {
-            try self.data.appendSlice(self.allocator, data);
+            try self.data.appendSlice(data);
         }
 
         pub fn getData(self: *const CryptoStream) []const u8 {
@@ -100,7 +100,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit();
+        defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {
@@ -131,8 +131,8 @@ pub const QuicHandshake = struct {
 
     // Extract CRYPTO frames from packet payload
     fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(frames.CryptoFrame) {
-        var result = std.ArrayList(frames.CryptoFrame).init(allocator);
-        errdefer result.deinit();
+        var result = std.ArrayList(frames.CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
+        errdefer result.deinit(allocator);
         var offset: usize = 0;
 
         while (offset < payload.len) {
@@ -140,7 +140,7 @@ pub const QuicHandshake = struct {
             if (payload[offset] == @intFromEnum(frames.FrameType.crypto)) {
                 // Parse CRYPTO frame
                 const frame = try frames.CryptoFrame.parseFromPayload(payload[offset..]);
-                try result.append(allocator, frame);
+                try result.append(frame);
 
                 // Calculate frame size to advance offset
                 var frame_size: usize = 1; // Frame type
@@ -212,7 +212,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit();
+        defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {

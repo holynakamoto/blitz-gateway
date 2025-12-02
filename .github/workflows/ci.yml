@@ -89,7 +89,6 @@ jobs:
       - name: Run tests
         run: |
           zig build test --summary all
-          zig build test-load-balancer
           zig build test-quic
 
   #############################

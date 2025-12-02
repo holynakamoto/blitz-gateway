@@ -262,8 +262,8 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
-    needs: [lint]
-    if: github.event_name != 'pull_request' || needs.lint.result == 'success'
+    needs: [lint, always-run]
+    if: needs.lint.result == 'success'  # Run on PRs after lint passes, or on push
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache

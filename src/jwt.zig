@@ -201,8 +201,10 @@ pub const Validator = struct {
         if (parts.next() != null) return ValidationError.InvalidToken;
 
         // Decode header
-        const header_json = try std.base64.url_safe.Decoder.allocDecode(self.allocator, header_b64);
-        defer self.allocator.free(header_json);
+        const header_decoded_len = std.base64.url_safe.Decoder.calcSize(header_b64.len) catch return error.InvalidBase64;
+        const header_json = try self.allocator.alloc(u8, header_decoded_len);
+        errdefer self.allocator.free(header_json);
+        _ = std.base64.url_safe.Decoder.decode(header_json, header_b64) catch return error.InvalidBase64;
 
         var header = try self.parseHeader(header_json);
         defer header.deinit(self.allocator);
@@ -215,8 +217,10 @@ pub const Validator = struct {
         defer payload.deinit(self.allocator);
 
         // Decode signature
-        const signature = try std.base64.url_safe.Decoder.allocDecode(self.allocator, signature_b64);
-        defer self.allocator.free(signature);
+        const signature_decoded_len = std.base64.url_safe.Decoder.calcSize(signature_b64.len) catch return error.InvalidBase64;
+        const signature = try self.allocator.alloc(u8, signature_decoded_len);
+        errdefer self.allocator.free(signature);
+        _ = std.base64.url_safe.Decoder.decode(signature, signature_b64) catch return error.InvalidBase64;
 
         // Validate algorithm matches config
         if (@intFromEnum(header.alg) != @intFromEnum(self.config.algorithm)) {

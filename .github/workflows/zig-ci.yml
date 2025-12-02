@@ -12,34 +12,16 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
-    - name: Fetch picotls (vendored dependency)
-      run: |
-        if [ ! -d deps/picotls ]; then
-          echo "Fetching picotls from GitHub..."
-          mkdir -p deps
-          git clone --depth 1 --branch master https://github.com/h2o/picotls.git deps/picotls || \
-          git clone --depth 1 https://github.com/h2o/picotls.git deps/picotls
-        fi
-    
-    - name: Verify picotls header exists
-      run: test -f deps/picotls/include/picotls.h || (echo "picotls missing!" && exit 1)
     
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
       with:
-        version: 0.15.2
+        version: 0.15.2  # Match your project version
     
-    - name: Install system dependencies
+    - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          liburing-dev \
-          libssl-dev \
-          pkg-config \
-          build-essential
+        sudo apt-get install -y libssl-dev libbrotli-dev liburing-dev
     
     - name: Build (Debug)
       run: zig build
@@ -49,9 +31,6 @@ jobs:
     
     - name: Build (Release)
       run: zig build -Doptimize=ReleaseSafe
-    
-    - name: Build blitz-quic (ReleaseFast)
-      run: zig build run-quic -Doptimize=ReleaseFast
     
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -73,22 +52,16 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
-    - name: Fetch picotls (vendored dependency)
-      run: |
-        if [ ! -d deps/picotls ]; then
-          echo "Fetching picotls from GitHub..."
-          mkdir -p deps
-          git clone --depth 1 --branch master https://github.com/h2o/picotls.git deps/picotls || \
-          git clone --depth 1 https://github.com/h2o/picotls.git deps/picotls
-        fi
     
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
       with:
         version: 0.15.2
+    
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev libbrotli-dev liburing-dev
     
     - name: Build Release
       run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
@@ -99,4 +72,3 @@ jobs:
         name: release-${{ matrix.target }}
         path: zig-out/bin/*
         retention-days: 30
-

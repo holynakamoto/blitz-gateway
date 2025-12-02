@@ -119,14 +119,13 @@ pub const QuicHandshake = struct {
             }
 
             // Feed CRYPTO data to TLS
-            if (self.tls_conn) |*tls_conn| {
-                try tls_conn.feedData(frame.data);
-
-                // Try to accept TLS handshake
-                // In QUIC, we process TLS handshake messages as they arrive in CRYPTO frames
-                const ret = blitz_ssl_accept(tls_conn.ssl);
-                _ = ret; // Handle errors later
-            }
+            // TODO: Re-enable when PicoTLS integration is complete
+            // if (self.tls_conn) |*tls_conn| {
+            //     try tls_conn.feedData(frame.data);
+            //     const ret = blitz_ssl_accept(tls_conn.ssl);
+            //     _ = ret; // Handle errors later
+            // }
+            _ = self.tls_conn; // Suppress unused warning
         }
     }
 
@@ -194,14 +193,15 @@ pub const QuicHandshake = struct {
         }
 
         // Get TLS handshake output from write_bio
-        const tls_conn = self.tls_conn.?;
-        if (!tls_conn.hasEncryptedOutput()) {
-            return error.NoTlsOutput;
-        }
-
-        // Read TLS output (this will be the ServerHello)
-        var tls_output_buf: [4096]u8 = undefined;
-        const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
+        // TODO: Re-enable when PicoTLS integration is complete
+        // const tls_conn = self.tls_conn.?;
+        // if (!tls_conn.hasEncryptedOutput()) {
+        //     return error.NoTlsOutput;
+        // }
+        // var tls_output_buf: [4096]u8 = undefined;
+        // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
+        _ = self.tls_conn;
+        return error.NoTlsOutput; // Temporarily disabled for PicoTLS migration
 
         // Get current offset in handshake crypto stream
         const stream_offset = self.handshake_crypto_stream.data.items.len;
@@ -237,17 +237,15 @@ pub const QuicHandshake = struct {
             try self.handshake_crypto_stream.append(frame.data);
 
             // Feed to TLS
-            if (self.tls_conn) |*tls_conn| {
-                try tls_conn.feedData(frame.data);
-
-                // Continue TLS handshake
-                _ = blitz_ssl_accept(tls_conn.ssl);
-
-                // Check if handshake is complete
-                if (tls_conn.state == .connected) {
-                    self.state = .handshake_complete;
-                }
-            }
+            // TODO: Re-enable when PicoTLS integration is complete
+            // if (self.tls_conn) |*tls_conn| {
+            //     try tls_conn.feedData(frame.data);
+            //     _ = blitz_ssl_accept(tls_conn.ssl);
+            //     if (tls_conn.state == .connected) {
+            //         self.state = .handshake_complete;
+            //     }
+            // }
+            _ = self.tls_conn; // Suppress unused warning
         }
     }
 

@@ -108,7 +108,7 @@ pub const ConnectionPool = struct {
         errdefer _ = c.close(sockfd);
 
         const conn = BackendConnection.init(sockfd, backend_server);
-        try self.connections.append(self.allocator, conn);
+        try self.connections.append(conn);
 
         const conn_ptr = &self.connections.items[self.connections.items.len - 1];
         conn_ptr.markUsed();

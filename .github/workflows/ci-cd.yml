@@ -70,7 +70,7 @@ jobs:
 
       - name: Build blitz-quic
         run: |
-          zig build run-quic -Doptimize=ReleaseFast
+          zig build -Doptimize=ReleaseFast
           ls -lah zig-out/bin/blitz-quic
 
       - name: Upload Build Artifact

@@ -92,7 +92,7 @@ pub const BufferPool = struct {
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             read_buffers[i] = buf;
-            try read_free.append(backing_allocator, i);
+            try read_free.append(i);
         }
 
         // Pre-allocate all write buffers
@@ -105,7 +105,7 @@ pub const BufferPool = struct {
         for (0..pool_size) |i| {
             const buf = try backing_allocator.alloc(u8, buffer_size);
             write_buffers[i] = buf;
-            try write_free.append(backing_allocator, i);
+            try write_free.append(i);
         }
 
         return BufferPool{
@@ -159,7 +159,7 @@ pub const BufferPool = struct {
         // Find the buffer index
         for (self.read_pool.buffers, 0..) |pool_buf, idx| {
             if (pool_buf.ptr == buf.ptr) {
-                self.read_pool.free_indices.append(self.backing_allocator, idx) catch return;
+                self.read_pool.free_indices.append(idx) catch return;
                 return;
             }
         }
@@ -184,7 +184,7 @@ pub const BufferPool = struct {
         // Find the buffer index
         for (self.write_pool.buffers, 0..) |pool_buf, idx| {
             if (pool_buf.ptr == buf.ptr) {
-                self.write_pool.free_indices.append(self.backing_allocator, idx) catch return;
+                self.write_pool.free_indices.append(idx) catch return;
                 return;
             }
         }

@@ -488,10 +488,10 @@ pub const Http2Connection = struct {
         errdefer self.allocator.free(content_length_str);
 
         // Zig 0.15.2: append requires allocator
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = ":status", .value = "200" });
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-length", .value = content_length_str });
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
+        try response_headers.append(hpack.HeaderField{ .name = ":status", .value = "200" });
+        try response_headers.append(hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
+        try response_headers.append(hpack.HeaderField{ .name = "content-length", .value = content_length_str });
+        try response_headers.append(hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
 
         return ResponseAction{
             .send_response = .{

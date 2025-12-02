@@ -107,7 +107,7 @@ pub const HpackDecoder = struct {
         while (offset < data.len) {
             const header = try self.decodeHeaderField(data[offset..]);
             // Zig 0.15.2: append requires allocator
-            try headers.append(self.allocator, header.field);
+            try headers.append(header.field);
             offset += header.bytes_consumed;
         }
 
@@ -306,7 +306,7 @@ pub const HpackDecoder = struct {
         const value_copy = try self.allocator.dupe(u8, field.value);
         errdefer self.allocator.free(value_copy);
 
-        try self.dynamic_table.append(self.allocator, .{
+        try self.dynamic_table.append(.{
             .name = name_copy,
             .value = value_copy,
         });

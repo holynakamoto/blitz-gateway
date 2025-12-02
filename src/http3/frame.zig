@@ -147,7 +147,7 @@ pub const SettingsFrame = struct {
             offset += value_result.bytes_read;
 
             // Zig 0.15.2: append requires allocator
-            try frame.settings.append(allocator, Setting{
+            try frame.settings.append(Setting{
                 .identifier = id_result.value,
                 .value = value_result.value,
             });

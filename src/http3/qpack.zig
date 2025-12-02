@@ -280,8 +280,8 @@ pub const QpackEncoder = struct {
 
         // QPACK header block prefix (RFC 9204 Section 4.5.1)
         // Required Insert Count (QPACK uses 0 for static-only encoding)
-        try buffer.append(self.allocator, 0x00); // Required Insert Count = 0
-        try buffer.append(self.allocator, 0x00); // Delta Base = 0 (Sign bit = 0)
+        try buffer.append(0x00); // Required Insert Count = 0
+        try buffer.append(0x00); // Delta Base = 0 (Sign bit = 0)
 
         for (headers) |field| {
             try self.encodeField(&buffer, field);
@@ -321,7 +321,7 @@ pub const QpackEncoder = struct {
 
         // Literal Field Line With Literal Name (RFC 9204 Section 4.5.6)
         // Format: 001 N=0 name + value
-        try buffer.append(self.allocator, 0x20); // 001x xxxx (N=0, no Huffman)
+        try buffer.append(0x20); // 001x xxxx (N=0, no Huffman)
         var temp_buf: [512]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&temp_buf);
         const writer = fbs.writer();
@@ -386,7 +386,7 @@ pub const QpackDecoder = struct {
         // Decode field lines
         while (offset < data.len) {
             const field = try self.decodeFieldLine(data[offset..]);
-            try headers.append(self.allocator, field.field);
+            try headers.append(field.field);
             offset += field.bytes_read;
         }
 

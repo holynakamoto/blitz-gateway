@@ -219,7 +219,7 @@ pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !s
             // Parse CRYPTO frame
             const frame = try CryptoFrame.parseFromPayload(payload[offset..]);
             // Zig 0.15.2: append requires allocator
-            try frames.append(allocator, frame);
+            try frames.append(frame);
 
             // Move offset past this frame
             // Frame type (1) + offset VarInt + length VarInt + data

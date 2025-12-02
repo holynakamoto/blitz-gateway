@@ -1,0 +1,102 @@
+name: Zig CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Fetch picotls (vendored dependency)
+      run: |
+        if [ ! -d deps/picotls ]; then
+          echo "Fetching picotls from GitHub..."
+          mkdir -p deps
+          git clone --depth 1 --branch master https://github.com/h2o/picotls.git deps/picotls || \
+          git clone --depth 1 https://github.com/h2o/picotls.git deps/picotls
+        fi
+    
+    - name: Verify picotls header exists
+      run: test -f deps/picotls/include/picotls.h || (echo "picotls missing!" && exit 1)
+    
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          liburing-dev \
+          libssl-dev \
+          pkg-config \
+          build-essential
+    
+    - name: Build (Debug)
+      run: zig build
+    
+    - name: Run Tests
+      run: zig build test
+    
+    - name: Build (Release)
+      run: zig build -Doptimize=ReleaseSafe
+    
+    - name: Build blitz-quic (ReleaseFast)
+      run: zig build run-quic -Doptimize=ReleaseFast
+    
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-binary
+        path: zig-out/bin/*
+        retention-days: 7
+
+  # Optional: Multi-platform builds (only on tags to save minutes)
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-linux
+          - x86_64-windows
+          - x86_64-macos
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Fetch picotls (vendored dependency)
+      run: |
+        if [ ! -d deps/picotls ]; then
+          echo "Fetching picotls from GitHub..."
+          mkdir -p deps
+          git clone --depth 1 --branch master https://github.com/h2o/picotls.git deps/picotls || \
+          git clone --depth 1 https://github.com/h2o/picotls.git deps/picotls
+        fi
+    
+    - name: Setup Zig
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: 0.15.2
+    
+    - name: Build Release
+      run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
+    
+    - name: Upload Release Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ matrix.target }}
+        path: zig-out/bin/*
+        retention-days: 30
+

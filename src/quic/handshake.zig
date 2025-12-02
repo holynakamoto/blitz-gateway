@@ -305,11 +305,6 @@ pub const QuicHandshake = struct {
     };
 };
 
-// Import TLS module functions
-const c = @cImport({
-    @cDefine("_GNU_SOURCE", "1");
-    @cInclude("openssl/ssl.h");
-});
-
-// C wrapper for SSL_accept (from TLS module)
-extern fn blitz_ssl_accept(ssl: ?*c.SSL) c_int;
+// Note: OpenSSL/TLS integration is handled via picotls
+// The blitz_ssl_accept wrapper is defined in src/tls/openssl_wrapper.c
+// and linked via build.zig, so we don't need to import OpenSSL headers here

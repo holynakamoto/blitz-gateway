@@ -1,6 +1,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    // Load build.zig.zon dependencies
+    const optimize = b.standardOptimizeOption(.{});
+    _ = optimize; // Reserved for future use
     const target = b.standardTargetOptions(.{});
     _ = b.standardOptimizeOption(.{}); // Optimize options are used via command line
 

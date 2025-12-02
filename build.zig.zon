@@ -1,0 +1,17 @@
+.{
+    .name = "blitz-gateway",
+    .version = "0.6.0",
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        // Note: picotls is currently managed as a git submodule in deps/picotls
+        // System dependencies (liburing, OpenSSL) are linked via build.zig
+        // Future Zig packages can be added here as they become available
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+        "LICENSE",
+    },
+}

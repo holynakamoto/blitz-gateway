@@ -74,6 +74,11 @@ jobs:
       options: --user root
 
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates curl
+
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-container
@@ -99,6 +104,11 @@ jobs:
       options: --user root
 
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates curl
+
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-container
@@ -124,6 +134,11 @@ jobs:
       options: --user root
 
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates curl
+
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-container
@@ -182,6 +197,11 @@ jobs:
     needs: [build]
 
     steps:
+      - name: Install git for checkout
+        run: |
+          apt-get update
+          apt-get install -y git ca-certificates curl
+
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-container

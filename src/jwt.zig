@@ -201,26 +201,35 @@ pub const Validator = struct {
         if (parts.next() != null) return ValidationError.InvalidToken;
 
         // Decode header
-        const header_decoded_len = std.base64.url_safe.Decoder.calcSize(header_b64.len) catch return error.InvalidBase64;
+        // Base64 decoded size is at most 3/4 of encoded size (rounded up)
+        const header_decoded_len = (header_b64.len * 3 + 3) / 4;
         const header_json = try self.allocator.alloc(u8, header_decoded_len);
         errdefer self.allocator.free(header_json);
-        _ = std.base64.url_safe.Decoder.decode(header_json, header_b64) catch return error.InvalidBase64;
+        var header_decoder = std.base64.url_safe.Decoder.init(std.base64.url_safe.alphabet_chars, null);
+        const header_actual_len = header_decoder.decode(header_json, header_b64) catch return error.InvalidBase64;
+        const header_json_slice = header_json[0..header_actual_len];
 
-        var header = try self.parseHeader(header_json);
+        var header = try self.parseHeader(header_json_slice);
         defer header.deinit(self.allocator);
 
         // Decode payload
-        const payload_json = try std.base64.url_safe.Decoder.allocDecode(self.allocator, payload_b64);
-        defer self.allocator.free(payload_json);
+        const payload_decoded_len = (payload_b64.len * 3 + 3) / 4;
+        const payload_json = try self.allocator.alloc(u8, payload_decoded_len);
+        errdefer self.allocator.free(payload_json);
+        var payload_decoder = std.base64.url_safe.Decoder.init(std.base64.url_safe.alphabet_chars, null);
+        const payload_actual_len = payload_decoder.decode(payload_json, payload_b64) catch return error.InvalidBase64;
+        const payload_json_slice = payload_json[0..payload_actual_len];
 
-        var payload = try self.parsePayload(payload_json);
+        var payload = try self.parsePayload(payload_json_slice);
         defer payload.deinit(self.allocator);
 
         // Decode signature
-        const signature_decoded_len = std.base64.url_safe.Decoder.calcSize(signature_b64.len) catch return error.InvalidBase64;
+        const signature_decoded_len = (signature_b64.len * 3 + 3) / 4;
         const signature = try self.allocator.alloc(u8, signature_decoded_len);
         errdefer self.allocator.free(signature);
-        _ = std.base64.url_safe.Decoder.decode(signature, signature_b64) catch return error.InvalidBase64;
+        var signature_decoder = std.base64.url_safe.Decoder.init(std.base64.url_safe.alphabet_chars, null);
+        const signature_actual_len = signature_decoder.decode(signature, signature_b64) catch return error.InvalidBase64;
+        const signature_slice = signature[0..signature_actual_len];
 
         // Validate algorithm matches config
         if (@intFromEnum(header.alg) != @intFromEnum(self.config.algorithm)) {
@@ -232,7 +241,7 @@ pub const Validator = struct {
         defer self.allocator.free(signing_input);
 
         // Verify signature
-        try self.verifySignature(signing_input, signature, &header);
+        try self.verifySignature(signing_input, signature_slice, &header);
 
         // Validate claims
         try payload.validateClaims(self.config.issuer, self.config.audience);

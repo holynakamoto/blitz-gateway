@@ -311,36 +311,47 @@ pub const Validator = struct {
 
     /// Parse JWT payload from JSON
     fn parsePayload(self: *Validator, json_str: []const u8) !Payload {
-        var parser = json.Parser.init(self.allocator, false);
-        defer parser.deinit();
-
-        var tree = try parser.parse(json_str);
+        const tree = try json.parseFromSlice(json.Value, self.allocator, json_str, .{});
         defer tree.deinit();
 
-        const root = tree.root.Object;
+        const root = tree.value.object;
         var payload = Payload.init(self.allocator);
 
         // Parse standard claims
         if (root.get("iss")) |v| {
-            payload.iss = try self.allocator.dupe(u8, v.String);
+            if (v == .string) {
+                payload.iss = try self.allocator.dupe(u8, v.string);
+            }
         }
         if (root.get("sub")) |v| {
-            payload.sub = try self.allocator.dupe(u8, v.String);
+            if (v == .string) {
+                payload.sub = try self.allocator.dupe(u8, v.string);
+            }
         }
         if (root.get("aud")) |v| {
-            payload.aud = try self.allocator.dupe(u8, v.String);
+            if (v == .string) {
+                payload.aud = try self.allocator.dupe(u8, v.string);
+            }
         }
         if (root.get("exp")) |v| {
-            payload.exp = v.Integer;
+            if (v == .integer) {
+                payload.exp = v.integer;
+            }
         }
         if (root.get("nbf")) |v| {
-            payload.nbf = v.Integer;
+            if (v == .integer) {
+                payload.nbf = v.integer;
+            }
         }
         if (root.get("iat")) |v| {
-            payload.iat = v.Integer;
+            if (v == .integer) {
+                payload.iat = v.integer;
+            }
         }
         if (root.get("jti")) |v| {
-            payload.jti = try self.allocator.dupe(u8, v.String);
+            if (v == .string) {
+                payload.jti = try self.allocator.dupe(u8, v.string);
+            }
         }
 
         // Store custom claims

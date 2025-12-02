@@ -60,7 +60,7 @@ pub const HealthChecker = struct {
         sockaddr_arg.__sockaddr__ = addr_ptr;
         const connect_result = c.connect(sockfd, sockaddr_arg, @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
-            const err = c.__errno_location().*;
+            const err = c.errno;
             if (err != c.EINPROGRESS) {
                 return false;
             }

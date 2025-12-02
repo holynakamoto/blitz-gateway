@@ -28,8 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-local-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
       ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM to reduce RAM
     steps:
       - uses: actions/checkout@v4
@@ -162,8 +162,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     if: github.event_name != 'pull_request'  # Skip on PRs, use build-pr instead
     env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-local-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
       ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM → cuts RAM from ~11 GB → ~4.5 GB
     strategy:
       fail-fast: false
@@ -235,8 +235,8 @@ jobs:
     needs: [lint]
     if: github.event_name != 'pull_request' || needs.lint.result == 'success'
     env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-local-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
       ZIG_LLVM_CLANG_LLD_PATH: ""  # Disables bundled LLVM → cuts RAM from ~11 GB → ~4.5 GB
     steps:
       - uses: actions/checkout@v4

@@ -161,6 +161,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tools/quic_handshake_server.zig"),
         .target = target,
     });
+    // Add src/ to module search path so tools can import from src/
+    quic_handshake_root_module.addIncludePath(b.path("src"));
     const quic_handshake_exe = b.addExecutable(.{
         .name = "blitz-quic-handshake",
         .root_module = quic_handshake_root_module,

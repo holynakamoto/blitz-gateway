@@ -5,11 +5,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const packet = @import("quic/packet.zig");
-const frames = @import("quic/frames.zig");
-const crypto = @import("quic/crypto.zig");
-const frame = @import("http3/frame.zig");
-const qpack = @import("http3/qpack.zig");
+const packet = @import("../src/quic/packet.zig");
+const frames = @import("../src/quic/frames.zig");
+const crypto = @import("../src/quic/crypto.zig");
+const frame = @import("../src/http3/frame.zig");
+const qpack = @import("../src/http3/qpack.zig");
 const tls_session = @import("tls_session.zig");
 const jwt = @import("jwt.zig");
 const middleware = @import("middleware.zig");

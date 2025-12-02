@@ -13,17 +13,22 @@ const c = @cImport({
     @cInclude("fcntl.h");
     @cInclude("errno.h");
     @cInclude("sys/time.h");
+    // sys/select.h is already included via sys/time.h
 });
 
+// Manual FD_SET implementation since Zig can't translate the macro
+fn FD_SET(fd: c_int, set: *c.fd_set) void {
+    const __NFDBITS = @sizeOf(c.long) * 8;
+    const fd_usize: usize = @intCast(fd);
+    set.__fds_bits[fd_usize / __NFDBITS] |= @as(c.long, 1) << @intCast(fd_usize % __NFDBITS);
+}
+
 // Helper to get errno at runtime (avoids comptime issue on Linux)
-// On Linux, errno is a macro that expands to *__errno_location(), which can't be called at comptime
 fn getErrno() c_int {
-    // Declare the external function properly for Zig 0.15.2
     const __errno_location = struct {
         extern "c" fn __errno_location() *c_int;
     }.__errno_location;
 
-    // Call it at runtime and dereference the pointer
     return __errno_location().*;
 }
 
@@ -80,7 +85,7 @@ pub const HealthChecker = struct {
 
         // Wait for connection with select
         var write_fds: c.fd_set = std.mem.zeroes(c.fd_set);
-        c.FD_SET(sockfd, &write_fds);
+        FD_SET(sockfd, &write_fds);
 
         var select_timeout: c.struct_timeval = timeout;
         const select_result = c.select(sockfd + 1, null, &write_fds, null, &select_timeout);
@@ -114,7 +119,7 @@ pub const HealthChecker = struct {
                 } else if (err == c.EAGAIN or err == c.EWOULDBLOCK) {
                     // Socket would block - wait for it to become writable
                     var send_write_fds: c.fd_set = std.mem.zeroes(c.fd_set);
-                    c.FD_SET(sockfd, &send_write_fds);
+                    FD_SET(sockfd, &send_write_fds);
 
                     var send_timeout: c.struct_timeval = timeout;
                     const send_select_result = c.select(sockfd + 1, null, &send_write_fds, null, &send_timeout);

@@ -261,21 +261,22 @@ pub const QuicHandshake = struct {
         stream_type: CryptoStreamType,
         out_buf: []u8,
     ) !?usize {
-        if (self.tls_conn == null) {
-            return null;
-        }
-
-        const tls_conn = self.tls_conn.?;
-        if (!tls_conn.hasEncryptedOutput()) {
-            return null;
-        }
-
-        var tls_output_buf: [4096]u8 = undefined;
-        const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
-
-        if (tls_output_len == 0) {
-            return null;
-        }
+        // TODO: Re-enable when PicoTLS integration is complete
+        // if (self.tls_conn == null) {
+        //     return null;
+        // }
+        // const tls_conn = self.tls_conn.?;
+        // if (!tls_conn.hasEncryptedOutput()) {
+        //     return null;
+        // }
+        // var tls_output_buf: [4096]u8 = undefined;
+        // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
+        // if (tls_output_len == 0) {
+        //     return null;
+        // }
+        _ = self.tls_conn;
+        _ = out_buf;
+        return null; // Temporarily disabled for PicoTLS migration
 
         // Get current offset in appropriate crypto stream
         const crypto_stream = switch (stream_type) {

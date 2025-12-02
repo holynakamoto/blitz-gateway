@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+      options: --user root
     
     steps:
     - uses: actions/checkout@v4
@@ -16,14 +19,16 @@ jobs:
         submodules: recursive
     
     - name: Setup Zig
-      uses: goto-bus-stop/setup-zig@v2
+      uses: goto-bus-stop/setup-zig@v3
       with:
-          version: 0.14.0  # Downgraded for CI compatibility (glibc FD_SET translation issue in 0.15.2)
+          version: 0.15.1  # Using 0.15.1 with Ubuntu 22.04 Docker container to avoid glibc header translation issues
     
     - name: Install Dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libssl-dev libbrotli-dev liburing-dev
+        apt-get update
+        apt-get install -y \
+          wget curl git \
+          libssl-dev libbrotli-dev liburing-dev build-essential
     
     - name: Build (Debug)
       run: zig build
@@ -58,14 +63,19 @@ jobs:
         submodules: recursive
     
     - name: Setup Zig
-      uses: goto-bus-stop/setup-zig@v2
+      uses: goto-bus-stop/setup-zig@v3
       with:
-        version: 0.15.2
+        version: 0.15.1
     
     - name: Install Dependencies
+      container:
+        image: ubuntu:22.04
+        options: --user root
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libssl-dev libbrotli-dev liburing-dev
+        apt-get update
+        apt-get install -y \
+          wget curl git \
+          libssl-dev libbrotli-dev liburing-dev build-essential
     
     - name: Build Release
       run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}

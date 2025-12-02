@@ -152,9 +152,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        container:
+          image: ubuntu:22.04
+          options: --user root
+        uses: goto-bus-stop/setup-zig@v3
         with:
-          version: '0.14.0'  # Downgraded for CI compatibility (glibc FD_SET translation issue in 0.15.2)
+          version: '0.15.1'  # Using 0.15.1 with Ubuntu 22.04 Docker container to avoid glibc header translation issues
 
       - name: Check Formatting
         run: |
@@ -191,9 +194,12 @@ jobs:
           submodules: true
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        container:
+          image: ubuntu:22.04
+          options: --user root
+        uses: goto-bus-stop/setup-zig@v3
         with:
-          version: '0.14.0'  # Downgraded for CI compatibility (glibc FD_SET translation issue in 0.15.2)
+          version: '0.15.1'  # Using 0.15.1 with Ubuntu 22.04 Docker container to avoid glibc header translation issues
 
       - name: Install system dependencies
         run: |

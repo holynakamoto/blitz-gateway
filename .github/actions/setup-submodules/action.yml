@@ -3,5 +3,9 @@ runs:
   using: "composite"
   steps:
     - shell: bash
-      run: git submodule update --init --recursive
+      run: |
+        # Fix dubious ownership issue in containers (Git security feature)
+        # Mark current directory as safe for git operations
+        git config --global --add safe.directory "$(pwd)"
+        git submodule update --init --recursive
 

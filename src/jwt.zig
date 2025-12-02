@@ -205,7 +205,7 @@ pub const Validator = struct {
         const header_decoded_len = (header_b64.len * 3 + 3) / 4;
         const header_json = try self.allocator.alloc(u8, header_decoded_len);
         errdefer self.allocator.free(header_json);
-        var header_decoder = std.base64.url_safe.Decoder.init(std.base64.url_safe.alphabet_chars, null);
+        const header_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
         const header_actual_len = header_decoder.decode(header_json, header_b64) catch return error.InvalidBase64;
         const header_json_slice = header_json[0..header_actual_len];
 
@@ -216,7 +216,7 @@ pub const Validator = struct {
         const payload_decoded_len = (payload_b64.len * 3 + 3) / 4;
         const payload_json = try self.allocator.alloc(u8, payload_decoded_len);
         errdefer self.allocator.free(payload_json);
-        var payload_decoder = std.base64.url_safe.Decoder.init(std.base64.url_safe.alphabet_chars, null);
+        const payload_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
         const payload_actual_len = payload_decoder.decode(payload_json, payload_b64) catch return error.InvalidBase64;
         const payload_json_slice = payload_json[0..payload_actual_len];
 
@@ -227,7 +227,7 @@ pub const Validator = struct {
         const signature_decoded_len = (signature_b64.len * 3 + 3) / 4;
         const signature = try self.allocator.alloc(u8, signature_decoded_len);
         errdefer self.allocator.free(signature);
-        var signature_decoder = std.base64.url_safe.Decoder.init(std.base64.url_safe.alphabet_chars, null);
+        const signature_decoder = std.base64.Base64Decoder.init(std.base64.url_safe.alphabet_chars, null);
         const signature_actual_len = signature_decoder.decode(signature, signature_b64) catch return error.InvalidBase64;
         const signature_slice = signature[0..signature_actual_len];
 

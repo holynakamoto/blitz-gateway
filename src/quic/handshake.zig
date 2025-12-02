@@ -201,22 +201,8 @@ pub const QuicHandshake = struct {
         // var tls_output_buf: [4096]u8 = undefined;
         // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
         _ = self.tls_conn;
+        _ = out_buf;
         return error.NoTlsOutput; // Temporarily disabled for PicoTLS migration
-
-        // Get current offset in handshake crypto stream
-        const stream_offset = self.handshake_crypto_stream.data.items.len;
-
-        // Wrap TLS output in CRYPTO frame
-        const frame_len = try frames.CryptoFrame.generate(
-            @intCast(stream_offset),
-            tls_output_buf[0..tls_output_len],
-            out_buf,
-        );
-
-        // Append to handshake crypto stream
-        try self.handshake_crypto_stream.append(tls_output_buf[0..tls_output_len]);
-
-        self.state = .server_hello_sent;
 
         return frame_len;
     }
@@ -274,15 +260,14 @@ pub const QuicHandshake = struct {
         // if (tls_output_len == 0) {
         //     return null;
         // }
+        // const crypto_stream = switch (stream_type) {
+        //     .initial => &self.initial_crypto_stream,
+        //     .handshake => &self.handshake_crypto_stream,
+        // };
         _ = self.tls_conn;
         _ = out_buf;
+        _ = stream_type;
         return null; // Temporarily disabled for PicoTLS migration
-
-        // Get current offset in appropriate crypto stream
-        const crypto_stream = switch (stream_type) {
-            .initial => &self.initial_crypto_stream,
-            .handshake => &self.handshake_crypto_stream,
-        };
         const stream_offset = crypto_stream.data.items.len;
 
         // Wrap TLS output in CRYPTO frame

@@ -324,19 +324,62 @@ pub fn build(b: *std.Build) void {
         \\#!/bin/bash
         \\set -euo pipefail
         \\echo "Building .deb package..."
-        \\# Check if nfpm is available (should be installed in CI)
+        \\echo "Checking for nfpm..."
+        \\
+        \\# Try to install nfpm if not available
         \\if ! command -v nfpm &> /dev/null; then
-        \\    echo "ERROR: nfpm not found. Please install nfpm:"
-        \\    echo "  go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest"
-        \\    echo "  # or"
-        \\    echo "  sudo apt-get install -y nfpm"
+        \\    echo "nfpm not found, attempting installation..."
+        \\    # Try apt first
+        \\    if command -v apt-get &> /dev/null; then
+        \\        echo "Trying apt-get install nfpm..."
+        \\        if apt-get update && apt-get install -y nfpm; then
+        \\            echo "✅ nfpm installed via apt"
+        \\        else
+        \\            echo "apt install failed, trying manual download..."
+        \\        fi
+        \\    fi
+        \\
+        \\    # Manual installation if apt failed
+        \\    if ! command -v nfpm &> /dev/null; then
+        \\        echo "Downloading nfpm manually..."
+        \\        curl -fL https://github.com/goreleaser/nfpm/releases/download/v2.35.3/nfpm_2.35.3_Linux_x86_64.tar.gz -o /tmp/nfpm.tar.gz || {
+        \\            echo "ERROR: Failed to download nfpm"
+        \\            exit 1
+        \\        }
+        \\        tar -xzf /tmp/nfpm.tar.gz -C /tmp || {
+        \\            echo "ERROR: Failed to extract nfpm"
+        \\            exit 1
+        \\        }
+        \\        mv /tmp/nfpm /usr/local/bin/nfpm || {
+        \\            echo "ERROR: Failed to install nfpm"
+        \\            exit 1
+        \\        }
+        \\        chmod +x /usr/local/bin/nfpm
+        \\        echo "✅ nfpm installed manually"
+        \\    fi
+        \\fi
+        \\
+        \\# Verify nfpm works
+        \\if ! nfpm version; then
+        \\    echo "ERROR: nfpm installation failed or is not working"
         \\    exit 1
         \\fi
+        \\
+        \\echo "✅ nfpm ready"
+        \\
         \\# Copy binary to expected location for nfpm
         \\mkdir -p zig-out/bin zig-out/deb
+        \\if [ ! -f zig-out/bin/blitz ]; then
+        \\    echo "ERROR: blitz binary not found at zig-out/bin/blitz"
+        \\    exit 1
+        \\fi
         \\cp zig-out/bin/blitz zig-out/bin/blitz-quic
+        \\echo "✅ Binary prepared for packaging"
+        \\
         \\# Build package
+        \\echo "Building .deb package with nfpm..."
         \\nfpm pkg --packager deb --target zig-out/deb/ --config packaging/nfpm.yaml
+        \\
         \\echo "✅ .deb package built successfully!"
         \\echo "📦 Package location: zig-out/deb/"
         \\ls -la zig-out/deb/

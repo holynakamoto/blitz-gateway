@@ -31,7 +31,11 @@ pub const QuicServerConnection = struct {
         client_addr: std.net.Ip4Address,
     ) !QuicServerConnection {
         const local_conn_id_mut = try allocator.dupe(u8, local_conn_id);
+        errdefer allocator.free(local_conn_id_mut);
+        
         const remote_conn_id_mut = try allocator.dupe(u8, remote_conn_id);
+        errdefer allocator.free(remote_conn_id_mut);
+        
         var quic_conn = connection.QuicConnection.init(allocator, local_conn_id_mut, remote_conn_id_mut);
         const handshake_mgr = handshake.QuicHandshake.init(allocator, &quic_conn, local_conn_id_mut, remote_conn_id_mut);
 
@@ -174,7 +178,7 @@ pub const QuicServer = struct {
         }
 
         const parsed = packet.Packet.parse(data, 8) catch |err| {
-            std.log.debug("Failed to parse QUIC packet: {any}", .{err});
+            std.log.debug("Failed to parse QUIC packet: {}", .{err});
             return;
         };
 

@@ -18,9 +18,14 @@ const c = @cImport({
 
 // Manual FD_SET implementation since Zig can't translate the macro
 fn FD_SET(fd: c_int, set: *c.fd_set) void {
-    const __NFDBITS = @sizeOf(c_long) * 8;
-    const fd_usize: usize = @intCast(fd);
-    set.__fds_bits[fd_usize / __NFDBITS] |= @as(c_long, 1) << @intCast(fd_usize % __NFDBITS);
+    // Use Zig's std.posix.fd_set operations instead of manual bit manipulation
+    // This is safer and compatible across Zig versions
+    const fd_usize = @as(usize, @intCast(fd));
+    if (fd_usize < set.fds_bits.len * @sizeOf(usize) * 8) {
+        const idx = fd_usize / (@sizeOf(usize) * 8);
+        const bit = fd_usize % (@sizeOf(usize) * 8);
+        set.fds_bits[idx] |= (@as(usize, 1) << @intCast(bit));
+    }
 }
 
 // Helper to get errno at runtime (avoids comptime issue on Linux)
@@ -73,9 +78,7 @@ pub const HealthChecker = struct {
         const addr_ptr: *const c.struct_sockaddr = @ptrCast(&addr);
 
         // Connect (non-blocking)
-        var sockaddr_arg: c.__CONST_SOCKADDR_ARG = undefined;
-        sockaddr_arg.__sockaddr__ = addr_ptr;
-        const connect_result = c.connect(sockfd, sockaddr_arg, @sizeOf(c.struct_sockaddr_in));
+        const connect_result = c.connect(sockfd, addr_ptr, @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
             const err = getErrno();
             if (err != c.EINPROGRESS) {

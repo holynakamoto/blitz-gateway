@@ -62,13 +62,19 @@ else
     echo "VM '$VM_NAME' already exists"
 fi
 
-# ——— Enhanced mount support setup (Ubuntu 24.04+ requirement) ———
-echo "Setting up mount support (snap + apt fallback)..."
-multipass exec "$VM_NAME" -- sudo snap install multipass-sshfs
-multipass exec "$VM_NAME" -- sudo snap connect multipass-sshfs:removable-media || true
-multipass exec "$VM_NAME" -- sudo snap connect multipass-sshfs:fuse-support || true
-multipass exec "$VM_NAME" -- sudo apt-get update -qq && sudo apt-get install -y sshfs fuse
-echo "✓ Mount drivers ready (snap + apt fallback)"
+# ——— Pure apt SSHFS setup for mounts (Ubuntu 24.04+ reliable, no snaps) ———
+echo "Setting up mount support (apt SSHFS + non-interactive sudo)..."
+multipass exec "$VM_NAME" -- sudo sed -i 's/^Defaults\tenv_reset$/Defaults\tenv_reset,!tty/' /etc/sudoers || true
+multipass exec "$VM_NAME" -- sudo apt update -qq
+multipass exec "$VM_NAME" -- sudo apt install -y sshfs fuse
+echo "✓ SSHFS and sudo ready"
+
+# Quick verification
+if multipass exec "$VM_NAME" -- command -v sshfs >/dev/null 2>&1; then
+    echo "✓ Mount driver verified"
+else
+    die "SSHFS installation failed"
+fi
 
 # ——— Install exact Zig version if missing or wrong ———
 echo "Checking Zig installation in VM (may take up to 60s on first snap run)..."

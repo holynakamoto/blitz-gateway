@@ -5,7 +5,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // Import io_uring C bindings from parent module for type compatibility
-const io_uring_mod = @import("../io_uring.zig");
+const io_uring_mod = @import("../core/io_uring.zig");
 const c = io_uring_mod.c;
 
 // Create UDP socket for QUIC
@@ -27,7 +27,7 @@ pub fn createUdpSocket(port: u16) !c_int {
 
     // Use the C wrapper for bind to avoid glibc type issues
     if (io_uring_mod.blitz_bind(sockfd, &addr) < 0) {
-        std.log.err("bind() failed on UDP port {}", .{port});
+        std.log.err("bind() failed on UDP port {d}", .{port});
         _ = c.close(sockfd);
         return error.BindFailed;
     }
@@ -59,13 +59,8 @@ pub fn prepRecvFrom(
     addr: *c.struct_sockaddr_in,
     addr_len: *c.socklen_t,
 ) void {
-    // io_uring_prep_recvfrom is a macro - use recvmsg equivalent
-    // Set opcode to IORING_OP_RECV (5) for simpler buffer receive
-    sqe.opcode = 5; // IORING_OP_RECV
-    sqe.fd = sockfd;
-    sqe.*.anonymous_0.anonymous_0.addr = @intFromPtr(buf.ptr);
-    sqe.len = @intCast(buf.len);
-    sqe.flags = 0;
+    // Use io_uring_prep_recv helper function
+    c.io_uring_prep_recv(sqe, sockfd, buf.ptr, @intCast(buf.len), 0);
     // Store addr info for later use
     _ = addr;
     _ = addr_len;

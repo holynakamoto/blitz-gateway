@@ -84,9 +84,9 @@ pub const QuicHandshake = struct {
     }
 
     pub fn deinit(self: *QuicHandshake) void {
-        if (self.tls_conn) |*tls_conn| {
-            tls_conn.deinit();
-        }
+        // tls_conn is disabled for PicoTLS migration (anyopaque type)
+        // No cleanup needed as it's not currently used
+        _ = self.tls_conn;
         self.initial_crypto_stream.deinit();
         self.handshake_crypto_stream.deinit();
     }
@@ -96,11 +96,11 @@ pub const QuicHandshake = struct {
     pub fn processInitialPacket(
         self: *QuicHandshake,
         packet_payload: []const u8,
-        ssl: ?*c.SSL,
+        ssl: ?*anyopaque, // OpenSSL SSL* type (opaque pointer)
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit();
+        defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {
@@ -119,20 +119,20 @@ pub const QuicHandshake = struct {
             }
 
             // Feed CRYPTO data to TLS
-            if (self.tls_conn) |*tls_conn| {
-                try tls_conn.feedData(frame.data);
-
-                // Try to accept TLS handshake
-                // In QUIC, we process TLS handshake messages as they arrive in CRYPTO frames
-                const ret = blitz_ssl_accept(tls_conn.ssl);
-                _ = ret; // Handle errors later
-            }
+            // TODO: Re-enable when PicoTLS integration is complete
+            // if (self.tls_conn) |*tls_conn| {
+            //     try tls_conn.feedData(frame.data);
+            //     const ret = blitz_ssl_accept(tls_conn.ssl);
+            //     _ = ret; // Handle errors later
+            // }
+            _ = self.tls_conn; // Suppress unused warning
         }
     }
 
     // Extract CRYPTO frames from packet payload
     fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(frames.CryptoFrame) {
-        var result = std.ArrayList(frames.CryptoFrame).init(allocator);
+        var result = std.ArrayList(frames.CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
+        errdefer result.deinit(allocator);
         var offset: usize = 0;
 
         while (offset < payload.len) {
@@ -140,7 +140,7 @@ pub const QuicHandshake = struct {
             if (payload[offset] == @intFromEnum(frames.FrameType.crypto)) {
                 // Parse CRYPTO frame
                 const frame = try frames.CryptoFrame.parseFromPayload(payload[offset..]);
-                try result.append(frame);
+                try result.append(allocator, frame);
 
                 // Calculate frame size to advance offset
                 var frame_size: usize = 1; // Frame type
@@ -193,31 +193,16 @@ pub const QuicHandshake = struct {
         }
 
         // Get TLS handshake output from write_bio
-        const tls_conn = self.tls_conn.?;
-        if (!tls_conn.hasEncryptedOutput()) {
-            return error.NoTlsOutput;
-        }
-
-        // Read TLS output (this will be the ServerHello)
-        var tls_output_buf: [4096]u8 = undefined;
-        const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
-
-        // Get current offset in handshake crypto stream
-        const stream_offset = self.handshake_crypto_stream.data.items.len;
-
-        // Wrap TLS output in CRYPTO frame
-        const frame_len = try frames.CryptoFrame.generate(
-            @intCast(stream_offset),
-            tls_output_buf[0..tls_output_len],
-            out_buf,
-        );
-
-        // Append to handshake crypto stream
-        try self.handshake_crypto_stream.append(tls_output_buf[0..tls_output_len]);
-
-        self.state = .server_hello_sent;
-
-        return frame_len;
+        // TODO: Re-enable when PicoTLS integration is complete
+        // const tls_conn = self.tls_conn.?;
+        // if (!tls_conn.hasEncryptedOutput()) {
+        //     return error.NoTlsOutput;
+        // }
+        // var tls_output_buf: [4096]u8 = undefined;
+        // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
+        _ = self.tls_conn;
+        _ = out_buf;
+        return error.NoTlsOutput; // Temporarily disabled for PicoTLS migration
     }
 
     // Process HANDSHAKE packet payload - extract and process CRYPTO frames
@@ -227,7 +212,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit();
+        defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {
@@ -236,17 +221,15 @@ pub const QuicHandshake = struct {
             try self.handshake_crypto_stream.append(frame.data);
 
             // Feed to TLS
-            if (self.tls_conn) |*tls_conn| {
-                try tls_conn.feedData(frame.data);
-
-                // Continue TLS handshake
-                _ = blitz_ssl_accept(tls_conn.ssl);
-
-                // Check if handshake is complete
-                if (tls_conn.state == .connected) {
-                    self.state = .handshake_complete;
-                }
-            }
+            // TODO: Re-enable when PicoTLS integration is complete
+            // if (self.tls_conn) |*tls_conn| {
+            //     try tls_conn.feedData(frame.data);
+            //     _ = blitz_ssl_accept(tls_conn.ssl);
+            //     if (tls_conn.state == .connected) {
+            //         self.state = .handshake_complete;
+            //     }
+            // }
+            _ = self.tls_conn; // Suppress unused warning
         }
     }
 
@@ -262,40 +245,27 @@ pub const QuicHandshake = struct {
         stream_type: CryptoStreamType,
         out_buf: []u8,
     ) !?usize {
-        if (self.tls_conn == null) {
-            return null;
-        }
-
-        const tls_conn = self.tls_conn.?;
-        if (!tls_conn.hasEncryptedOutput()) {
-            return null;
-        }
-
-        var tls_output_buf: [4096]u8 = undefined;
-        const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
-
-        if (tls_output_len == 0) {
-            return null;
-        }
-
-        // Get current offset in appropriate crypto stream
-        const crypto_stream = switch (stream_type) {
-            .initial => &self.initial_crypto_stream,
-            .handshake => &self.handshake_crypto_stream,
-        };
-        const stream_offset = crypto_stream.data.items.len;
-
-        // Wrap TLS output in CRYPTO frame
-        const frame_len = try frames.CryptoFrame.generate(
-            @intCast(stream_offset),
-            tls_output_buf[0..tls_output_len],
-            out_buf,
-        );
-
-        // Append to crypto stream
-        try crypto_stream.append(tls_output_buf[0..tls_output_len]);
-
-        return frame_len;
+        // TODO: Re-enable when PicoTLS integration is complete
+        // if (self.tls_conn == null) {
+        //     return null;
+        // }
+        // const tls_conn = self.tls_conn.?;
+        // if (!tls_conn.hasEncryptedOutput()) {
+        //     return null;
+        // }
+        // var tls_output_buf: [4096]u8 = undefined;
+        // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
+        // if (tls_output_len == 0) {
+        //     return null;
+        // }
+        // const crypto_stream = switch (stream_type) {
+        //     .initial => &self.initial_crypto_stream,
+        //     .handshake => &self.handshake_crypto_stream,
+        // };
+        _ = self.tls_conn;
+        _ = out_buf;
+        _ = stream_type;
+        return null; // Temporarily disabled for PicoTLS migration
     }
 
     pub const CryptoStreamType = enum {
@@ -303,12 +273,3 @@ pub const QuicHandshake = struct {
         handshake,
     };
 };
-
-// Import TLS module functions
-const c = @cImport({
-    @cDefine("_GNU_SOURCE", "1");
-    @cInclude("openssl/ssl.h");
-});
-
-// C wrapper for SSL_accept (from TLS module)
-extern fn blitz_ssl_accept(ssl: ?*c.SSL) c_int;

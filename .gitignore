@@ -4,9 +4,11 @@ zig-cache/
 .zig-cache/
 
 # Benchmark results
+benches/results/
 benches/*.txt
 benches/*.png
 benches/*.svg
+nuclear-benchmarks/results/
 scripts/bench/results/
 scripts/bench/results/*.txt
 scripts/bench/results/*.png
@@ -30,4 +32,17 @@ Thumbs.db
 *.tmp
 *.temp
 .vagrant/
+
+# Dependencies (picotls is a submodule)
 deps/
+!deps/picotls
+
+# Certificates and keys (never commit these!)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Fuzz corpora (too large, belongs in CI/fuzzing setup)
+deps/picotls/fuzz/*-corpus/

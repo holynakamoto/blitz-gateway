@@ -1,0 +1,11 @@
+name: "Init submodules"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        # Fix dubious ownership issue in containers (Git security feature)
+        # Mark current directory as safe for git operations
+        git config --global --add safe.directory "$(pwd)"
+        git submodule update --init --recursive
+

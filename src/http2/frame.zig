@@ -102,8 +102,8 @@ pub const SettingsFrame = struct {
         }
 
         // Parse settings from payload
-        var settings_list = std.ArrayList(Setting).init(allocator);
-        errdefer settings_list.deinit();
+        var settings_list = std.ArrayList(SettingsFrame.Setting).init(allocator);
+        errdefer settings_list.deinit(allocator);
 
         var offset: usize = FrameHeader.SIZE;
         const num_settings = header.length / 6;
@@ -126,7 +126,7 @@ pub const SettingsFrame = struct {
 
         return SettingsFrame{
             .header = header,
-            .settings = try settings_list.toOwnedSlice(),
+            .settings = try settings_list.toOwnedSlice(allocator),
         };
     }
 

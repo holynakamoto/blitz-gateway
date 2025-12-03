@@ -164,7 +164,7 @@ pub const TlsContext = struct {
         );
 
         if (ret != 0 and ret != c.PTLS_ERROR_IN_PROGRESS) {
-            std.log.err("[picotls] Handshake error: {}", .{ret});
+            std.log.err("[picotls] Handshake error: {d}", .{ret});
             return error.TlsHandshakeFailed;
         }
 

@@ -5,7 +5,7 @@ const std = @import("std");
 const backend = @import("backend.zig");
 const health_check = @import("health_check.zig");
 const connection_pool = @import("connection_pool.zig");
-const config = @import("../config.zig");
+const config = @import("../config/mod.zig");
 
 pub const LoadBalancerError = error{
     NoBackendsAvailable,
@@ -59,7 +59,7 @@ pub const LoadBalancer = struct {
             }
         }
 
-        std.log.info("Load balancer initialized with {} backends", .{cfg.backends.items.len});
+        std.log.info("Load balancer initialized with {d} backends", .{cfg.backends.items.len});
         return lb;
     }
 
@@ -96,7 +96,7 @@ pub const LoadBalancer = struct {
                 // Exponential backoff before retry
                 if (attempt < self.max_retries - 1) {
                     const delay = self.retry_delay_ms * (@as(u64, 1) << @intCast(attempt));
-                    std.time.sleep(delay * 1_000_000); // Convert to nanoseconds
+                    std.Thread.sleep(delay * 1_000_000); // Convert to nanoseconds (Zig 0.15.2 API)
                 }
 
                 attempt += 1;
@@ -281,7 +281,7 @@ pub const LoadBalancer = struct {
     /// the QUIC handshake server to forward requests to backends
     pub fn serve(self: *LoadBalancer, host: []const u8, port: u16) !void {
         std.log.info("Load balancer server starting on {s}:{d}", .{ host, port });
-        std.log.info("Backends configured: {}", .{self.pool.backends.items.len});
+        std.log.info("Backends configured: {d}", .{self.pool.backends.items.len});
 
         // Start health checking in background
         self.startHealthChecking();
@@ -299,14 +299,14 @@ pub const LoadBalancer = struct {
 
         // For now, we'll just keep it running
         while (true) {
-            std.time.sleep(1_000_000_000); // Sleep for 1 second
+            std.Thread.sleep(1_000_000_000); // Sleep for 1 second (Zig 0.15.2 API)
             self.performHealthCheck();
         }
     }
 
     /// Start background health checking
     fn startHealthChecking(self: *LoadBalancer) void {
-        std.log.info("Starting health checks for {} backends", .{self.pool.backends.items.len});
+        std.log.info("Starting health checks for {d} backends", .{self.pool.backends.items.len});
 
         // Perform initial health check
         self.performHealthCheck();

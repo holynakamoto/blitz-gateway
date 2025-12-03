@@ -302,9 +302,9 @@ pub const Http2Connection = struct {
             }
 
             // Process this frame
-            std.log.debug("Processing HTTP/2 frame: type={}, stream_id={}, length={}", .{ header.frame_type, header.stream_id, header.length });
+            std.log.debug("Processing HTTP/2 frame: type={any}, stream_id={d}, length={d}", .{ header.frame_type, header.stream_id, header.length });
             const action = try self.handleFrame(data[offset..][0..frame_size]);
-            std.log.debug("Frame processed, action: {}", .{action});
+            std.log.debug("Frame processed, action: {any}", .{action});
 
             // Track actions that require a response
             // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response
@@ -415,11 +415,11 @@ pub const Http2Connection = struct {
         std.log.debug("Handling HEADERS frame", .{});
         const headers_frame = try frame.HeadersFrame.parse(data);
         const stream_id = headers_frame.header.stream_id;
-        std.log.debug("HEADERS frame: stream_id={}, header_block_len={}", .{ stream_id, headers_frame.header_block.len });
+        std.log.debug("HEADERS frame: stream_id={d}, header_block_len={d}", .{ stream_id, headers_frame.header_block.len });
 
         // Validate stream ID (must be odd for client-initiated streams)
         if (stream_id == 0 or stream_id % 2 == 0) {
-            std.log.warn("Invalid stream ID: {} (must be odd for client-initiated)", .{stream_id});
+            std.log.warn("Invalid stream ID: {d} (must be odd for client-initiated)", .{stream_id});
             return error.InvalidStreamId;
         }
 
@@ -428,10 +428,10 @@ pub const Http2Connection = struct {
         stream.state = .open;
 
         // Decode HPACK headers
-        std.log.debug("Decoding HPACK headers, {} bytes", .{headers_frame.header_block.len});
+        std.log.debug("Decoding HPACK headers, {d} bytes", .{headers_frame.header_block.len});
         const headers = try stream.decoder.decode(headers_frame.header_block);
         defer self.allocator.free(headers);
-        std.log.debug("Decoded {} headers", .{headers.len});
+        std.log.debug("Decoded {d} headers", .{headers.len});
 
         // Extract request information
         var method: []const u8 = "GET";
@@ -446,7 +446,7 @@ pub const Http2Connection = struct {
         }
 
         for (headers) |header| {
-            std.log.debug("Decoded header: name='{s}', value='{s}' (len={})", .{ header.name, header.value, header.value.len });
+            std.log.debug("Decoded header: name='{s}', value='{s}' (len={d})", .{ header.name, header.value, header.value.len });
             if (std.mem.eql(u8, header.name, ":method")) {
                 // Duplicate method string to ensure it remains valid after frame buffer is reused
                 method_owned = try self.allocator.dupe(u8, header.value);
@@ -484,14 +484,14 @@ pub const Http2Connection = struct {
             self.allocator.free(body);
         }
 
-        const content_length_str = try std.fmt.allocPrint(self.allocator, "{}", .{body.len});
+        const content_length_str = try std.fmt.allocPrint(self.allocator, "{d}", .{body.len});
         errdefer self.allocator.free(content_length_str);
 
         // Zig 0.15.2: append requires allocator
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = ":status", .value = "200" });
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-length", .value = content_length_str });
-        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
+        try response_headers.append(hpack.HeaderField{ .name = ":status", .value = "200" });
+        try response_headers.append(hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
+        try response_headers.append(hpack.HeaderField{ .name = "content-length", .value = content_length_str });
+        try response_headers.append(hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
 
         return ResponseAction{
             .send_response = .{

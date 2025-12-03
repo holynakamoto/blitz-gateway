@@ -13,7 +13,24 @@ const c = @cImport({
     @cInclude("fcntl.h");
     @cInclude("errno.h");
     @cInclude("sys/time.h");
+    // sys/select.h is already included via sys/time.h
 });
+
+// Manual FD_SET implementation since Zig can't translate the macro
+fn FD_SET(fd: c_int, set: *c.fd_set) void {
+    const __NFDBITS = @sizeOf(c_long) * 8;
+    const fd_usize: usize = @intCast(fd);
+    set.__fds_bits[fd_usize / __NFDBITS] |= @as(c_long, 1) << @intCast(fd_usize % __NFDBITS);
+}
+
+// Helper to get errno at runtime (avoids comptime issue on Linux)
+fn getErrno() c_int {
+    const __errno_location = struct {
+        extern "c" fn __errno_location() *c_int;
+    }.__errno_location;
+
+    return __errno_location().*;
+}
 
 pub const HealthChecker = struct {
     pool: *backend.BackendPool,
@@ -41,7 +58,7 @@ pub const HealthChecker = struct {
         defer _ = c.close(sockfd);
 
         // Set non-blocking
-        const flags = c.fcntl(sockfd, c.F_GETFL, 0);
+        const flags = c.fcntl(sockfd, c.F_GETFL, @as(c_int, 0));
         _ = c.fcntl(sockfd, c.F_SETFL, flags | c.O_NONBLOCK);
 
         // Set timeout
@@ -56,18 +73,19 @@ pub const HealthChecker = struct {
         const addr_ptr: *const c.struct_sockaddr = @ptrCast(&addr);
 
         // Connect (non-blocking)
-        const connect_result = c.connect(sockfd, addr_ptr, @sizeOf(c.struct_sockaddr_in));
+        var sockaddr_arg: c.__CONST_SOCKADDR_ARG = undefined;
+        sockaddr_arg.__sockaddr__ = addr_ptr;
+        const connect_result = c.connect(sockfd, sockaddr_arg, @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
-            const err = c.errno;
+            const err = getErrno();
             if (err != c.EINPROGRESS) {
                 return false;
             }
         }
 
         // Wait for connection with select
-        var write_fds: c.fd_set = undefined;
-        c.FD_ZERO(&write_fds);
-        c.FD_SET(sockfd, &write_fds);
+        var write_fds: c.fd_set = std.mem.zeroes(c.fd_set);
+        FD_SET(sockfd, &write_fds);
 
         var select_timeout: c.struct_timeval = timeout;
         const select_result = c.select(sockfd + 1, null, &write_fds, null, &select_timeout);
@@ -94,15 +112,14 @@ pub const HealthChecker = struct {
                 // Partial or complete write - increment bytes_sent
                 bytes_sent += @intCast(result);
             } else if (result == -1) {
-                const err = c.errno;
+                const err = getErrno();
                 if (err == c.EINTR) {
                     // Interrupted by signal - retry
                     continue;
                 } else if (err == c.EAGAIN or err == c.EWOULDBLOCK) {
                     // Socket would block - wait for it to become writable
-                    var send_write_fds: c.fd_set = undefined;
-                    c.FD_ZERO(&send_write_fds);
-                    c.FD_SET(sockfd, &send_write_fds);
+                    var send_write_fds: c.fd_set = std.mem.zeroes(c.fd_set);
+                    FD_SET(sockfd, &send_write_fds);
 
                     var send_timeout: c.struct_timeval = timeout;
                     const send_select_result = c.select(sockfd + 1, null, &send_write_fds, null, &send_timeout);

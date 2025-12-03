@@ -84,13 +84,16 @@ pub fn prepSendTo(
     addr: *const c.struct_sockaddr_in,
     addr_len: c.socklen_t,
 ) void {
-    c.io_uring_prep_sendto(
-        sqe,
-        sockfd,
-        buf.ptr,
-        @intCast(buf.len),
-        0,
-        @ptrCast(addr),
-        addr_len,
-    );
+    // Prepare sendmsg to send with destination address
+    var msg: c.struct_msghdr = std.mem.zeroes(c.struct_msghdr);
+    var iov: c.struct_iovec = .{
+        .iov_base = @constCast(buf.ptr),
+        .iov_len = @intCast(buf.len),
+    };
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_name = @ptrCast(@constCast(addr));
+    msg.msg_namelen = addr_len;
+
+    c.io_uring_prep_sendmsg(sqe, sockfd, &msg, 0);
 }

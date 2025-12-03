@@ -16,11 +16,24 @@ IFS=$'\n\t'
 
 VM_NAME="zig-build"
 MOUNT_POINT="/home/ubuntu/project"
-ZIG_VERSION="0.15.0"  # Change this when you upgrade Zig
+ZIG_VERSION="0.15.2"  # Change this when you upgrade Zig
 
-die() { echo "Error: $*" >&2; exit 1; }
+die() {
+    echo "ERROR: $*" >&2
+    echo "Debug info:" >&2
+    echo "- VM_NAME: $VM_NAME" >&2
+    echo "- MOUNT_POINT: $MOUNT_POINT" >&2
+    echo "- Current step failed" >&2
+    exit 1
+}
+
+echo "Starting linux-build.sh with debugging enabled"
+echo "VM_NAME: $VM_NAME"
+echo "ZIG_VERSION: $ZIG_VERSION"
+echo "Current directory: $(pwd)"
 
 command -v multipass >/dev/null || die "multipass not found → brew install --cask multipass"
+echo "✓ Multipass found"
 
 # ——— Parse --clean flag safely ———
 CLEAN_VM=false
@@ -47,31 +60,60 @@ if ! multipass info "$VM_NAME" &>/dev/null; then
 fi
 
 # ——— Install exact Zig version if missing or wrong ———
+echo "Checking Zig installation..."
 if ! multipass exec "$VM_NAME" -- zig version 2>/dev/null | grep -q "^${ZIG_VERSION}$"; then
     echo "Installing Zig ${ZIG_VERSION} in the VM..."
     multipass exec "$VM_NAME" -- sudo bash -c "
         set -euo pipefail
         URL='https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz'
+        echo \"Downloading from: \$URL\"
         rm -rf /usr/local/zig-${ZIG_VERSION}
         echo 'Downloading Zig ${ZIG_VERSION}...'
-        curl -L \"\$URL\" | tar -xJ -C /tmp
+        if ! curl -L \"\$URL\" | tar -xJ -C /tmp; then
+            echo 'ERROR: Failed to download or extract Zig'
+            exit 1
+        fi
         mv \"/tmp/zig-linux-x86_64-${ZIG_VERSION}\" \"/usr/local/zig-${ZIG_VERSION}\"
         ln -sf \"/usr/local/zig-${ZIG_VERSION}/zig\" /usr/local/bin/zig
-        echo 'Zig installed:'; zig version
+        echo 'Zig installed successfully'
+        zig version
     "
+    echo "Zig installation completed"
+else
+    echo "Zig ${ZIG_VERSION} already installed"
 fi
 
 # ——— Mount current project directory (100% reliable on 24.04+) ———
 echo "Mounting project → ${VM_NAME}:${MOUNT_POINT}"
 if ! multipass mount "$(pwd)" "${VM_NAME}:${MOUNT_POINT}" 2>/dev/null; then
     echo "Initial mount failed (expected on fresh 24.04) — fixing ownership..."
-    multipass exec "$VM_NAME" -- sudo mkdir -p "${MOUNT_POINT}"
-    multipass exec "$VM_NAME" -- sudo chown ubuntu:ubuntu "${MOUNT_POINT}"
-    multipass mount "$(pwd)" "${VM_NAME}:${MOUNT_POINT}"
-    echo "Mount fixed and applied"
+    echo "Creating mount point directory..."
+    multipass exec "$VM_NAME" -- sudo mkdir -p "${MOUNT_POINT}" || {
+        echo "ERROR: Failed to create mount point directory"
+        exit 1
+    }
+    echo "Setting ownership..."
+    multipass exec "$VM_NAME" -- sudo chown ubuntu:ubuntu "${MOUNT_POINT}" || {
+        echo "ERROR: Failed to set ownership"
+        exit 1
+    }
+    echo "Retrying mount..."
+    multipass mount "$(pwd)" "${VM_NAME}:${MOUNT_POINT}" || {
+        echo "ERROR: Mount failed even after fixing ownership"
+        exit 1
+    }
+    echo "Mount fixed and applied successfully"
 else
     echo "Mount succeeded on first try"
 fi
+
+# Verify mount worked
+echo "Verifying mount..."
+if ! multipass exec "$VM_NAME" -- ls "${MOUNT_POINT}/build.zig" >/dev/null 2>&1; then
+    echo "ERROR: Mount verification failed - build.zig not found in VM"
+    exit 1
+fi
+echo "Mount verified successfully"
 
 # ——— Usage / shortcuts ———
 if [[ $# -eq 0 ]]; then
@@ -86,4 +128,29 @@ fi
 
 # ——— Run the actual zig command inside Linux ———
 echo "Running in Linux VM: zig $*"
-multipass exec "$VM_NAME" -- bash -c "cd '${MOUNT_POINT}' && zig $*"
+echo "Working directory in VM: ${MOUNT_POINT}"
+echo "Command to execute: cd '${MOUNT_POINT}' && zig $*"
+
+# Test VM connectivity first
+echo "Testing VM connectivity..."
+if ! multipass exec "$VM_NAME" -- echo "VM is responsive"; then
+    echo "ERROR: Cannot connect to VM"
+    exit 1
+fi
+
+# Execute the zig command with error handling
+echo "Executing zig command..."
+if ! multipass exec "$VM_NAME" -- bash -c "cd '${MOUNT_POINT}' && zig $*"; then
+    echo "ERROR: Zig command failed with exit code $?"
+    echo "Debug info:"
+    echo "- VM name: $VM_NAME"
+    echo "- Mount point: $MOUNT_POINT"
+    echo "- Command: zig $*"
+    echo "- Current directory in VM:"
+    multipass exec "$VM_NAME" -- pwd || echo "Cannot get pwd"
+    echo "- Directory contents:"
+    multipass exec "$VM_NAME" -- ls -la "${MOUNT_POINT}" || echo "Cannot list directory"
+    exit 1
+fi
+
+echo "Command completed successfully"

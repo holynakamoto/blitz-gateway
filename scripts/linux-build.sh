@@ -16,7 +16,7 @@ IFS=$'\n\t'
 
 VM_NAME="zig-build"
 MOUNT_POINT="/home/ubuntu/project"
-ZIG_VERSION="0.15.2"  # Change this when you upgrade Zig
+ZIG_VERSION="0.15.2"  # Target Zig version
 
 die() {
     echo "ERROR: $*" >&2
@@ -57,26 +57,54 @@ if ! multipass info "$VM_NAME" &>/dev/null; then
         --cpus 6 \
         --memory 12G \
         --disk 50G
+    echo "VM launched successfully"
+else
+    echo "VM '$VM_NAME' already exists"
 fi
 
+# ——— Install sshfs for Multipass mounts (Ubuntu 24.04 requirement) ———
+echo "Installing sshfs for reliable mounts (Ubuntu 24.04 fix)..."
+multipass exec "$VM_NAME" -- sudo apt-get update -qq && sudo apt-get install -y sshfs
+echo "✓ sshfs installed"
+
 # ——— Install exact Zig version if missing or wrong ———
-echo "Checking Zig installation..."
-if ! multipass exec "$VM_NAME" -- zig version 2>/dev/null | grep -q "^${ZIG_VERSION}$"; then
-    echo "Installing Zig ${ZIG_VERSION} in the VM..."
+echo "Checking Zig installation in VM (may take up to 60s on first snap run)..."
+if ! timeout 90 multipass exec "$VM_NAME" -- bash -c "
+    echo '  → Checking for Zig...'
+    if command -v /snap/bin/zig >/dev/null; then
+        echo '  → Found Zig, checking version...'
+        /snap/bin/zig version 2>&1
+    else
+        echo '  → No Zig found'
+        exit 1
+    fi
+" 2>&1 | grep -q "^${ZIG_VERSION}$"; then
+    echo "Installing Zig ${ZIG_VERSION} in the VM via snap (with PATH fix)..."
     multipass exec "$VM_NAME" -- sudo bash -c "
         set -euo pipefail
-        URL='https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz'
-        echo \"Downloading from: \$URL\"
-        rm -rf /usr/local/zig-${ZIG_VERSION}
-        echo 'Downloading Zig ${ZIG_VERSION}...'
-        if ! curl -L \"\$URL\" | tar -xJ -C /tmp; then
-            echo 'ERROR: Failed to download or extract Zig'
-            exit 1
+
+        # Ensure snapd is ready
+        if ! command -v snap &>/dev/null; then
+            apt-get update -q
+            apt-get install -y snapd
+            systemctl enable --now snapd.socket || true
+            export PATH=/snap/bin:\$PATH
         fi
-        mv \"/tmp/zig-linux-x86_64-${ZIG_VERSION}\" \"/usr/local/zig-${ZIG_VERSION}\"
-        ln -sf \"/usr/local/zig-${ZIG_VERSION}/zig\" /usr/local/bin/zig
-        echo 'Zig installed successfully'
-        zig version
+
+        # Install specific version if available, otherwise latest
+        if snap info zig | grep -q \"^${ZIG_VERSION} \" 2>/dev/null; then
+            snap install zig --classic --channel=${ZIG_VERSION}/stable
+        else
+            echo \"Version ${ZIG_VERSION} not in snap store, installing latest...\"
+            snap install zig --classic --beta
+        fi
+
+        # Critical: Force /snap/bin into PATH for non-interactive sessions
+        echo 'export PATH=/snap/bin:\$PATH' >> /etc/environment
+        echo 'export PATH=/snap/bin:\$PATH' >> /home/ubuntu/.bashrc
+
+        echo 'Zig installed and PATH fixed'
+        /snap/bin/zig version
     "
     echo "Zig installation completed"
 else
@@ -88,12 +116,12 @@ echo "Mounting project → ${VM_NAME}:${MOUNT_POINT}"
 if ! multipass mount "$(pwd)" "${VM_NAME}:${MOUNT_POINT}" 2>/dev/null; then
     echo "Initial mount failed (expected on fresh 24.04) — fixing ownership..."
     echo "Creating mount point directory..."
-    multipass exec "$VM_NAME" -- sudo mkdir -p "${MOUNT_POINT}" || {
+    multipass exec "$VM_NAME" -- /bin/mkdir -p "${MOUNT_POINT}" || {
         echo "ERROR: Failed to create mount point directory"
         exit 1
     }
     echo "Setting ownership..."
-    multipass exec "$VM_NAME" -- sudo chown ubuntu:ubuntu "${MOUNT_POINT}" || {
+    multipass exec "$VM_NAME" -- /bin/chown ubuntu:ubuntu "${MOUNT_POINT}" || {
         echo "ERROR: Failed to set ownership"
         exit 1
     }
@@ -129,7 +157,7 @@ fi
 # ——— Run the actual zig command inside Linux ———
 echo "Running in Linux VM: zig $*"
 echo "Working directory in VM: ${MOUNT_POINT}"
-echo "Command to execute: cd '${MOUNT_POINT}' && zig $*"
+echo "Command to execute: export PATH=/snap/bin:\$PATH && cd '${MOUNT_POINT}' && zig $*"
 
 # Test VM connectivity first
 echo "Testing VM connectivity..."
@@ -140,16 +168,16 @@ fi
 
 # Execute the zig command with error handling
 echo "Executing zig command..."
-if ! multipass exec "$VM_NAME" -- bash -c "cd '${MOUNT_POINT}' && zig $*"; then
+if ! multipass exec "$VM_NAME" -- /bin/sh -c "PATH=/snap/bin:\$PATH && cd '${MOUNT_POINT}' && /snap/bin/zig $*"; then
     echo "ERROR: Zig command failed with exit code $?"
     echo "Debug info:"
     echo "- VM name: $VM_NAME"
     echo "- Mount point: $MOUNT_POINT"
     echo "- Command: zig $*"
     echo "- Current directory in VM:"
-    multipass exec "$VM_NAME" -- pwd || echo "Cannot get pwd"
+    multipass exec "$VM_NAME" -- /bin/sh -c "PATH=/snap/bin:\$PATH && /bin/pwd" || echo "Cannot get pwd"
     echo "- Directory contents:"
-    multipass exec "$VM_NAME" -- ls -la "${MOUNT_POINT}" || echo "Cannot list directory"
+    multipass exec "$VM_NAME" -- /bin/sh -c "PATH=/snap/bin:\$PATH && /bin/ls -la '${MOUNT_POINT}'" || echo "Cannot list directory"
     exit 1
 fi
 

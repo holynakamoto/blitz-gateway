@@ -216,7 +216,7 @@ pub const Config = struct {
             .health_check_path = health_path,
         };
 
-        try self.backends.append(owned_backend);
+        try self.backends.append(self.allocator, owned_backend);
     }
 
     pub fn validate(self: *const Config) !void {
@@ -285,7 +285,7 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
                 };
 
                 // Append directly since we've already duplicated strings
-                try cfg.backends.append(backend);
+                try cfg.backends.append(cfg.allocator, backend);
 
                 // Clear temporaries for next backend
                 h_opt.* = null;

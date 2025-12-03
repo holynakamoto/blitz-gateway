@@ -146,7 +146,7 @@ pub const QuicHandshake = struct {
             if (payload[offset] == @intFromEnum(frames.FrameType.crypto)) {
                 // Parse CRYPTO frame
                 const frame = try frames.CryptoFrame.parseFromPayload(payload[offset..]);
-                try result.append(frame);
+                try result.append(allocator, frame);
 
                 // Calculate frame size to advance offset
                 var frame_size: usize = 1; // Frame type

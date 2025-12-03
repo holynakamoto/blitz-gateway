@@ -24,7 +24,7 @@ fn FD_SET(fd: c_int, set: *c.fd_set) void {
     if (fd_usize < set.fds_bits.len * @sizeOf(usize) * 8) {
         const idx = fd_usize / (@sizeOf(usize) * 8);
         const bit = fd_usize % (@sizeOf(usize) * 8);
-        set.fds_bits[idx] |= (@as(usize, 1) << @intCast(bit));
+        set.fds_bits[idx] |= @as(c_long, @intCast(@as(usize, 1) << @intCast(bit)));
     }
 }
 

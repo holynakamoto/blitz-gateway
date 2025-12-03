@@ -121,7 +121,7 @@ pub const JwtConfig = struct {
         for (self.unprotected_paths.items) |path| {
             allocator.free(path);
         }
-        self.unprotected_paths.deinit();
+        self.unprotected_paths.deinit(allocator);
     }
 
     /// Check if a path requires authentication

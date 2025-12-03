@@ -41,10 +41,10 @@ pub const SessionTicket = struct {
     }
 
     pub fn deinit(self: *SessionTicket, allocator: std.mem.Allocator) void {
-        allocator.free(self.ticket_data);
-        allocator.free(self.psk_identity);
+        allocator.free(@constCast(self.ticket_data));
+        allocator.free(@constCast(self.psk_identity));
         if (self.server_name) |sn| {
-            allocator.free(sn);
+            allocator.free(@constCast(sn));
         }
     }
 
@@ -73,9 +73,6 @@ pub const SessionCache = struct {
 
     /// Maximum cache size
     max_size: usize = 10000,
-
-    /// Current cache size
-    size: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator) SessionCache {
         return SessionCache{
@@ -107,7 +104,6 @@ pub const SessionCache = struct {
                 if (self.sessions.fetchRemove(key)) |kv| {
                     kv.value.deinit(self.allocator);
                     self.allocator.destroy(kv.value);
-                    self.size -= 1;
                 }
             }
         }
@@ -117,8 +113,12 @@ pub const SessionCache = struct {
         ticket_copy.* = ticket.*;
         // Note: We take ownership of the ticket data
 
+        // If put() overwrites an existing key, we need to clean up the old value
+        if (self.sessions.fetchRemove(ticket.psk_identity)) |kv| {
+            kv.value.deinit(self.allocator);
+            self.allocator.destroy(kv.value);
+        }
         try self.sessions.put(ticket.psk_identity, ticket_copy);
-        self.size += 1;
     }
 
     /// Retrieve a session ticket by PSK identity
@@ -131,19 +131,25 @@ pub const SessionCache = struct {
         if (self.sessions.fetchRemove(psk_identity)) |kv| {
             kv.value.deinit(self.allocator);
             self.allocator.destroy(kv.value);
-            self.size -= 1;
         }
     }
 
     /// Clean up expired tickets
     pub fn evictExpired(self: *SessionCache) !void {
-        var to_remove = std.ArrayList([]const u8).init(self.allocator);
-        defer to_remove.deinit();
+        var to_remove = std.ArrayList([]u8).init(self.allocator);
+        defer {
+            for (to_remove.items) |key| {
+                self.allocator.free(key);
+            }
+            to_remove.deinit();
+        }
 
         var iterator = self.sessions.iterator();
         while (iterator.next()) |entry| {
-            if (entry.value_ptr.isExpired()) {
-                try to_remove.append(entry.key_ptr.*);
+            if (entry.value_ptr.*.isExpired()) {
+                const key_copy = try self.allocator.dupe(u8, entry.key_ptr.*);
+                errdefer self.allocator.free(key_copy);
+                try to_remove.append(key_copy);
             }
         }
 
@@ -159,8 +165,8 @@ pub const SessionCache = struct {
 
         var iterator = self.sessions.iterator();
         while (iterator.next()) |entry| {
-            if (entry.value_ptr.created_at < oldest_time) {
-                oldest_time = entry.value_ptr.created_at;
+            if (entry.value_ptr.*.created_at < oldest_time) {
+                oldest_time = entry.value_ptr.*.created_at;
                 oldest_key = entry.key_ptr.*;
             }
         }
@@ -174,7 +180,7 @@ pub const SessionCache = struct {
         max_sessions: usize,
     } {
         return .{
-            .total_sessions = self.size,
+            .total_sessions = self.sessions.count(),
             .max_sessions = self.max_size,
         };
     }
@@ -203,7 +209,7 @@ pub const EarlyDataContext = struct {
     }
 
     pub fn deinit(self: *EarlyDataContext) void {
-        self.data.deinit(self.allocator);
+        self.data.deinit();
     }
 
     /// Add early data
@@ -261,7 +267,7 @@ pub const QuicToken = struct {
     }
 
     pub fn deinit(self: *QuicToken, allocator: std.mem.Allocator) void {
-        allocator.free(self.token_data);
+        allocator.free(@constCast(self.token_data));
     }
 
     /// Check if token is expired
@@ -317,10 +323,31 @@ pub const TokenCache = struct {
 
         const key = makeKey(token.client_ip, token.client_port);
         const token_copy = try self.allocator.create(QuicToken);
-        token_copy.* = token.*;
-        // Note: We take ownership
+        errdefer self.allocator.destroy(token_copy);
 
-        try self.tokens.put(key, token_copy);
+        // Deep copy token_data to avoid double-free
+        const token_data_copy = try self.allocator.alloc(u8, token.token_data.len);
+        errdefer self.allocator.free(token_data_copy);
+        std.mem.copy(u8, token_data_copy, token.token_data);
+
+        // Copy the struct fields with the new token_data
+        token_copy.* = QuicToken{
+            .token_data = token_data_copy,
+            .client_ip = token.client_ip,
+            .client_port = token.client_port,
+            .created_at = token.created_at,
+            .lifetime_seconds = token.lifetime_seconds,
+        };
+
+        // Insert the new token and check if we replaced an existing one
+        const result = try self.tokens.put(key, token_copy);
+
+        // If there was an existing token, free its resources
+        if (result.old_value) |old_token| {
+            // Free the old token's token_data and destroy the token
+            self.allocator.free(@constCast(old_token.token_data));
+            self.allocator.destroy(old_token);
+        }
     }
 
     /// Retrieve a token
@@ -358,7 +385,7 @@ pub const TokenCache = struct {
 
         var iterator = self.tokens.iterator();
         while (iterator.next()) |entry| {
-            if (entry.value_ptr.isExpired()) {
+            if (entry.value_ptr.*.isExpired()) {
                 try to_remove.append(entry.key_ptr.*);
             }
         }

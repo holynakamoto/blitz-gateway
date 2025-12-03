@@ -121,7 +121,7 @@ pub const SettingsFrame = struct {
 
     pub fn deinit(self: *SettingsFrame) void {
         // Zig 0.15.2: deinit requires allocator
-        self.settings.deinit(self.allocator);
+        self.settings.deinit();
     }
 
     pub fn parse(data: []const u8, allocator: std.mem.Allocator) !SettingsFrame {
@@ -147,7 +147,7 @@ pub const SettingsFrame = struct {
             offset += value_result.bytes_read;
 
             // Zig 0.15.2: append requires allocator
-            try frame.settings.append(Setting{
+            try frame.settings.append(allocator, Setting{
                 .identifier = id_result.value,
                 .value = value_result.value,
             });

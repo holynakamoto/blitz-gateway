@@ -87,16 +87,20 @@ pub const JwtConfig = struct {
 
     /// Authorization header name
     header_name: []const u8 = "Authorization",
+    header_name_allocated: bool = false,
 
     /// Authorization scheme
     scheme: []const u8 = "Bearer",
+    scheme_allocated: bool = false,
 
     /// Paths that don't require authentication
     unprotected_paths: std.ArrayList([]const u8) = undefined,
 
-    pub fn init(allocator: std.mem.Allocator) JwtConfig {
+    pub fn init(allocator: std.mem.Allocator) !JwtConfig {
         return .{
-            .unprotected_paths = std.ArrayList([]const u8).initCapacity(allocator, 0) catch @panic("Failed to init unprotected_paths list"),
+            .unprotected_paths = try std.ArrayList([]const u8).initCapacity(allocator, 0),
+            .header_name_allocated = false,
+            .scheme_allocated = false,
         };
     }
 
@@ -105,13 +109,19 @@ pub const JwtConfig = struct {
         if (self.public_key) |pk| allocator.free(pk);
         if (self.issuer) |iss| allocator.free(iss);
         if (self.audience) |aud| allocator.free(aud);
-        allocator.free(self.header_name);
-        allocator.free(self.scheme);
+        // Only free header_name if it was dynamically allocated
+        if (self.header_name_allocated) {
+            allocator.free(self.header_name);
+        }
+        // Only free scheme if it was dynamically allocated
+        if (self.scheme_allocated) {
+            allocator.free(self.scheme);
+        }
 
         for (self.unprotected_paths.items) |path| {
             allocator.free(path);
         }
-        self.unprotected_paths.deinit(allocator);
+        self.unprotected_paths.deinit();
     }
 
     /// Check if a path requires authentication
@@ -132,6 +142,9 @@ pub const Config = struct {
 
     /// Listen address for server/load balancer
     listen_addr: []const u8 = "0.0.0.0",
+
+    /// Whether listen_addr was dynamically allocated (for proper cleanup)
+    listen_addr_allocated: bool = false,
 
     /// Listen port for server/load balancer
     listen_port: u16 = 4433,
@@ -156,22 +169,32 @@ pub const Config = struct {
         load_balancer, // Load balancer mode
     };
 
-    pub fn init(allocator: std.mem.Allocator) Config {
+    pub fn init(allocator: std.mem.Allocator) !Config {
         return Config{
-            .backends = std.ArrayList(Backend).initCapacity(allocator, 0) catch @panic("Failed to init backends list"),
-            .jwt = JwtConfig.init(allocator),
+            .backends = try std.ArrayList(Backend).initCapacity(allocator, 0),
+            .jwt = try JwtConfig.init(allocator),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Config) void {
+        // Free listen_addr if it was allocated
+        if (self.listen_addr_allocated) {
+            self.allocator.free(self.listen_addr);
+        }
+
+        // Free metrics endpoint if allocated
+        if (self.metrics.otlp_endpoint) |endpoint| {
+            self.allocator.free(endpoint);
+        }
+
         for (self.backends.items) |*backend| {
             self.allocator.free(backend.host);
             if (backend.health_check_path) |path| {
                 self.allocator.free(path);
             }
         }
-        self.backends.deinit(self.allocator);
+        self.backends.deinit();
         self.jwt.deinit(self.allocator);
     }
 
@@ -184,6 +207,7 @@ pub const Config = struct {
         if (backend.health_check_path) |path| {
             health_path = try self.allocator.dupe(u8, path);
         }
+        errdefer if (health_path) |p| self.allocator.free(p);
 
         const owned_backend = Backend{
             .host = host,
@@ -192,7 +216,7 @@ pub const Config = struct {
             .health_check_path = health_path,
         };
 
-        try self.backends.append(self.allocator, owned_backend);
+        try self.backends.append(owned_backend);
     }
 
     pub fn validate(self: *const Config) !void {
@@ -219,11 +243,58 @@ pub const Config = struct {
 
 // Simple TOML-like config file parser (no external dependencies)
 pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Config {
-    var config = Config.init(allocator);
+    var config = try Config.init(allocator);
     errdefer config.deinit();
 
     var lines = std.mem.splitSequence(u8, content, "\n");
     var current_section: ?[]const u8 = null;
+    var current_backend_section: ?[]const u8 = null;
+
+    // Temporary variables to accumulate backend fields
+    var host_opt: ?[]const u8 = null;
+    var port_opt: ?u16 = null;
+    var weight_opt: ?u32 = null;
+    var health_check_path_opt: ?[]const u8 = null;
+
+    // Helper function to finalize the current backend
+    const finalizeBackend = struct {
+        fn call(
+            cfg: *Config,
+            h_opt: *?[]const u8,
+            p_opt: *?u16,
+            w_opt: *?u32,
+            hc_opt: *?[]const u8,
+        ) !void {
+            if (h_opt.*) |host| {
+                // Allocate exactly once: duplicate host and health_check_path
+                const host_dupe = try cfg.allocator.dupe(u8, host);
+                errdefer cfg.allocator.free(host_dupe);
+
+                var health_path: ?[]const u8 = null;
+                if (hc_opt.*) |path| {
+                    health_path = try cfg.allocator.dupe(u8, path);
+                    errdefer cfg.allocator.free(health_path.?);
+                }
+
+                // Build Backend struct with parsed port/weight defaults
+                const backend = Backend{
+                    .host = host_dupe,
+                    .port = p_opt.* orelse 8080,
+                    .weight = w_opt.* orelse 10,
+                    .health_check_path = health_path,
+                };
+
+                // Append directly since we've already duplicated strings
+                try cfg.backends.append(backend);
+
+                // Clear temporaries for next backend
+                h_opt.* = null;
+                p_opt.* = null;
+                w_opt.* = null;
+                hc_opt.* = null;
+            }
+        }
+    }.call;
 
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
@@ -232,8 +303,24 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
         }
 
         if (std.mem.startsWith(u8, trimmed, "[") and std.mem.endsWith(u8, trimmed, "]")) {
-            // Section header
-            current_section = trimmed[1 .. trimmed.len - 1];
+            // Section header - finalize previous backend if we're moving to a new backend section
+            const new_section = trimmed[1 .. trimmed.len - 1];
+            if (std.mem.startsWith(u8, new_section, "backends.")) {
+                if (current_backend_section) |prev_section| {
+                    if (!std.mem.eql(u8, prev_section, new_section)) {
+                        // New backend section started, finalize previous backend
+                        try finalizeBackend(&config, &host_opt, &port_opt, &weight_opt, &health_check_path_opt);
+                    }
+                }
+                current_backend_section = new_section;
+            } else {
+                // Moving to non-backend section, finalize current backend if any
+                if (current_backend_section != null) {
+                    try finalizeBackend(&config, &host_opt, &port_opt, &weight_opt, &health_check_path_opt);
+                    current_backend_section = null;
+                }
+            }
+            current_section = new_section;
         } else if (std.mem.indexOf(u8, trimmed, "=")) |eq_pos| {
             // Key-value pair
             const key = std.mem.trim(u8, trimmed[0..eq_pos], &std.ascii.whitespace);
@@ -246,20 +333,35 @@ pub fn parseConfigFile(allocator: std.mem.Allocator, content: []const u8) !Confi
             else
                 value;
 
-            try parseKeyValue(&config, current_section, key, clean_value);
+            try parseKeyValue(&config, current_section, key, clean_value, &host_opt, &port_opt, &weight_opt, &health_check_path_opt);
         }
+    }
+
+    // Finalize any remaining backend at end of file
+    if (current_backend_section != null) {
+        try finalizeBackend(&config, &host_opt, &port_opt, &weight_opt, &health_check_path_opt);
     }
 
     try config.validate();
     return config;
 }
 
-fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: []const u8) !void {
+fn parseKeyValue(
+    config: *Config,
+    section: ?[]const u8,
+    key: []const u8,
+    value: []const u8,
+    host_opt: *?[]const u8,
+    port_opt: *?u16,
+    weight_opt: *?u32,
+    health_check_path_opt: *?[]const u8,
+) !void {
     if (section == null) {
         // Global configuration
         if (std.mem.eql(u8, key, "listen")) {
             if (std.mem.indexOf(u8, value, ":")) |colon_pos| {
                 config.listen_addr = try config.allocator.dupe(u8, value[0..colon_pos]);
+                config.listen_addr_allocated = true;
                 config.listen_port = try std.fmt.parseInt(u16, value[colon_pos + 1 ..], 10);
             } else {
                 return error.InvalidListenFormat;
@@ -304,30 +406,16 @@ fn parseKeyValue(config: *Config, section: ?[]const u8, key: []const u8, value: 
             config.metrics.prometheus_enabled = std.mem.eql(u8, value, "true");
         }
     } else if (std.mem.startsWith(u8, section.?, "backends.")) {
-        // Backend configuration
-        // For simplicity, we'll just add all backends in order
-        // In a real implementation, you'd want to group by backend name
+        // Backend configuration - accumulate fields in temporary variables
+        // Do NOT call allocator.dupe() here; allocation happens once when backend is finalized
         if (std.mem.eql(u8, key, "host")) {
-            const backend = Backend{
-                .host = try config.allocator.dupe(u8, value),
-                .port = 8080, // Default, will be overridden
-            };
-            try config.addBackend(backend);
+            host_opt.* = value;
         } else if (std.mem.eql(u8, key, "port")) {
-            if (config.backends.items.len > 0) {
-                const port = try std.fmt.parseInt(u16, value, 10);
-                config.backends.items[config.backends.items.len - 1].port = port;
-            }
+            port_opt.* = try std.fmt.parseInt(u16, value, 10);
         } else if (std.mem.eql(u8, key, "weight")) {
-            if (config.backends.items.len > 0) {
-                const weight = try std.fmt.parseInt(u32, value, 10);
-                config.backends.items[config.backends.items.len - 1].weight = weight;
-            }
+            weight_opt.* = try std.fmt.parseInt(u32, value, 10);
         } else if (std.mem.eql(u8, key, "health_check_path")) {
-            if (config.backends.items.len > 0) {
-                const path = try config.allocator.dupe(u8, value);
-                config.backends.items[config.backends.items.len - 1].health_check_path = path;
-            }
+            health_check_path_opt.* = value;
         }
     }
 }

@@ -21,11 +21,9 @@ pub const QUIC_VERSION_1 = @import("packet.zig").QUIC_VERSION_1;
 pub const CryptoFrame = @import("frames.zig").CryptoFrame;
 pub const FrameType = @import("frames.zig").FrameType;
 
-pub const InitialSecrets = @import("crypto.zig").InitialSecrets;
-pub const ZeroRttSecrets = @import("crypto.zig").ZeroRttSecrets;
-pub const deriveInitialSecrets = @import("crypto.zig").deriveInitialSecrets;
-pub const decryptPayload = @import("crypto.zig").decryptPayload;
-pub const encryptPayload = @import("crypto.zig").encryptPayload;
+// Cryptographic primitives are intentionally not exported to prevent misuse.
+// These should only be accessed internally by QUIC protocol handlers.
+// External code should use higher-level APIs like QuicServer, QuicServerConnection, etc.
 
 pub const TransportParameters = @import("transport_params.zig").TransportParameters;
 pub const TransportParameterId = @import("transport_params.zig").TransportParameterId;

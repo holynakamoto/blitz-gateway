@@ -22,6 +22,7 @@ pub const QuicHandshake = struct {
     state: HandshakeState,
     quic_conn: *connection.QuicConnection,
     tls_conn: ?*anyopaque = null, // Disabled for PicoTLS migration
+    tls_conn_cleanup: ?*const fn (*anyopaque) void = null, // Optional cleanup function for tls_conn
     allocator: std.mem.Allocator,
 
     // Crypto stream tracking (RFC 9000 Section 7.2)
@@ -48,7 +49,7 @@ pub const QuicHandshake = struct {
         }
 
         pub fn deinit(self: *CryptoStream) void {
-            self.data.deinit(self.allocator);
+            self.data.deinit();
         }
 
         pub fn append(self: *CryptoStream, data: []const u8) !void {
@@ -84,9 +85,14 @@ pub const QuicHandshake = struct {
     }
 
     pub fn deinit(self: *QuicHandshake) void {
-        // tls_conn is disabled for PicoTLS migration (anyopaque type)
-        // No cleanup needed as it's not currently used
-        _ = self.tls_conn;
+        // Defensively clean up tls_conn if it was assigned
+        if (self.tls_conn) |tls_conn| {
+            if (self.tls_conn_cleanup) |cleanup_fn| {
+                cleanup_fn(tls_conn);
+            }
+            self.tls_conn = null;
+        }
+        self.tls_conn_cleanup = null;
         self.initial_crypto_stream.deinit();
         self.handshake_crypto_stream.deinit();
     }
@@ -100,7 +106,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit(self.allocator);
+        defer crypto_frames.deinit();
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {
@@ -132,7 +138,7 @@ pub const QuicHandshake = struct {
     // Extract CRYPTO frames from packet payload
     fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(frames.CryptoFrame) {
         var result = std.ArrayList(frames.CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
-        errdefer result.deinit(allocator);
+        errdefer result.deinit();
         var offset: usize = 0;
 
         while (offset < payload.len) {
@@ -140,7 +146,7 @@ pub const QuicHandshake = struct {
             if (payload[offset] == @intFromEnum(frames.FrameType.crypto)) {
                 // Parse CRYPTO frame
                 const frame = try frames.CryptoFrame.parseFromPayload(payload[offset..]);
-                try result.append(allocator, frame);
+                try result.append(frame);
 
                 // Calculate frame size to advance offset
                 var frame_size: usize = 1; // Frame type
@@ -212,7 +218,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit(self.allocator);
+        defer crypto_frames.deinit();
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {

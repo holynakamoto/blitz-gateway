@@ -302,9 +302,9 @@ pub const Http2Connection = struct {
             }
 
             // Process this frame
-            std.log.debug("Processing HTTP/2 frame: type={any}, stream_id={d}, length={d}", .{ header.frame_type, header.stream_id, header.length });
+            std.log.debug("Processing HTTP/2 frame: type={}, stream_id={d}, length={d}", .{ header.frame_type, header.stream_id, header.length });
             const action = try self.handleFrame(data[offset..][0..frame_size]);
-            std.log.debug("Frame processed, action: {any}", .{action});
+            std.log.debug("Frame processed, action: {}", .{action});
 
             // Track actions that require a response
             // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response
@@ -487,7 +487,7 @@ pub const Http2Connection = struct {
         const content_length_str = try std.fmt.allocPrint(self.allocator, "{d}", .{body.len});
         errdefer self.allocator.free(content_length_str);
 
-        // Zig 0.15.2: append requires allocator
+        // Zig 0.15.2: append no longer requires allocator
         try response_headers.append(hpack.HeaderField{ .name = ":status", .value = "200" });
         try response_headers.append(hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
         try response_headers.append(hpack.HeaderField{ .name = "content-length", .value = content_length_str });

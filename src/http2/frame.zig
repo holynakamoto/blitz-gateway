@@ -102,7 +102,7 @@ pub const SettingsFrame = struct {
         }
 
         // Parse settings from payload
-        var settings_list = std.ArrayList(SettingsFrame.Setting).initCapacity(allocator, 0);
+        var settings_list = try std.ArrayList(SettingsFrame.Setting).initCapacity(allocator, 0);
         errdefer settings_list.deinit();
 
         var offset: usize = FrameHeader.SIZE;

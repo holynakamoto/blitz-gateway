@@ -207,7 +207,7 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
                     ring,
                     &buffer_pool,
                 ) catch |err| {
-                    std.log.debug("Error handling QUIC packet: {any}", .{err});
+                    std.log.debug("Error handling QUIC packet: {}", .{err});
                 };
 
                 // Resubmit recvfrom for next packet
@@ -272,7 +272,7 @@ fn handleQuicPacket(
 
     // Parse packet to get connection ID for lookup
     const parsed = packet.Packet.parse(data, 8) catch |err| {
-        std.log.debug("Failed to parse QUIC packet: {any}", .{err});
+        std.log.debug("Failed to parse QUIC packet: {}", .{err});
         return;
     };
 

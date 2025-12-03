@@ -77,8 +77,8 @@ pub const HealthChecker = struct {
         const addr = try backend_server.getAddress();
         const addr_ptr: *const c.struct_sockaddr = @ptrCast(&addr);
 
-        // Connect (non-blocking)
-        const connect_result = c.connect(sockfd, addr_ptr, @sizeOf(c.struct_sockaddr_in));
+        // Connect (non-blocking) - cast sockaddr to the expected union type
+        const connect_result = c.connect(sockfd, @as(c.__CONST_SOCKADDR_ARG, @ptrCast(addr_ptr)), @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
             const err = getErrno();
             if (err != c.EINPROGRESS) {

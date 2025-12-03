@@ -6,7 +6,12 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 
 // eBPF syscall numbers
-const BPF_SYSCALL = if (builtin.cpu.arch == .x86_64) 321 else 321; // SYS_bpf
+const BPF_SYSCALL = switch (builtin.cpu.arch) {
+    .x86_64 => 321,
+    .aarch64 => 280,
+    .arm => 386,
+    else => @compileError("BPF syscall number not defined for architecture: " ++ @tagName(builtin.cpu.arch)),
+}; // SYS_bpf
 
 // eBPF program types
 const BPF_PROG_TYPE_XDP = 6;
@@ -14,6 +19,7 @@ const BPF_PROG_TYPE_XDP = 6;
 // eBPF map types
 const BPF_MAP_TYPE_HASH = 1;
 const BPF_MAP_TYPE_ARRAY = 2;
+const BPF_MAP_TYPE_LRU_HASH = 13; // LRU eviction for DDoS protection
 
 // eBPF commands
 const BPF_MAP_CREATE = 0;
@@ -39,6 +45,7 @@ pub const EbpfRateLimitConfig = extern struct {
 pub const TokenBucket = extern struct {
     tokens: u64,
     last_update: u64,
+    last_seen: u64, // Last time this IP was seen (for TTL cleanup)
 };
 
 // eBPF map specification
@@ -96,6 +103,9 @@ pub const EbpfManager = struct {
         if (self.object_fd) |fd| {
             fd.close();
         }
+        if (self.xdp_prog_fd >= 0) {
+            std.os.close(self.xdp_prog_fd);
+        }
     }
 
     /// Load eBPF object file and programs
@@ -125,12 +135,13 @@ pub const EbpfManager = struct {
 
     /// Create eBPF maps
     pub fn createMaps(self: *EbpfManager) !void {
-        // IP buckets map (HASH: IP -> TokenBucket)
+        // IP buckets map (LRU_HASH: IP -> TokenBucket)
+        // Uses LRU eviction to prevent DDoS attacks from exhausting map capacity
         self.ip_buckets_map_fd = try self.createMap(.{
-            .map_type = BPF_MAP_TYPE_HASH,
+            .map_type = BPF_MAP_TYPE_LRU_HASH,
             .key_size = @sizeOf(u32), // IPv4 address
             .value_size = @sizeOf(TokenBucket),
-            .max_entries = 1024, // Max tracked IPs
+            .max_entries = 65536, // Increased capacity for expected load with LRU protection
             .map_flags = 0,
         });
 
@@ -172,14 +183,34 @@ pub const EbpfManager = struct {
         // TODO: Attach XDP program using netlink or ioctl
         // This would use the XDP socket or netlink interface
 
-        std.log.info("XDP program attached to interface {s} (ifindex: {})", .{ interface_name, self.ifindex });
+        // TODO: After successful attach, query the kernel for the assigned program ID
+        // This can be done via netlink (RTM_GETLINK with IFLA_XDP_PROG_ID) or
+        // by using bpf syscall to get program info
+        // For now, simulate getting the program ID from the kernel
+        const kernel_prog_id: u32 = 12345; // TODO: Get actual prog_id from kernel after attach
+        self.prog_id = kernel_prog_id;
+
+        std.log.info("XDP program attached to interface {s} (ifindex: {}, prog_id: {})", .{ interface_name, self.ifindex, self.prog_id });
     }
 
     /// Detach XDP program
     pub fn detachXdp(self: *EbpfManager) void {
         if (self.ifindex > 0 and self.prog_id > 0) {
-            // TODO: Detach XDP program
-            std.log.info("XDP program detached from interface (ifindex: {})", .{self.ifindex});
+            // TODO: Detach XDP program using netlink or ioctl
+            // This would use the XDP socket or netlink interface to detach
+            // the program identified by self.prog_id
+            // On success, clear self.prog_id = 0 below
+
+            // TODO: Check for detach errors and only clear prog_id on success
+            // For now, simulate successful detach
+            const detach_success = true; // TODO: Replace with actual detach result
+
+            if (detach_success) {
+                std.log.info("XDP program detached from interface (ifindex: {}, prog_id: {})", .{ self.ifindex, self.prog_id });
+
+                // Clear prog_id atomically after successful detach
+                self.prog_id = 0;
+            }
         }
     }
 

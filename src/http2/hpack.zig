@@ -94,24 +94,23 @@ pub const HpackDecoder = struct {
             self.allocator.free(field.value);
         }
         // Zig 0.15.2: deinit requires allocator
-        self.dynamic_table.deinit(self.allocator);
+        self.dynamic_table.deinit();
     }
 
     // Decode header block
     pub fn decode(self: *HpackDecoder, data: []const u8) ![]HeaderField {
         // Zig 0.15.2: Use initCapacity
         var headers = std.ArrayList(HeaderField).initCapacity(self.allocator, 16) catch return error.OutOfMemory;
-        errdefer headers.deinit(self.allocator);
+        errdefer headers.deinit();
 
         var offset: usize = 0;
         while (offset < data.len) {
             const header = try self.decodeHeaderField(data[offset..]);
-            // Zig 0.15.2: append requires allocator
-            try headers.append(header.field);
+            try headers.append(self.allocator, header.field);
             offset += header.bytes_consumed;
         }
 
-        return headers.toOwnedSlice();
+        return headers.toOwnedSlice(self.allocator);
     }
 
     const DecodeResult = struct {
@@ -306,7 +305,7 @@ pub const HpackDecoder = struct {
         const value_copy = try self.allocator.dupe(u8, field.value);
         errdefer self.allocator.free(value_copy);
 
-        try self.dynamic_table.append(.{
+        try self.dynamic_table.append(self.allocator, .{
             .name = name_copy,
             .value = value_copy,
         });
@@ -353,7 +352,7 @@ pub const HpackEncoder = struct {
             self.allocator.free(field.value);
         }
         // Zig 0.15.2: deinit requires allocator
-        self.dynamic_table.deinit(self.allocator);
+        self.dynamic_table.deinit();
     }
 
     // Encode a single header field
@@ -543,7 +542,7 @@ pub const HpackEncoder = struct {
         const value_copy = try self.allocator.dupe(u8, field.value);
         errdefer self.allocator.free(value_copy);
 
-        try self.dynamic_table.append(.{
+        try self.dynamic_table.append(self.allocator, .{
             .name = name_copy,
             .value = value_copy,
         });

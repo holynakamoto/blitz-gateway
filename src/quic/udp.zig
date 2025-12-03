@@ -59,11 +59,21 @@ pub fn prepRecvFrom(
     addr: *c.struct_sockaddr_in,
     addr_len: *c.socklen_t,
 ) void {
-    // Use io_uring_prep_recv helper function
-    c.io_uring_prep_recv(sqe, sockfd, buf.ptr, @intCast(buf.len), 0);
-    // Store addr info for later use
-    _ = addr;
-    _ = addr_len;
+    // Prepare recvmsg to capture sender address
+    // Ensure addr_len is initialized to the size of sockaddr_in
+    addr_len.* = @sizeOf(c.struct_sockaddr_in);
+
+    var msg: c.struct_msghdr = std.mem.zeroes(c.struct_msghdr);
+    var iov: c.struct_iovec = .{
+        .iov_base = buf.ptr,
+        .iov_len = @intCast(buf.len),
+    };
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_name = @ptrCast(addr);
+    msg.msg_namelen = addr_len.*;
+
+    c.io_uring_prep_recvmsg(sqe, sockfd, &msg, 0);
 }
 
 // Helper to prepare sendto for io_uring

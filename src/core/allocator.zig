@@ -135,7 +135,7 @@ pub const BufferPool = struct {
         errdefer write_buffer_to_index.deinit();
 
         var write_buffers_allocated: usize = 0;
-        errdefer write_free.deinit();
+        errdefer write_free.deinit(backing_allocator);
         errdefer backing_allocator.free(write_buffers);
         errdefer {
             // Free any partially-allocated buffers

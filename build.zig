@@ -157,9 +157,25 @@ pub fn build(b: *std.Build) void {
     // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
 
     // QUIC Handshake Server (full TLS integration)
-    // NOTE: Disabled temporarily - tool has module path issues
-    // The tool needs to be refactored to work with Zig's module system
-    // Can be re-enabled once module imports are fixed
+    // Create a new module with src/main.zig as root, then override entry point
+    const quic_handshake_server_module = b.addModule("quic_handshake_server", .{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+    });
+    const quic_handshake_server_exe = b.addExecutable(.{
+        .name = "quic_handshake_server",
+        .root_module = quic_handshake_server_module,
+    });
+    quic_handshake_server_exe.linkLibC();
+    if (target.result.os.tag == .linux) {
+        quic_handshake_server_exe.linkSystemLibrary("ssl");
+        quic_handshake_server_exe.linkSystemLibrary("crypto");
+        quic_handshake_server_exe.linkSystemLibrary("uring");
+        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "src" });
+        quic_handshake_server_exe.addIncludePath(b.path("deps/picotls/include"));
+    }
+    b.installArtifact(quic_handshake_server_exe);
 
     // Transport parameters tests
     const transport_params_tests = b.addTest(.{
@@ -297,4 +313,33 @@ pub fn build(b: *std.Build) void {
     // For now, this step exists to satisfy the CI workflow
     _ = b.step("docs", "Generate documentation");
     // Docs generation not yet implemented - step exists for CI compatibility
+
+    // .deb package build step using nfpm
+    const deb_step = b.step("deb", "Build .deb package using nfpm");
+    deb_step.dependOn(b.getInstallStep()); // Ensure binary is built first
+
+    // Create a run command to build the deb package
+    const deb_cmd = b.addSystemCommand(&[_][]const u8{
+        "bash", "-c",
+        \\#!/bin/bash
+        \\set -euo pipefail
+        \\echo "Building .deb package..."
+        \\# Check if nfpm is available (should be installed in CI)
+        \\if ! command -v nfpm &> /dev/null; then
+        \\    echo "ERROR: nfpm not found. Please install nfpm:"
+        \\    echo "  go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest"
+        \\    echo "  # or"
+        \\    echo "  sudo apt-get install -y nfpm"
+        \\    exit 1
+        \\fi
+        \\# Copy binary to expected location for nfpm
+        \\mkdir -p zig-out/bin zig-out/deb
+        \\cp zig-out/bin/blitz zig-out/bin/blitz-quic
+        \\# Build package
+        \\nfpm pkg --packager deb --target zig-out/deb/ --config packaging/nfpm.yaml
+        \\echo "✅ .deb package built successfully!"
+        \\echo "📦 Package location: zig-out/deb/"
+        \\ls -la zig-out/deb/
+    });
+    deb_step.dependOn(&deb_cmd.step);
 }

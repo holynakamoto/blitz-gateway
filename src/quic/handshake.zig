@@ -106,7 +106,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit();
+        defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {
@@ -218,7 +218,7 @@ pub const QuicHandshake = struct {
     ) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit();
+        defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {

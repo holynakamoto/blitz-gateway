@@ -62,10 +62,10 @@ else
     echo "VM '$VM_NAME' already exists"
 fi
 
-# ——— Install sshfs for Multipass mounts (Ubuntu 24.04 requirement) ———
-echo "Installing sshfs for reliable mounts (Ubuntu 24.04 fix)..."
-multipass exec "$VM_NAME" -- sudo apt-get update -qq && sudo apt-get install -y sshfs
-echo "✓ sshfs installed"
+# ——— Install multipass-sshfs snap for mounts (Ubuntu 24.04+ requirement) ———
+echo "Installing multipass-sshfs snap for reliable mounts..."
+multipass exec "$VM_NAME" -- sudo snap install multipass-sshfs --classic
+echo "✓ multipass-sshfs installed"
 
 # ——— Install exact Zig version if missing or wrong ———
 echo "Checking Zig installation in VM (may take up to 60s on first snap run)..."

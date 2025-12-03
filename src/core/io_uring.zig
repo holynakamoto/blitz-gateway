@@ -677,9 +677,9 @@ pub fn runEchoServer(port: u16) !void {
 
                                 // Handle HTTP/2 frames using decrypted data
                                 // Process all frames in the buffer (may contain multiple frames)
-                                std.log.info("Processing HTTP/2 frames, {} bytes available (first 16 bytes: {x})", .{ tls_decrypted_len, std.fmt.fmtSliceHexLower(read_buf[0..@min(16, tls_decrypted_len)]) });
+                                std.log.info("Processing HTTP/2 frames, {} bytes available", .{tls_decrypted_len});
                                 const frame_result = conn.http2_conn.?.processAllFrames(read_buf[0..tls_decrypted_len]) catch |err| {
-                                    std.log.err("HTTP/2 frame handling failed: {} (first 16 bytes: {x})", .{ err, std.fmt.fmtSliceHexLower(read_buf[0..@min(16, tls_decrypted_len)]) });
+                                    std.log.err("HTTP/2 frame handling failed: {}", .{err});
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "HTTP/2 frame error");
                                     continue;

@@ -94,7 +94,7 @@ pub const HpackDecoder = struct {
             self.allocator.free(field.value);
         }
         // Zig 0.15.2: deinit requires allocator
-        self.dynamic_table.deinit();
+        self.dynamic_table.deinit(self.allocator);
     }
 
     // Decode header block
@@ -352,7 +352,7 @@ pub const HpackEncoder = struct {
             self.allocator.free(field.value);
         }
         // Zig 0.15.2: deinit requires allocator
-        self.dynamic_table.deinit();
+        self.dynamic_table.deinit(self.allocator);
     }
 
     // Encode a single header field

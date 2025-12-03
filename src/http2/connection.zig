@@ -304,7 +304,6 @@ pub const Http2Connection = struct {
             // Process this frame
             std.log.debug("Processing HTTP/2 frame: type={}, stream_id={d}, length={d}", .{ header.frame_type, header.stream_id, header.length });
             const action = try self.handleFrame(data[offset..][0..frame_size]);
-            std.log.debug("Frame processed, action: {}", .{action});
 
             // Track actions that require a response
             // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response

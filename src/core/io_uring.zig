@@ -687,7 +687,7 @@ pub fn runEchoServer(port: u16) !void {
                                 const response_action = frame_result.action;
                                 const needs_settings_ack = frame_result.needs_settings_ack;
                                 const frames_consumed = frame_result.bytes_consumed;
-                                std.log.info("Processed {} bytes of HTTP/2 frames, response action: {}, needs_settings_ack: {}", .{ frames_consumed, response_action, needs_settings_ack });
+                                std.log.info("Processed {} bytes of HTTP/2 frames, needs_settings_ack: {}", .{ frames_consumed, needs_settings_ack });
 
                                 // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response
                                 // This is required by HTTP/2 spec - clients will hang if ACK comes after response

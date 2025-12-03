@@ -49,7 +49,7 @@ pub const QuicHandshake = struct {
         }
 
         pub fn deinit(self: *CryptoStream) void {
-            self.data.deinit();
+            self.data.deinit(self.allocator);
         }
 
         pub fn append(self: *CryptoStream, data: []const u8) !void {
@@ -138,7 +138,7 @@ pub const QuicHandshake = struct {
     // Extract CRYPTO frames from packet payload
     fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(frames.CryptoFrame) {
         var result = std.ArrayList(frames.CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
-        errdefer result.deinit();
+        errdefer result.deinit(allocator);
         var offset: usize = 0;
 
         while (offset < payload.len) {

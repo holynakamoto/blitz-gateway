@@ -1,4 +1,4 @@
-name: Blitz Gateway CI
+name: Blitz Gateway Linux CI
 
 on:
   pull_request:
@@ -16,28 +16,12 @@ env:
 jobs:
 
   #############################
-  # PLATFORM BUILD MATRIX
+  # LINUX BUILD & RELEASE
   #############################
 
   build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: linux
-            arch: x86_64
-            runner: ubuntu-latest
-          - os: linux
-            arch: aarch64
-            runner: ubuntu-latest
-          - os: macos
-            arch: aarch64
-            runner: macos-14
-          - os: windows
-            arch: x86_64
-            runner: windows-latest
+    name: Build (Linux x86_64)
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -46,168 +30,25 @@ jobs:
 
       - uses: ./.github/actions/setup-zig
 
-      - name: Install dependencies (Linux)
-<<<<<<< HEAD
-        if: matrix.os == 'linux'
-=======
-        if: matrix.os == 'ubuntu-latest'
->>>>>>> origin/main
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y liburing-dev libssl-dev pkg-config build-essential
-
-      - name: Install dependencies (macOS)
-        if: matrix.os == 'macos'
-        run: |
-          brew install openssl liburing || true
-
-      - name: Install dependencies (Windows)
-        if: matrix.os == 'windows'
-        run: |
-          echo "Windows dependencies handled by Zig build system"
       - name: Initialize submodules
         run: git submodule update --init --recursive
 
       - name: Build
         run: zig build -Doptimize=ReleaseFast
 
+      - name: Run tests
+        run: zig build test --summary all
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-<<<<<<< HEAD
-          name: blitz-${{ matrix.os }}-${{ matrix.arch }}
-=======
-          name: blitz-${{ matrix.os }}
->>>>>>> origin/main
+          name: blitz-linux-x86_64
           path: zig-out/bin/*
 
-  #############################
-  # TESTING JOB
-  #############################
-
-  test:
-    name: Tests (Linux)
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
-      options: --user root
-
-    steps:
-      - name: Install git for checkout
-        run: |
-          apt-get update
-          apt-get install -y git ca-certificates curl
-
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/setup-container
-      - uses: ./.github/actions/setup-submodules
-      - uses: ./.github/actions/install-deps
-      - uses: ./.github/actions/setup-zig
-
-      - name: Run tests
-        run: |
-          zig build test --summary all
-          zig build test-quic
-
-  #############################
-  # SANITIZERS / MEMORY SAFETY
-  #############################
-
-  sanitizers:
-    name: Memory Safety (ASAN/UBSAN)
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
-      options: --user root
-
-    steps:
-      - name: Install git for checkout
-        run: |
-          apt-get update
-          apt-get install -y git ca-certificates curl
-
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/setup-container
-      - uses: ./.github/actions/setup-submodules
-      - uses: ./.github/actions/install-deps
-      - uses: ./.github/actions/setup-zig
-
-      - name: Run sanitizer build
-        run: zig build -Dsanitize=address -Doptimize=Debug
-
-      - name: Run tests with sanitizers
-        run: zig build test -Dsanitize=address -Doptimize=Debug
-
-  #############################
-  # BENCHMARK JOB
-  #############################
-
-  benchmark:
-    name: Zig Benchmarks
-    runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
-      options: --user root
-
-    steps:
-      - name: Install git for checkout
-        run: |
-          apt-get update
-          apt-get install -y git ca-certificates curl
-
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/setup-container
-      - uses: ./.github/actions/setup-submodules
-      - uses: ./.github/actions/install-deps
-      - uses: ./.github/actions/setup-zig
-
-      - name: Run benchmarks
-        run: zig build bench
-
-  #############################
-  # DOCKER IMAGE PUBLISH (GHCR)
-  #############################
-
-  docker:
-    name: Docker Build & Push
-    runs-on: ubuntu-latest
-    needs: [build, test]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/setup-submodules
-
-      - name: Log in to GHCR
-<<<<<<< HEAD
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-=======
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
->>>>>>> origin/main
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number }}-${{ github.sha }}
 
   #############################
   # DEBIAN PACKAGE BUILD
@@ -216,31 +57,23 @@ jobs:
   deb:
     name: Build .deb Package
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04
-      options: --user root
-
     needs: [build]
 
     steps:
-      - name: Install git for checkout
-        run: |
-          apt-get update
-          apt-get install -y git ca-certificates curl
-
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/setup-container
-      - uses: ./.github/actions/setup-submodules
-      - uses: ./.github/actions/install-deps
       - uses: ./.github/actions/setup-zig
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liburing-dev libssl-dev pkg-config build-essential
+
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
       - name: Build .deb
-<<<<<<< HEAD
         run: zig build deb
-=======
-        run: zig build deb || zig build -Doptimize=ReleaseFast
->>>>>>> origin/main
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
@@ -251,31 +84,4 @@ jobs:
             zig-out/bin/blitz
           if-no-files-found: warn
 
-  #############################
-  # DOCUMENTATION
-  #############################
-
-  docs:
-    name: Generate Documentation
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/setup-zig
-
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
-
-      - name: Build Docs
-        run: |
-          mkdir -p public
-          zig build docs || echo "Docs build not available"
-
-      - name: Upload documentation
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs
-          path: public
-          if-no-files-found: warn
 

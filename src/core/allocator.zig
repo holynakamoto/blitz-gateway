@@ -108,7 +108,7 @@ pub const BufferPool = struct {
         errdefer backing_allocator.free(read_buffers);
 
         var read_free = try std.ArrayList(usize).initCapacity(backing_allocator, pool_size);
-        errdefer read_free.deinit();
+        errdefer read_free.deinit(backing_allocator);
 
         var read_buffer_to_index = std.AutoHashMap(usize, usize).init(backing_allocator);
         errdefer read_buffer_to_index.deinit();

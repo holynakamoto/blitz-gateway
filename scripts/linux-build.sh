@@ -64,9 +64,8 @@ fi
 
 # ——— Pure apt SSHFS setup for mounts (Ubuntu 24.04+ reliable, no snaps) ———
 echo "Setting up mount support (apt SSHFS + non-interactive sudo)..."
-multipass exec "$VM_NAME" -- sudo sed -i 's/^Defaults\tenv_reset$/Defaults\tenv_reset,!tty/' /etc/sudoers || true
 multipass exec "$VM_NAME" -- sudo apt update -qq
-multipass exec "$VM_NAME" -- sudo apt install -y sshfs fuse
+multipass exec "$VM_NAME" -- sudo apt install -y sshfs fuse3
 echo "✓ SSHFS and sudo ready"
 
 # Quick verification

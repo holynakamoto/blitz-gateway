@@ -292,7 +292,7 @@ pub const HpackDecoder = struct {
         // Evict entries if needed
         while (self.getTableSize() + entry_size > self.max_table_size) {
             if (self.dynamic_table.items.len == 0) break;
-            const old_field = self.dynamic_table.pop();
+            const old_field = self.dynamic_table.pop() orelse break;
             // Free the old field's memory
             self.allocator.free(old_field.name);
             self.allocator.free(old_field.value);
@@ -529,7 +529,7 @@ pub const HpackEncoder = struct {
         // Evict entries if needed
         while (self.getTableSize() + entry_size > self.max_table_size) {
             if (self.dynamic_table.items.len == 0) break;
-            const old_field = self.dynamic_table.pop();
+            const old_field = self.dynamic_table.pop() orelse break;
             // Free the old field's memory
             self.allocator.free(old_field.name);
             self.allocator.free(old_field.value);

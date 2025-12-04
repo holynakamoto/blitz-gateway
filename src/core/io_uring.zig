@@ -171,7 +171,7 @@ fn closeConnection(
 
     // Close socket
     _ = c.close(fd);
-    std.log.debug("Closed connection {}: {s}", .{ fd, reason });
+    std.log.debug("Closed connection {any}: {s}", .{ fd, reason });
 }
 
 // Connection state stored in user_data
@@ -215,7 +215,7 @@ pub fn init() !void {
 
     // Use std.debug.print for immediate unbuffered output
     std.debug.print("io_uring initialized with {} SQ entries\n", .{SQ_RING_SIZE});
-    std.log.info("io_uring initialized with {} SQ entries", .{SQ_RING_SIZE});
+    std.log.info("io_uring initialized with {any} SQ entries", .{SQ_RING_SIZE});
 }
 
 pub fn deinit() void {
@@ -241,7 +241,7 @@ fn createServerSocket(port: u16) !c_int {
     // Use C wrapper to avoid Zig 0.12.0 union type issues
     const bind_result = blitz_bind(sockfd, &addr);
     if (bind_result < 0) {
-        std.log.err("bind() failed on port {}", .{port});
+        std.log.err("bind() failed on port {any}", .{port});
         _ = c.close(sockfd);
         return error.BindFailed;
     }
@@ -262,7 +262,7 @@ pub fn runEchoServer(port: u16) !void {
     std.debug.print("Echo server listening on port {}\n", .{port});
     std.debug.print("Target: 3M+ RPS\n", .{});
 
-    std.log.info("Echo server listening on port {}", .{port});
+    std.log.info("Echo server listening on port {any}", .{port});
     std.log.info("Target: 3M+ RPS", .{});
 
     // Initialize allocators at startup - zero allocations after this
@@ -421,7 +421,7 @@ pub fn runEchoServer(port: u16) !void {
                         if (tls_conn.state == .handshake) {
                             // Feed new data to TLS connection
                             tls_conn.feedData(read_buf[0..bytes_read]) catch |err| {
-                                std.log.warn("Failed to feed TLS data: {}", .{err});
+                                std.log.warn("Failed to feed TLS data: {any}", .{err});
                                 buffer_pool.releaseRead(read_buf);
                                 _ = c.close(client_fd);
                                 continue;
@@ -429,7 +429,7 @@ pub fn runEchoServer(port: u16) !void {
 
                             // Continue TLS handshake
                             _ = tls_conn.doHandshake() catch |err| {
-                                std.log.warn("TLS handshake failed: {}", .{err});
+                                std.log.warn("TLS handshake failed: {any}", .{err});
                                 buffer_pool.releaseRead(read_buf);
                                 _ = c.close(client_fd);
                                 continue;
@@ -447,7 +447,7 @@ pub fn runEchoServer(port: u16) !void {
                                     };
                                     // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
                                     const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf_tls) catch |err| {
-                                        std.log.warn("Failed to get TLS encrypted output: {}", .{err});
+                                        std.log.warn("Failed to get TLS encrypted output: {any}", .{err});
                                         buffer_pool.releaseWrite(write_buf_tls);
                                         buffer_pool.releaseRead(read_buf);
                                         _ = c.close(client_fd);
@@ -493,7 +493,7 @@ pub fn runEchoServer(port: u16) !void {
                                 };
                                 // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
                                 const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf_tls) catch |err| {
-                                    std.log.warn("Failed to get TLS encrypted output: {}", .{err});
+                                    std.log.warn("Failed to get TLS encrypted output: {any}", .{err});
                                     buffer_pool.releaseWrite(write_buf_tls);
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "getEncryptedOutput failed");
@@ -529,7 +529,7 @@ pub fn runEchoServer(port: u16) !void {
                             // This is encrypted application data (HTTP request)
                             // Feed encrypted data from io_uring to OpenSSL read_bio
                             tls_conn.feedData(read_buf[0..bytes_read]) catch |err| {
-                                std.log.warn("Failed to feed TLS application data: {}", .{err});
+                                std.log.warn("Failed to feed TLS application data: {any}", .{err});
                                 // CRITICAL: Clear read_bio before releasing buffer
                                 tls_conn.clearReadBio();
                                 buffer_pool.releaseRead(read_buf);
@@ -557,7 +557,7 @@ pub fn runEchoServer(port: u16) !void {
                                     _ = c.io_uring_submit(&ring);
                                     continue;
                                 } else {
-                                    std.log.warn("TLS read failed: {}", .{err});
+                                    std.log.warn("TLS read failed: {any}", .{err});
                                     // CRITICAL: Clear read_bio before releasing buffer
                                     tls_conn.clearReadBio();
                                     buffer_pool.releaseRead(read_buf);
@@ -571,7 +571,7 @@ pub fn runEchoServer(port: u16) !void {
                                 conn.protocol = tls_conn.protocol;
                             }
 
-                            std.log.debug("TLS decrypted {} bytes, protocol: {} (conn.protocol: {})", .{ tls_decrypted_len, tls_conn.protocol, conn.protocol });
+                            std.log.debug("TLS decrypted {any} bytes, protocol: {any} (conn.protocol: {any})", .{ tls_decrypted_len, tls_conn.protocol, conn.protocol });
 
                             // Initialize HTTP/2 connection if negotiated (check conn.protocol which persists across reads)
                             if (conn.protocol == .http2) {
@@ -597,7 +597,7 @@ pub fn runEchoServer(port: u16) !void {
 
                                     const server_settings = conn.http2_conn.?.getServerSettings();
                                     const settings_len = http2.frame.generateServerSettings(server_settings, write_buf_init) catch |err| {
-                                        std.log.warn("Failed to generate server SETTINGS: {}", .{err});
+                                        std.log.warn("Failed to generate server SETTINGS: {any}", .{err});
                                         buffer_pool.releaseWrite(write_buf_init);
                                         buffer_pool.releaseRead(read_buf);
                                         closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "SETTINGS generation failed");
@@ -606,7 +606,7 @@ pub fn runEchoServer(port: u16) !void {
 
                                     // Encrypt and send initial SETTINGS
                                     _ = tls_conn.write(write_buf_init[0..settings_len]) catch |err| {
-                                        std.log.warn("Failed to encrypt SETTINGS: {}", .{err});
+                                        std.log.warn("Failed to encrypt SETTINGS: {any}", .{err});
                                         buffer_pool.releaseWrite(write_buf_init);
                                         buffer_pool.releaseRead(read_buf);
                                         closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
@@ -615,7 +615,7 @@ pub fn runEchoServer(port: u16) !void {
 
                                     // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
                                     const encrypted_settings_len = tls_conn.getAllEncryptedOutput(write_buf_init) catch |err| {
-                                        std.log.warn("Failed to get encrypted SETTINGS: {}", .{err});
+                                        std.log.warn("Failed to get encrypted SETTINGS: {any}", .{err});
                                         buffer_pool.releaseWrite(write_buf_init);
                                         buffer_pool.releaseRead(read_buf);
                                         closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS output failed");
@@ -677,9 +677,9 @@ pub fn runEchoServer(port: u16) !void {
 
                                 // Handle HTTP/2 frames using decrypted data
                                 // Process all frames in the buffer (may contain multiple frames)
-                                std.log.info("Processing HTTP/2 frames, {} bytes available", .{tls_decrypted_len});
+                                std.log.info("Processing HTTP/2 frames, {any} bytes available", .{tls_decrypted_len});
                                 const frame_result = conn.http2_conn.?.processAllFrames(read_buf[0..tls_decrypted_len]) catch |err| {
-                                    std.log.err("HTTP/2 frame handling failed: {}", .{err});
+                                    std.log.err("HTTP/2 frame handling failed: {any}", .{err});
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "HTTP/2 frame error");
                                     continue;
@@ -687,7 +687,7 @@ pub fn runEchoServer(port: u16) !void {
                                 const response_action = frame_result.action;
                                 const needs_settings_ack = frame_result.needs_settings_ack;
                                 const frames_consumed = frame_result.bytes_consumed;
-                                std.log.info("Processed {} bytes of HTTP/2 frames, needs_settings_ack: {}", .{ frames_consumed, needs_settings_ack });
+                                std.log.info("Processed {any} bytes of HTTP/2 frames, needs_settings_ack: {any}", .{ frames_consumed, needs_settings_ack });
 
                                 // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response
                                 // This is required by HTTP/2 spec - clients will hang if ACK comes after response
@@ -708,7 +708,7 @@ pub fn runEchoServer(port: u16) !void {
                                 if (needs_settings_ack) {
                                     std.log.info("Sending SETTINGS ACK before response", .{});
                                     const ack_len = http2.frame.generateSettingsAck(write_buf[offset..]) catch |err| {
-                                        std.log.warn("Failed to generate SETTINGS ACK: {}", .{err});
+                                        std.log.warn("Failed to generate SETTINGS ACK: {any}", .{err});
                                         buffer_pool.releaseWrite(write_buf);
                                         buffer_pool.releaseRead(read_buf);
                                         continue;
@@ -752,7 +752,7 @@ pub fn runEchoServer(port: u16) !void {
                                         // Send server SETTINGS frame (initial settings)
                                         const server_settings = conn.http2_conn.?.getServerSettings();
                                         const settings_len = http2.frame.generateServerSettings(server_settings, write_buf[offset..]) catch |err| {
-                                            std.log.warn("Failed to generate server SETTINGS: {}", .{err});
+                                            std.log.warn("Failed to generate server SETTINGS: {any}", .{err});
                                             buffer_pool.releaseWrite(write_buf);
                                             buffer_pool.releaseRead(read_buf);
                                             continue;
@@ -763,7 +763,7 @@ pub fn runEchoServer(port: u16) !void {
                                         // This should not happen here since we handle it above, but keep for safety
                                         if (!needs_settings_ack) {
                                             const ack_len = http2.frame.generateSettingsAck(write_buf[offset..]) catch |err| {
-                                                std.log.warn("Failed to generate SETTINGS ACK: {}", .{err});
+                                                std.log.warn("Failed to generate SETTINGS ACK: {any}", .{err});
                                                 buffer_pool.releaseWrite(write_buf);
                                                 buffer_pool.releaseRead(read_buf);
                                                 continue;
@@ -773,7 +773,7 @@ pub fn runEchoServer(port: u16) !void {
                                     },
                                     .send_ping_ack => |ping_data| {
                                         const ping_len = http2.frame.generatePingAck(ping_data, write_buf[offset..]) catch |err| {
-                                            std.log.warn("Failed to generate PING ACK: {}", .{err});
+                                            std.log.warn("Failed to generate PING ACK: {any}", .{err});
                                             // Use deinit to properly free owned ping_data
                                             response_action.deinit(backing_allocator);
                                             buffer_pool.releaseWrite(write_buf);
@@ -785,9 +785,9 @@ pub fn runEchoServer(port: u16) !void {
                                         response_action.deinit(backing_allocator);
                                     },
                                     .send_response => |resp| {
-                                        std.log.info("Generating HTTP/2 response for stream {}, body_len={}", .{ resp.stream_id, resp.body.len });
+                                        std.log.info("Generating HTTP/2 response for stream {any}, body_len={any}", .{ resp.stream_id, resp.body.len });
                                         const resp_len = conn.http2_conn.?.generateResponse(resp.stream_id, resp.status, resp.headers, resp.body, write_buf[offset..]) catch |err| {
-                                            std.log.warn("Failed to generate HTTP/2 response: {}", .{err});
+                                            std.log.warn("Failed to generate HTTP/2 response: {any}", .{err});
                                             // Use deinit to properly free all owned resources (body, headers slice, and allocated header values)
                                             response_action.deinit(backing_allocator);
                                             buffer_pool.releaseWrite(write_buf);
@@ -795,13 +795,13 @@ pub fn runEchoServer(port: u16) !void {
                                             continue;
                                         };
                                         offset += resp_len;
-                                        std.log.info("Generated HTTP/2 response, {} bytes", .{resp_len});
+                                        std.log.info("Generated HTTP/2 response, {any} bytes", .{resp_len});
                                         // Use deinit to properly free all owned resources (body, headers slice, and allocated header values)
                                         response_action.deinit(backing_allocator);
                                     },
                                     .send_goaway => |last_stream_id| {
                                         const goaway_len = http2.frame.generateGoaway(@as(u31, @intCast(last_stream_id)), @intFromEnum(http2.frame.ErrorCode.no_error), write_buf[offset..]) catch |err| {
-                                            std.log.warn("Failed to generate GOAWAY: {}", .{err});
+                                            std.log.warn("Failed to generate GOAWAY: {any}", .{err});
                                             buffer_pool.releaseWrite(write_buf);
                                             buffer_pool.releaseRead(read_buf);
                                             continue;
@@ -823,7 +823,7 @@ pub fn runEchoServer(port: u16) !void {
 
                                 // CRITICAL: If response_len is 0, we have nothing to send - this is an error
                                 if (response_len == 0) {
-                                    std.log.warn("HTTP/2 response length is 0! needs_settings_ack={}, response_action={}", .{ needs_settings_ack, response_action });
+                                    std.log.warn("HTTP/2 response length is 0! needs_settings_ack={any}, response_action={any}", .{ needs_settings_ack, response_action });
                                     buffer_pool.releaseWrite(write_buf);
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "HTTP/2 response length is 0");
@@ -839,20 +839,20 @@ pub fn runEchoServer(port: u16) !void {
                                 // Verify write_bio is empty before encrypting - retry if needed
                                 var clear_attempts: u32 = 0;
                                 while (tls_conn.hasEncryptedOutput() and clear_attempts < 3) {
-                                    std.log.warn("Warning: write_bio still has data after clearEncryptedOutput() (attempt {})!", .{clear_attempts + 1});
+                                    std.log.warn("Warning: write_bio still has data after clearEncryptedOutput() (attempt {any})!", .{clear_attempts + 1});
                                     tls_conn.clearEncryptedOutput();
                                     clear_attempts += 1;
                                 }
 
                                 // Final check - if still not empty, log error but continue (might be a false positive)
                                 if (tls_conn.hasEncryptedOutput()) {
-                                    std.log.err("ERROR: write_bio still has data after {} clear attempts! This may cause 'bad record mac' errors.", .{clear_attempts + 1});
+                                    std.log.err("ERROR: write_bio still has data after {any} clear attempts! This may cause 'bad record mac' errors.", .{clear_attempts + 1});
                                 }
 
-                                std.log.info("Encrypting HTTP/2 response, {} bytes (ACK: {}, main: {})", .{ response_len, needs_settings_ack, response_action != .none });
+                                std.log.info("Encrypting HTTP/2 response, {any} bytes (ACK: {any}, main: {any})", .{ response_len, needs_settings_ack, response_action != .none });
 
                                 _ = tls_conn.write(write_buf[0..response_len]) catch |err| {
-                                    std.log.warn("Failed to encrypt HTTP/2 response: {}", .{err});
+                                    std.log.warn("Failed to encrypt HTTP/2 response: {any}", .{err});
                                     buffer_pool.releaseWrite(write_buf);
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
@@ -861,14 +861,14 @@ pub fn runEchoServer(port: u16) !void {
 
                                 // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
                                 const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf) catch |err| {
-                                    std.log.warn("Failed to get encrypted HTTP/2 output: {}", .{err});
+                                    std.log.warn("Failed to get encrypted HTTP/2 output: {any}", .{err});
                                     buffer_pool.releaseWrite(write_buf);
                                     buffer_pool.releaseRead(read_buf);
                                     closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS output failed");
                                     continue;
                                 };
 
-                                std.log.info("Encrypted HTTP/2 response, {} bytes (plaintext: {}), submitting write", .{ encrypted_len, response_len });
+                                std.log.info("Encrypted HTTP/2 response, {any} bytes (plaintext: {any}), submitting write", .{ encrypted_len, response_len });
 
                                 // CRITICAL: If encrypted_len is 0, TLS write produced no output - this is an error
                                 if (encrypted_len == 0) {
@@ -938,7 +938,7 @@ pub fn runEchoServer(port: u16) !void {
 
                             // Check connection limits
                             if (conn.request_count > Connection.MAX_REQUESTS_PER_CONN) {
-                                std.log.warn("Connection {} exceeded max requests ({}), closing", .{ client_fd, Connection.MAX_REQUESTS_PER_CONN });
+                                std.log.warn("Connection {any} exceeded max requests ({any}), closing", .{ client_fd, Connection.MAX_REQUESTS_PER_CONN });
                                 buffer_pool.releaseRead(read_buf);
                                 _ = c.close(client_fd);
                                 _ = connections.remove(client_fd);
@@ -950,13 +950,13 @@ pub fn runEchoServer(port: u16) !void {
                             // Fall through to shared HTTP/1.1 handler below
                         } else if (tls_conn.state == .tls_error or tls_conn.state == .closed) {
                             // TLS error or closed state
-                            std.log.warn("TLS error/closed state: {}", .{tls_conn.state});
+                            std.log.warn("TLS error/closed state: {any}", .{tls_conn.state});
                             buffer_pool.releaseRead(read_buf);
                             _ = c.close(client_fd);
                             continue;
                         } else {
                             // Unknown TLS state
-                            std.log.warn("TLS unknown state: {}", .{tls_conn.state});
+                            std.log.warn("TLS unknown state: {any}", .{tls_conn.state});
                             buffer_pool.releaseRead(read_buf);
                             _ = c.close(client_fd);
                             continue;
@@ -978,7 +978,7 @@ pub fn runEchoServer(port: u16) !void {
 
                     // Check connection limits
                     if (conn.request_count > Connection.MAX_REQUESTS_PER_CONN) {
-                        std.log.warn("Connection {} exceeded max requests ({}), closing", .{ client_fd, Connection.MAX_REQUESTS_PER_CONN });
+                        std.log.warn("Connection {any} exceeded max requests ({any}), closing", .{ client_fd, Connection.MAX_REQUESTS_PER_CONN });
                         buffer_pool.releaseRead(read_buf);
                         _ = c.close(client_fd);
                         _ = connections.remove(client_fd);
@@ -1028,14 +1028,14 @@ pub fn runEchoServer(port: u16) !void {
                             conn.read_buffer = null;
 
                             _ = tls_conn.write(write_buf[0..response.len]) catch |err| {
-                                std.log.warn("TLS write failed: {}", .{err});
+                                std.log.warn("TLS write failed: {any}", .{err});
                                 buffer_pool.releaseWrite(write_buf);
                                 closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
                                 continue;
                             };
                             // CRITICAL: Must read all encrypted output to prevent incomplete TLS records
                             const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf) catch |err| {
-                                std.log.warn("Failed to get TLS encrypted output: {}", .{err});
+                                std.log.warn("Failed to get TLS encrypted output: {any}", .{err});
                                 buffer_pool.releaseWrite(write_buf);
                                 closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "getEncryptedOutput failed");
                                 continue;
@@ -1138,7 +1138,7 @@ pub fn runEchoServer(port: u16) !void {
 
                         // Encrypt response (puts encrypted data in write_bio)
                         _ = tls_conn.write(write_buf[0..response_len]) catch |err| {
-                            std.log.warn("TLS write failed: {}", .{err});
+                            std.log.warn("TLS write failed: {any}", .{err});
                             buffer_pool.releaseWrite(write_buf);
                             closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "TLS write failed");
                             continue;
@@ -1147,7 +1147,7 @@ pub fn runEchoServer(port: u16) !void {
                         // Get ALL encrypted output from write_bio
                         // CRITICAL: Must read all data to prevent incomplete TLS records and "bad record mac" errors
                         const encrypted_len = tls_conn.getAllEncryptedOutput(write_buf) catch |err| {
-                            std.log.warn("Failed to get TLS encrypted output: {}", .{err});
+                            std.log.warn("Failed to get TLS encrypted output: {any}", .{err});
                             buffer_pool.releaseWrite(write_buf);
                             closeConnection(client_fd, &connections, &buffer_pool, backing_allocator, "getEncryptedOutput failed");
                             continue;
@@ -1252,7 +1252,7 @@ pub fn runEchoServer(port: u16) !void {
         const now: i64 = @intCast(std.time.nanoTimestamp());
         if (now - last_stats_time >= std.time.ns_per_s) {
             const rps = requests_this_second;
-            std.log.info("Connections: {}, Total Requests: {}, RPS: {}", .{ connection_count, total_requests, rps });
+            std.log.info("Connections: {any}, Total Requests: {any}, RPS: {any}", .{ connection_count, total_requests, rps });
             requests_this_second = 0;
             last_stats_time = now;
 
@@ -1265,7 +1265,7 @@ pub fn runEchoServer(port: u16) !void {
 
                 // Close idle connections
                 if (idle_time > Connection.IDLE_TIMEOUT_NS) {
-                    std.log.debug("Closing idle connection {} (idle: {}s)", .{ entry.key_ptr.*, @divTrunc(idle_time, std.time.ns_per_s) });
+                    std.log.debug("Closing idle connection {any} (idle: {any}s)", .{ entry.key_ptr.*, @divTrunc(idle_time, std.time.ns_per_s) });
                     if (conn.read_buffer) |buf| {
                         buffer_pool.releaseRead(buf);
                     }
@@ -1286,7 +1286,7 @@ pub fn runEchoServer(port: u16) !void {
                 }
                 // Close expired connections (max age)
                 else if (age > Connection.MAX_CONNECTION_AGE_NS) {
-                    std.log.debug("Closing expired connection {} (age: {}s)", .{ entry.key_ptr.*, @divTrunc(age, std.time.ns_per_s) });
+                    std.log.debug("Closing expired connection {any} (age: {any}s)", .{ entry.key_ptr.*, @divTrunc(age, std.time.ns_per_s) });
                     if (conn.read_buffer) |buf| {
                         buffer_pool.releaseRead(buf);
                     }

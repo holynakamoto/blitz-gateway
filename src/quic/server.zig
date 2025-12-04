@@ -178,7 +178,7 @@ pub const QuicServer = struct {
         }
 
         const parsed = packet.Packet.parse(data, 8) catch |err| {
-            std.log.debug("Failed to parse QUIC packet: {}", .{err});
+            std.log.debug("Failed to parse QUIC packet: {any}", .{err});
             return;
         };
 

@@ -341,7 +341,7 @@ pub fn main() !void {
 
     // Create UDP socket
     const sockfd = std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, 0) catch |err| {
-        std.log.err("Failed to create socket: {}", .{err});
+        std.log.err("Failed to create socket: {any}", .{err});
         return err;
     };
     defer std.posix.close(sockfd);
@@ -349,7 +349,7 @@ pub fn main() !void {
     // Bind to port 8443
     const addr = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, 8443);
     std.posix.bind(sockfd, &addr.any, addr.getOsSockLen()) catch |err| {
-        std.log.err("Failed to bind to port 8443: {}", .{err});
+        std.log.err("Failed to bind to port 8443: {any}", .{err});
         return err;
     };
 
@@ -398,7 +398,7 @@ pub fn main() !void {
             if (err == error.WouldBlock or err == error.TimedOut) {
                 continue;
             }
-            std.log.warn("recvfrom error: {}", .{err});
+            std.log.warn("recvfrom error: {any}", .{err});
             continue;
         };
 
@@ -435,7 +435,7 @@ pub fn main() !void {
         var dcid_key: [20]u8 = [_]u8{0} ** 20;
         @memcpy(dcid_key[0..dcid.len], dcid);
         const conn_state = connections.getOrPut(dcid_key) catch |err| {
-            std.log.err("[QUIC] Connection tracking error: {}", .{err});
+            std.log.err("[QUIC] Connection tracking error: {any}", .{err});
             continue;
         };
 
@@ -455,7 +455,7 @@ pub fn main() !void {
 
         // Process QUIC packet
         const response_len = handleQuicPacket(allocator, buf[0..bytes], &response_buf, &conn_state.value_ptr, &session_cache, &token_cache) catch |err| {
-            std.log.err("[QUIC] Packet handling error: {}", .{err});
+            std.log.err("[QUIC] Packet handling error: {any}", .{err});
 
             // On error, clean up connection state
             if (conn_state.value_ptr.state == .timed_out) {
@@ -467,7 +467,7 @@ pub fn main() !void {
         if (response_len > 0) {
             std.debug.print("[SEND] Sending {} bytes response\n", .{response_len});
             _ = std.posix.sendto(sockfd, response_buf[0..response_len], 0, &src_addr, src_len) catch |err| {
-                std.log.warn("sendto error: {}", .{err});
+                std.log.warn("sendto error: {any}", .{err});
             };
         }
 
@@ -480,7 +480,7 @@ pub fn main() !void {
             var keys_to_remove = std.ArrayList([20]u8).init(allocator);
             defer keys_to_remove.deinit();
             keys_to_remove.ensureTotalCapacity(64) catch |err| {
-                std.log.warn("[CLEANUP] Failed to pre-allocate capacity: {}", .{err});
+                std.log.warn("[CLEANUP] Failed to pre-allocate capacity: {any}", .{err});
             };
 
             // Collect keys of timed-out connections
@@ -488,7 +488,7 @@ pub fn main() !void {
             while (it.next()) |entry| {
                 if (entry.value_ptr.checkTimeout()) {
                     keys_to_remove.append(entry.key_ptr.*) catch |err| {
-                        std.log.warn("[CLEANUP] Failed to collect key for removal: {}", .{err});
+                        std.log.warn("[CLEANUP] Failed to collect key for removal: {any}", .{err});
                         continue;
                     };
                 }
@@ -629,14 +629,14 @@ fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
     // Derive Initial secrets from DCID
     std.debug.print("[CRYPTO] Deriving Initial secrets from DCID...\n", .{});
     const secrets = crypto.deriveInitialSecrets(dcid) catch |err| {
-        std.log.err("[CRYPTO] Failed to derive secrets: {}", .{err});
+        std.log.err("[CRYPTO] Failed to derive secrets: {any}", .{err});
         return 0;
     };
     std.debug.print("[CRYPTO] ✅ Initial secrets derived\n", .{});
 
     // Find packet number offset
     const pn_offset = crypto.findPacketNumberOffset(data) catch |err| {
-        std.log.err("[CRYPTO] Failed to find PN offset: {}", .{err});
+        std.log.err("[CRYPTO] Failed to find PN offset: {any}", .{err});
         return 0;
     };
     std.debug.print("[CRYPTO] Packet number at offset {}\n", .{pn_offset});
@@ -647,7 +647,7 @@ fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
 
     // Remove header protection
     const pn = crypto.removeHeaderProtection(packet_copy[0..data.len], &secrets.client_hp, pn_offset) catch |err| {
-        std.log.err("[CRYPTO] Failed to remove HP: {}", .{err});
+        std.log.err("[CRYPTO] Failed to remove HP: {any}", .{err});
         return 0;
     };
     std.debug.print("[CRYPTO] Packet number: {}\n", .{pn});
@@ -739,7 +739,7 @@ fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
         packet_copy[0..header_len],
         &plaintext,
     ) catch |err| {
-        std.log.err("[CRYPTO] Decryption failed: {}", .{err});
+        std.log.err("[CRYPTO] Decryption failed: {any}", .{err});
         return 0;
     };
 
@@ -759,7 +759,7 @@ fn handleInitialPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
             std.debug.print("[FRAME] Found CRYPTO frame at offset {}\n", .{offset});
 
             const crypto_frame = frames.CryptoFrame.parse(plaintext[offset..decrypted_len]) catch |err| {
-                std.log.err("[FRAME] Failed to parse CRYPTO: {}", .{err});
+                std.log.err("[FRAME] Failed to parse CRYPTO: {any}", .{err});
                 return 0;
             };
 
@@ -838,7 +838,7 @@ fn processTlsHandshake(
     const rc = c.ptls_handle_message(conn_state.ptls.?, &out_initial, &out_handshake, &out_1rtt, &epoch_offsets, 0, input.base, input.len, null);
 
     if (rc != 0 and rc != c.PTLS_ERROR_IN_PROGRESS) {
-        std.log.err("picotls error {}", .{rc});
+        std.log.err("picotls error {any}", .{rc});
         return 0;
     }
 
@@ -961,14 +961,14 @@ fn buildHttp3Response(
         out[0..header_end],
         out[pkt_offset..],
     ) catch |err| {
-        std.log.err("[HTTP/3] Encryption failed: {}", .{err});
+        std.log.err("[HTTP/3] Encryption failed: {any}", .{err});
         return 0;
     };
     pkt_offset += ciphertext_len;
 
     // Apply header protection
     crypto.applyHeaderProtection(out[0..pkt_offset], &rtt_keys.server_hp, header_end - 2, 2) catch |err| {
-        std.log.err("[HTTP/3] Header protection failed: {}", .{err});
+        std.log.err("[HTTP/3] Header protection failed: {any}", .{err});
         return 0;
     };
 
@@ -1051,7 +1051,7 @@ fn buildHandshakeResponse(
 
     // Write CRYPTO frame
     const crypto_len = frames.CryptoFrame.generate(conn_state.crypto_offset_handshake, tls_data, plaintext[pt_offset..]) catch |err| {
-        std.log.err("[QUIC] Failed to generate CRYPTO frame: {}", .{err});
+        std.log.err("[QUIC] Failed to generate CRYPTO frame: {any}", .{err});
         return 0;
     };
     pt_offset += crypto_len;
@@ -1096,7 +1096,7 @@ fn buildHandshakeResponse(
         out[0..header_end],
         out[pkt_offset..],
     ) catch |err| {
-        std.log.err("[QUIC] Encryption failed: {}", .{err});
+        std.log.err("[QUIC] Encryption failed: {any}", .{err});
         return 0;
     };
     pkt_offset += ciphertext_len;
@@ -1108,7 +1108,7 @@ fn buildHandshakeResponse(
 
     // Apply header protection
     crypto.applyHeaderProtection(out[0..pkt_offset], &secrets.server_hp, pn_offset, 4) catch |err| {
-        std.log.err("[QUIC] Header protection failed: {}", .{err});
+        std.log.err("[QUIC] Header protection failed: {any}", .{err});
         return 0;
     };
 
@@ -1205,7 +1205,7 @@ fn buildAckOnlyInitialPacket(
         out[0..header_end],
         out[pkt_offset..],
     ) catch |err| {
-        std.log.err("[QUIC] ACK packet encryption failed: {}", .{err});
+        std.log.err("[QUIC] ACK packet encryption failed: {any}", .{err});
         return 0;
     };
     pkt_offset += ciphertext_len;
@@ -1217,7 +1217,7 @@ fn buildAckOnlyInitialPacket(
 
     // Apply header protection
     crypto.applyHeaderProtection(out[0..pkt_offset], &secrets.server_hp, pn_offset, 4) catch |err| {
-        std.log.err("[QUIC] ACK packet header protection failed: {}", .{err});
+        std.log.err("[QUIC] ACK packet header protection failed: {any}", .{err});
         return 0;
     };
 
@@ -1240,7 +1240,7 @@ fn buildInitialResponse(
 
     // Write CRYPTO frame
     const crypto_len = frames.CryptoFrame.generate(0, tls_data, plaintext[pt_offset..]) catch |err| {
-        std.log.err("[QUIC] Failed to generate CRYPTO frame: {}", .{err});
+        std.log.err("[QUIC] Failed to generate CRYPTO frame: {any}", .{err});
         return 0;
     };
     pt_offset += crypto_len;
@@ -1313,7 +1313,7 @@ fn buildInitialResponse(
         out[0..header_end],
         out[pkt_offset..],
     ) catch |err| {
-        std.log.err("[QUIC] Encryption failed: {}", .{err});
+        std.log.err("[QUIC] Encryption failed: {any}", .{err});
         return 0;
     };
     pkt_offset += ciphertext_len;
@@ -1322,7 +1322,7 @@ fn buildInitialResponse(
 
     // Apply header protection
     crypto.applyHeaderProtection(out[0..pkt_offset], &secrets.server_hp, pn_offset, 4) catch |err| {
-        std.log.err("[QUIC] Header protection failed: {}", .{err});
+        std.log.err("[QUIC] Header protection failed: {any}", .{err});
         return 0;
     };
 
@@ -1374,7 +1374,7 @@ fn handleZeroRttPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
 
             // Initialize early data context
             conn_state.early_data = allocator.create(tls_session.EarlyDataContext) catch |err| {
-                std.log.err("[0-RTT] Failed to create early data context: {}", .{err});
+                std.log.err("[0-RTT] Failed to create early data context: {any}", .{err});
                 return 0;
             };
             conn_state.early_data.?.* = tls_session.EarlyDataContext.init(allocator, ticket.max_early_data_size);
@@ -1382,7 +1382,7 @@ fn handleZeroRttPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
             // Derive 0-RTT secrets from session ticket
             // This is a simplified version - in practice, you'd use HKDF with the PSK
             const zero_rtt_secrets = crypto.deriveZeroRttSecrets(dcid, ticket.psk_identity) catch |err| {
-                std.log.err("[0-RTT] Failed to derive 0-RTT secrets: {}", .{err});
+                std.log.err("[0-RTT] Failed to derive 0-RTT secrets: {any}", .{err});
                 return 0;
             };
 
@@ -1392,7 +1392,7 @@ fn handleZeroRttPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
 
             // Decrypt 0-RTT packet payload
             const pn_offset = crypto.findPacketNumberOffset(data) catch |err| {
-                std.log.err("[0-RTT] Failed to find PN offset: {}", .{err});
+                std.log.err("[0-RTT] Failed to find PN offset: {any}", .{err});
                 return 0;
             };
 
@@ -1403,7 +1403,7 @@ fn handleZeroRttPacket(allocator: std.mem.Allocator, data: []u8, response: []u8,
                 &zero_rtt_secrets,
                 &decrypted_data,
             ) catch |err| {
-                std.log.err("[0-RTT] Failed to decrypt 0-RTT packet: {}", .{err});
+                std.log.err("[0-RTT] Failed to decrypt 0-RTT packet: {any}", .{err});
                 return 0;
             };
 
@@ -1610,7 +1610,7 @@ fn buildZeroRttResponse(_: std.mem.Allocator, dcid: []const u8, scid: []const u8
     // Write CRYPTO frame containing "0-RTT ACCEPTED" payload
     const payload = "0-RTT ACCEPTED";
     const crypto_len = frames.CryptoFrame.generate(conn_state.crypto_offset_handshake, payload, plaintext[pt_offset..]) catch |err| {
-        std.log.err("[0-RTT] Failed to generate CRYPTO frame: {}", .{err});
+        std.log.err("[0-RTT] Failed to generate CRYPTO frame: {any}", .{err});
         return 0;
     };
     pt_offset += crypto_len;
@@ -1684,14 +1684,14 @@ fn buildZeroRttResponse(_: std.mem.Allocator, dcid: []const u8, scid: []const u8
         response[0..header_end],
         response[pkt_offset..],
     ) catch |err| {
-        std.log.err("[0-RTT] Encryption failed: {}", .{err});
+        std.log.err("[0-RTT] Encryption failed: {any}", .{err});
         return 0;
     };
     pkt_offset += ciphertext_len;
 
     // Apply header protection
     crypto.applyHeaderProtection(response[0..pkt_offset], &secrets.server_hp, pn_offset, 4) catch |err| {
-        std.log.err("[0-RTT] Header protection failed: {}", .{err});
+        std.log.err("[0-RTT] Header protection failed: {any}", .{err});
         return 0;
     };
 

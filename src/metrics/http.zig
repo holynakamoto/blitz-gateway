@@ -84,7 +84,7 @@ pub const MetricsHttpServer = struct {
         defer server.deinit();
 
         server.listen(address) catch |err| {
-            std.log.err("Failed to start metrics HTTP server on port {d}: {}", .{ self.port, err });
+            std.log.err("Failed to start metrics HTTP server on port {d}: {any}", .{ self.port, err });
             return;
         };
 
@@ -96,13 +96,13 @@ pub const MetricsHttpServer = struct {
                 if (!self.running.load(.acquire)) {
                     break;
                 }
-                std.log.err("Failed to accept connection: {}", .{err});
+                std.log.err("Failed to accept connection: {any}", .{err});
                 continue;
             };
 
             // Handle connection in a separate thread
             const handler_thread = std.Thread.spawn(.{}, handleConnectionWrapper, .{ self, connection }) catch |err| {
-                std.log.err("Failed to spawn connection handler: {}", .{err});
+                std.log.err("Failed to spawn connection handler: {any}", .{err});
                 connection.stream.close();
                 continue;
             };
@@ -112,7 +112,7 @@ pub const MetricsHttpServer = struct {
                 self.threads_mutex.lock();
                 defer self.threads_mutex.unlock();
                 self.active_threads.append(handler_thread) catch |err| {
-                    std.log.err("Failed to track handler thread: {}", .{err});
+                    std.log.err("Failed to track handler thread: {any}", .{err});
                     handler_thread.detach(); // Fallback to detach if we can't track
                 };
             }
@@ -143,7 +143,7 @@ pub const MetricsHttpServer = struct {
         // Read request (simple HTTP/1.0 parsing)
         var buffer: [4096]u8 = undefined;
         const bytes_read = connection.stream.read(&buffer) catch |err| {
-            std.log.err("Failed to read HTTP request: {}", .{err});
+            std.log.err("Failed to read HTTP request: {any}", .{err});
             return;
         };
 
@@ -158,12 +158,12 @@ pub const MetricsHttpServer = struct {
         if (std.mem.startsWith(u8, request, "GET /metrics")) {
             // Serve metrics
             self.serveMetrics(connection.stream) catch |err| {
-                std.log.err("Failed to serve metrics: {}", .{err});
+                std.log.err("Failed to serve metrics: {any}", .{err});
             };
         } else {
             // Serve simple HTML page with links
             self.serveIndexPage(connection.stream) catch |err| {
-                std.log.err("Failed to serve index page: {}", .{err});
+                std.log.err("Failed to serve index page: {any}", .{err});
             };
         }
     }

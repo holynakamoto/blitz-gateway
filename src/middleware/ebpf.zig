@@ -190,7 +190,7 @@ pub const EbpfManager = struct {
         const kernel_prog_id: u32 = 12345; // TODO: Get actual prog_id from kernel after attach
         self.prog_id = kernel_prog_id;
 
-        std.log.info("XDP program attached to interface {s} (ifindex: {}, prog_id: {})", .{ interface_name, self.ifindex, self.prog_id });
+        std.log.info("XDP program attached to interface {s} (ifindex: {any}, prog_id: {any})", .{ interface_name, self.ifindex, self.prog_id });
     }
 
     /// Detach XDP program
@@ -206,7 +206,7 @@ pub const EbpfManager = struct {
             const detach_success = true; // TODO: Replace with actual detach result
 
             if (detach_success) {
-                std.log.info("XDP program detached from interface (ifindex: {}, prog_id: {})", .{ self.ifindex, self.prog_id });
+                std.log.info("XDP program detached from interface (ifindex: {any}, prog_id: {any})", .{ self.ifindex, self.prog_id });
 
                 // Clear prog_id atomically after successful detach
                 self.prog_id = 0;
@@ -218,7 +218,7 @@ pub const EbpfManager = struct {
     pub fn updateConfig(self: *EbpfManager, config: EbpfRateLimitConfig) !void {
         const key: u32 = 0;
         try self.updateMapElement(self.config_map_fd, &key, &config);
-        std.log.info("Rate limiting config updated: global={} RPS, per_ip={} RPS", .{ config.global_rps, config.per_ip_rps });
+        std.log.info("Rate limiting config updated: global={any} RPS, per_ip={any} RPS", .{ config.global_rps, config.per_ip_rps });
     }
 
     /// Get rate limiting statistics

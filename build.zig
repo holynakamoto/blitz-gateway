@@ -1,8 +1,40 @@
 const std = @import("std");
 
+// Helper function to add all C source files to an executable
+fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget, use_openssl: bool) void {
+    if (target.result.os.tag != .linux) return;
+
+    // Add core C files
+    exe.addCSourceFile(.{
+        .file = b.path("src/core/bind_wrapper.c"),
+        .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+    });
+
+    // Only add OpenSSL wrapper if explicitly requested
+    if (use_openssl) {
+        exe.addCSourceFile(.{
+            .file = b.path("src/tls/openssl_wrapper.c"),
+            .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+        });
+    }
+
+    // Help Zig find the right architecture-specific headers
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include/aarch64-linux-gnu" });
+}
+
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    // Explicitly set default target to Linux aarch64 (required for cross-compilation)
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_arch = .aarch64,
+            .os_tag = .linux,
+            .abi = .gnu,
+        },
+    });
     _ = b.standardOptimizeOption(.{}); // Optimize options are used via command line
+
+    // Build option to use OpenSSL (default: false, use picotls)
+    const use_openssl = b.option(bool, "use-openssl", "Use OpenSSL instead of picotls (default: false)") orelse false;
 
     const root_module = b.addModule("root", .{
         .root_source_file = b.path("src/main.zig"),
@@ -12,7 +44,6 @@ pub fn build(b: *std.Build) void {
         .name = "blitz",
         .root_module = root_module,
     });
-    // Target and optimize are set via standardTargetOptions/standardOptimizeOption above
 
     // Link libc (required for C interop)
     exe.linkLibC();
@@ -20,44 +51,30 @@ pub fn build(b: *std.Build) void {
     // Platform-specific configuration
     if (target.result.os.tag == .linux) {
         // Add architecture-specific library paths for Ubuntu/Debian
-        // Docker containers use /usr/lib/x86_64-linux-gnu/
+        // Support both x86_64 and aarch64 architectures
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/aarch64-linux-gnu" });
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" }); // For picotls
         exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
+        exe.addLibraryPath(.{ .cwd_relative = "/lib/aarch64-linux-gnu" });
         exe.addLibraryPath(.{ .cwd_relative = "/lib" });
 
-        // Link liburing
+        // Link picotls libraries (built and installed by linux-build.sh)
+        exe.linkSystemLibrary("picotls");
+        exe.linkSystemLibrary("picotls-minicrypto");
         exe.linkSystemLibrary("uring");
 
-        // Link OpenSSL for TLS 1.3
-        exe.linkSystemLibrary("ssl");
-        exe.linkSystemLibrary("crypto");
+        // Add library and include paths for picotls
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+        exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
 
-        // Add C wrappers with proper flags
-        exe.addCSourceFile(.{
-            .file = b.path("src/core/bind_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
-
-        exe.addCSourceFile(.{
-            .file = b.path("src/tls/openssl_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
+        // Add all C source files
+        addCSourceFiles(b, exe, target, use_openssl);
 
         // Add include paths for headers
         exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         exe.addIncludePath(.{ .cwd_relative = "src" });
-
-        // Add picotls include paths (needed for openssl_wrapper.c)
-        exe.addIncludePath(b.path("deps/picotls/include"));
     }
 
     // Install the binary
@@ -168,12 +185,29 @@ pub fn build(b: *std.Build) void {
     });
     quic_handshake_server_exe.linkLibC();
     if (target.result.os.tag == .linux) {
-        quic_handshake_server_exe.linkSystemLibrary("ssl");
-        quic_handshake_server_exe.linkSystemLibrary("crypto");
+        // Add architecture-specific library paths
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/aarch64-linux-gnu" });
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" }); // For picotls
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/lib/aarch64-linux-gnu" });
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/lib" });
+
+        // Link picotls libraries (built and installed by linux-build.sh)
+        quic_handshake_server_exe.linkSystemLibrary("picotls");
+        quic_handshake_server_exe.linkSystemLibrary("picotls-minicrypto");
         quic_handshake_server_exe.linkSystemLibrary("uring");
+
+        // Add library and include paths for picotls
+        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+
         quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "src" });
-        quic_handshake_server_exe.addIncludePath(b.path("deps/picotls/include"));
+
+        // Add all C source files (required for Zig 0.15.2+)
+        addCSourceFiles(b, quic_handshake_server_exe, target, use_openssl);
     }
     b.installArtifact(quic_handshake_server_exe);
 

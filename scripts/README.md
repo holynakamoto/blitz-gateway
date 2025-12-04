@@ -88,3 +88,96 @@ ulimit -n 1048576
 
 See `bench-box-setup.sh` for complete configuration.
 
+## linux-build.sh
+
+Test Linux builds locally using Multipass (Ubuntu VM) without waiting for CI.
+
+### Quick Start
+
+```bash
+# First time setup (creates VM and installs Zig automatically)
+./scripts/linux-build.sh build test
+
+# Regular usage - test release build
+./scripts/linux-build.sh build -Drelease-safe
+
+# Clean and recreate VM (if something goes wrong)
+./scripts/linux-build.sh --clean build test
+
+# Run any zig command
+./scripts/linux-build.sh build
+./scripts/linux-build.sh test
+./scripts/linux-build.sh build-exe src/main.zig
+```
+
+### What It Does
+
+1. **Creates Multipass VM** (if it doesn't exist) with Ubuntu 22.04
+2. **Installs Zig 0.15.0** automatically in the VM
+3. **Mounts your project** directory into the VM
+4. **Runs zig commands** in the Linux environment
+
+This gives you the exact same strict Linux compilation checks that CI uses, but locally in <2 seconds.
+
+### Requirements
+
+- macOS (or Linux with Multipass installed)
+- Multipass installed: `brew install multipass`
+- ~8GB RAM available for the VM
+
+### First Run
+
+The first time you run it, the script will:
+- Create a new Ubuntu VM named `zig-build`
+- Install Zig 0.15.0
+- Mount your current directory
+
+This takes ~2-3 minutes. Subsequent runs are instant.
+
+### Clean/Reset VM
+
+If the VM gets into a broken state, use the `--clean` flag to delete and recreate it:
+
+```bash
+./scripts/linux-build.sh --clean build test
+```
+
+This will:
+1. Delete the existing `zig-build` VM
+2. Create a fresh VM
+3. Install Zig
+4. Run your command
+
+### Manual VM Management
+
+```bash
+# Shell into the VM directly
+multipass shell zig-build
+
+# Stop the VM (saves resources)
+multipass stop zig-build
+
+# Start the VM
+multipass start zig-build
+
+# Delete the VM manually (if you want to start fresh)
+multipass delete zig-build
+multipass purge
+```
+
+### Troubleshooting
+
+**Multipass not found:**
+```bash
+brew install multipass
+```
+
+**VM creation fails:**
+- Check available disk space (needs ~40GB)
+- Ensure virtualization is enabled in BIOS
+- Try: `multipass launch --name test-vm` to test Multipass
+
+**Zig version mismatch:**
+- Edit the script to change the Zig version URL
+- Or manually install in VM: `multipass shell zig-build`
+

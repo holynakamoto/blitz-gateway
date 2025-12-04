@@ -272,31 +272,31 @@ pub const RateLimiter = struct {
 
         // Compile eBPF program (only if source exists and clang is available)
         ebpf.compileEbpfProgram(ebpf_source, ebpf_object) catch |err| {
-            std.log.warn("eBPF compilation failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF compilation failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Load eBPF program
         manager.loadEbpfProgram(ebpf_object) catch |err| {
-            std.log.warn("eBPF program loading failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF program loading failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Create eBPF maps
         manager.createMaps() catch |err| {
-            std.log.warn("eBPF map creation failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF map creation failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Load eBPF program into kernel
         manager.loadProgram() catch |err| {
-            std.log.warn("eBPF program loading failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF program loading failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Try to attach to network interface (eth0 by default)
         manager.attachXdp("eth0") catch |err| {
-            std.log.warn("XDP attachment failed ({}), eBPF rate limiting disabled", .{err});
+            std.log.warn("XDP attachment failed ({any}), eBPF rate limiting disabled", .{err});
             std.log.info("eBPF program loaded but not attached - falling back to userspace", .{});
             return err;
         };
@@ -309,7 +309,7 @@ pub const RateLimiter = struct {
         };
 
         manager.updateConfig(ebpf_config) catch |err| {
-            std.log.warn("eBPF config update failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF config update failed ({any}), falling back to userspace", .{err});
             return err;
         };
 

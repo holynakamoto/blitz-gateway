@@ -101,7 +101,7 @@ pub const HpackDecoder = struct {
     pub fn decode(self: *HpackDecoder, data: []const u8) ![]HeaderField {
         // Zig 0.15.2: Use initCapacity
         var headers = std.ArrayList(HeaderField).initCapacity(self.allocator, 16) catch return error.OutOfMemory;
-        errdefer headers.deinit();
+        errdefer headers.deinit(self.allocator);
 
         var offset: usize = 0;
         while (offset < data.len) {

@@ -94,6 +94,63 @@ pub const QuicServerConnection = struct {
         }
     }
 
+    /// Process already-decrypted payload (from UDP server after header protection removal)
+    /// This is the correct flow: decrypt first, then process frames
+    pub fn processDecryptedPayload(
+        self: *QuicServerConnection,
+        payload: []const u8,
+        ssl: ?*anyopaque,
+    ) !void {
+        std.log.info("[QUIC] Processing decrypted payload ({} bytes)", .{payload.len});
+
+        // Parse frames in decrypted payload
+        var offset: usize = 0;
+        while (offset < payload.len) {
+            const frame_type = payload[offset];
+
+            if (frame_type == 0x00) {
+                // PADDING frame
+                offset += 1;
+                continue;
+            } else if (frame_type == 0x06) {
+                // CRYPTO frame!
+                std.log.info("[FRAME] Found CRYPTO frame at offset {}", .{offset});
+
+                // Parse CRYPTO frame
+                const crypto_frame = frames.CryptoFrame.parse(payload[offset..]) catch |err| {
+                    std.log.err("[FRAME] Failed to parse CRYPTO: {any}", .{err});
+                    return;
+                };
+
+                std.log.info("[FRAME] CRYPTO offset={}, length={}", .{ crypto_frame.offset, crypto_frame.length });
+
+                // Check if this is ClientHello (first byte = 0x01)
+                if (crypto_frame.data.len > 0 and crypto_frame.data[0] == 0x01) {
+                    std.log.info("[TLS] Found ClientHello ({} bytes)", .{crypto_frame.data.len});
+
+                    // Process ClientHello through handshake manager
+                    try self.handshake_mgr.processInitialPacket(payload, @ptrCast(ssl));
+                    return;
+                } else if (crypto_frame.data.len > 0) {
+                    std.log.info("[TLS] CRYPTO frame content type: 0x{X:0>2}", .{crypto_frame.data[0]});
+                }
+
+                break;
+            } else if (frame_type == 0x01) {
+                // PING frame
+                offset += 1;
+                continue;
+            } else if (frame_type == 0x02 or frame_type == 0x03) {
+                // ACK frame - skip for now
+                std.log.debug("[FRAME] ACK frame at offset {}", .{offset});
+                break;
+            } else {
+                std.log.debug("[FRAME] Unknown frame type 0x{X:0>2} at offset {}", .{ frame_type, offset });
+                break;
+            }
+        }
+    }
+
     // Generate response packet (for handshake)
     // Returns the number of bytes written to buf (QUIC packet ready to send)
     pub fn generateResponsePacket(

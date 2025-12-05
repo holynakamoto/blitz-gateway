@@ -11,7 +11,7 @@ const c = io_uring_mod.c;
 const server_mod = @import("server.zig");
 const packet = @import("packet.zig");
 const udp = @import("udp.zig");
-// const tls = @import("../tls/tls.zig"); // Temporarily disabled for picotls migration
+const crypto = @import("crypto.zig");
 
 // Buffer pool for UDP packets
 const UDP_BUFFER_SIZE = 1500; // Standard MTU
@@ -270,22 +270,134 @@ fn handleQuicPacket(
         @intCast(c.ntohs(client_addr.sin_port)),
     );
 
-    // Parse packet to get connection ID for lookup
-    const parsed = packet.Packet.parse(data, 8) catch |err| {
-        std.log.debug("Failed to parse QUIC packet: {any}", .{err});
+    // ═══════════════════════════════════════════════════════════════════════════
+    // QUIC PACKET DECRYPTION FLOW (from working quic_handshake_server.zig)
+    // Must decrypt BEFORE parsing! QUIC uses encryption-at-rest.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    if (data.len < 18) {
+        std.log.debug("Packet too short: {} bytes", .{data.len});
+        return;
+    }
+
+    const first_byte = data[0];
+
+    // Check if long header (bit 7 = 1)
+    if ((first_byte & 0x80) == 0) {
+        std.log.debug("Short header packet (1-RTT) - not handled yet", .{});
+        return;
+    }
+
+    // Check packet type (bits 4-5): 0 = Initial
+    const packet_type = (first_byte & 0x30) >> 4;
+    if (packet_type != 0) {
+        std.log.debug("Non-Initial packet type {} - not handled yet", .{packet_type});
+        return;
+    }
+
+    // Extract DCID (unprotected part of header)
+    const dcid_len = data[5];
+    if (6 + dcid_len > data.len) {
+        std.log.debug("Invalid DCID length", .{});
+        return;
+    }
+    const dcid = data[6 .. 6 + dcid_len];
+
+    // Extract SCID
+    const scid_offset = 6 + dcid_len;
+    if (scid_offset >= data.len) return;
+    const scid_len = data[scid_offset];
+    const scid = data[scid_offset + 1 .. scid_offset + 1 + scid_len];
+
+    std.log.info("[QUIC] Initial packet: DCID={} bytes, SCID={} bytes", .{ dcid_len, scid_len });
+
+    // Derive Initial secrets from DCID
+    const secrets = crypto.deriveInitialSecrets(dcid) catch |err| {
+        std.log.err("[CRYPTO] Failed to derive secrets: {any}", .{err});
         return;
     };
 
-    const remote_conn_id = switch (parsed) {
-        .long => |p| p.src_conn_id,
-        .short => |p| p.dest_conn_id,
+    // Make a mutable copy for header protection removal
+    var packet_copy: [2048]u8 = undefined;
+    @memcpy(packet_copy[0..data.len], data);
+
+    // Find packet number offset
+    const pn_offset = crypto.findPacketNumberOffset(packet_copy[0..data.len]) catch |err| {
+        std.log.err("[CRYPTO] Failed to find PN offset: {any}", .{err});
+        return;
     };
 
-    // Get or create connection
-    const conn = try quic_server.getOrCreateConnection(remote_conn_id, client_ip);
+    // Remove header protection
+    const pn = crypto.removeHeaderProtection(packet_copy[0..data.len], &secrets.client_hp, pn_offset) catch |err| {
+        std.log.err("[CRYPTO] Failed to remove header protection: {any}", .{err});
+        return;
+    };
 
-    // Process packet
-    try conn.processPacket(data, quic_server.ssl_ctx);
+    std.log.info("[CRYPTO] Packet number: {}", .{pn});
+
+    // Get packet number length from unprotected first byte
+    const pn_len: usize = (packet_copy[0] & 0x03) + 1;
+    const header_len = pn_offset + pn_len;
+
+    // Calculate payload boundaries from the length field
+    // The length field is a varint just before the packet number
+    if (pn_offset < 2) return;
+    const len_byte = data[pn_offset - 1];
+    const len_prefix = (len_byte & 0xC0) >> 6;
+    const varint_size: usize = switch (len_prefix) {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        else => unreachable,
+    };
+
+    var payload_len: usize = 0;
+    const len_offset = pn_offset - varint_size;
+    switch (len_prefix) {
+        0 => payload_len = len_byte & 0x3F,
+        1 => payload_len = (@as(usize, len_byte & 0x3F) << 8) | @as(usize, data[len_offset + 1]),
+        2 => {
+            if (len_offset + 4 > data.len) return;
+            payload_len = (@as(usize, len_byte & 0x3F) << 24) |
+                (@as(usize, data[len_offset + 1]) << 16) |
+                (@as(usize, data[len_offset + 2]) << 8) |
+                @as(usize, data[len_offset + 3]);
+        },
+        3 => return, // 8-byte varint not common for payload length
+        else => unreachable,
+    }
+
+    // Encrypted payload starts after header
+    const encrypted_start = header_len;
+    const encrypted_len = payload_len - pn_len;
+
+    if (encrypted_start + encrypted_len > data.len) {
+        std.log.err("[CRYPTO] Invalid payload bounds", .{});
+        return;
+    }
+
+    // Decrypt payload
+    var plaintext: [2048]u8 = undefined;
+    const decrypted_len = crypto.decryptPayload(
+        packet_copy[encrypted_start .. encrypted_start + encrypted_len],
+        &secrets.client_key,
+        &secrets.client_iv,
+        pn,
+        packet_copy[0..header_len],
+        &plaintext,
+    ) catch |err| {
+        std.log.err("[CRYPTO] Decryption failed: {any}", .{err});
+        return;
+    };
+
+    std.log.info("[CRYPTO] Decrypted {} bytes", .{decrypted_len});
+
+    // Get or create connection using SCID as remote connection ID
+    const conn = try quic_server.getOrCreateConnection(scid, client_ip);
+
+    // Process decrypted payload (contains CRYPTO frames with ClientHello)
+    try conn.processDecryptedPayload(plaintext[0..decrypted_len], quic_server.ssl_ctx);
 
     // Check if we need to send a response (handshake in progress)
     if (conn.state == .handshaking) {

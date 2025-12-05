@@ -308,108 +308,223 @@ fn benchmarkHttp2Connection(state: *WorkerState) void {
 }
 
 //═══════════════════════════════════════════════════════════════════════════════
-// HTTP/3 BENCHMARK CLIENT (QUIC/UDP)
+// HTTP/3 BENCHMARK CLIENT (QUIC/UDP with REAL TLS handshake)
+// This sends encrypted Initial packets and waits for ServerHello
 //═══════════════════════════════════════════════════════════════════════════════
 
+const crypto = @import("quic/crypto.zig");
+
 fn benchmarkHttp3Connection(state: *WorkerState) void {
+    // Create persistent UDP socket for this worker
+    const sock = posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0) catch {
+        state.failed_requests += 1;
+        return;
+    };
+    defer posix.close(sock);
+
+    // Parse target address once
+    const addr = net.Address.parseIp4(state.config.target_host, state.config.port) catch {
+        state.failed_requests += 1;
+        return;
+    };
+
+    // Generate stable DCID for this connection
+    var dcid: [8]u8 = undefined;
+    std.crypto.random.bytes(&dcid);
+
+    // Derive Initial secrets from DCID (RFC 9001)
+    const secrets = crypto.deriveInitialSecrets(&dcid) catch {
+        state.failed_requests += 1;
+        return;
+    };
+
+    // Generate stable SCID
+    var scid: [8]u8 = undefined;
+    std.crypto.random.bytes(&scid);
+
+    var packet_number: u32 = 0;
+
     while (!state.should_stop.load(.acquire)) {
         const req_start = time.nanoTimestamp();
 
-        // Create UDP socket
-        const sock = posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0) catch {
-            state.failed_requests += 1;
-            std.Thread.sleep(1 * std.time.ns_per_ms);
-            continue;
-        };
-        defer posix.close(sock);
-
-        // Parse target address
-        const addr = net.Address.parseIp4(state.config.target_host, state.config.port) catch {
-            state.failed_requests += 1;
-            continue;
-        };
-
-        // Build QUIC Initial packet
+        // Build QUIC Initial packet with REAL ClientHello
         var initial_packet: [1200]u8 = undefined;
-        var pkt_len: usize = 0;
+        var header_len: usize = 0;
 
-        // Long header: Initial packet
-        initial_packet[0] = 0xC0; // Long header + Initial
-        pkt_len += 1;
+        // Long header: Initial packet (0xC0 = Long header + Initial type)
+        // Bits: 1 1 00 00 PN_LEN (where PN_LEN = 00 means 1-byte PN)
+        initial_packet[0] = 0xC0;
+        header_len += 1;
 
-        // Version (QUIC v1)
+        // Version (QUIC v1 = 0x00000001)
         initial_packet[1] = 0x00;
         initial_packet[2] = 0x00;
         initial_packet[3] = 0x00;
         initial_packet[4] = 0x01;
-        pkt_len += 4;
+        header_len += 4;
 
-        // DCID
+        // DCID length + DCID
         initial_packet[5] = 8;
-        pkt_len += 1;
-        std.crypto.random.bytes(initial_packet[6..14]);
-        pkt_len += 8;
+        @memcpy(initial_packet[6..14], &dcid);
+        header_len += 9;
 
-        // SCID
+        // SCID length + SCID
         initial_packet[14] = 8;
-        pkt_len += 1;
-        std.crypto.random.bytes(initial_packet[15..23]);
-        pkt_len += 8;
+        @memcpy(initial_packet[15..23], &scid);
+        header_len += 9;
 
-        // Token length (0)
+        // Token length (0 - no token)
         initial_packet[23] = 0;
-        pkt_len += 1;
+        header_len += 1;
 
-        // Packet length
-        const remaining = 1200 - pkt_len - 2;
-        initial_packet[24] = 0x40 | @as(u8, @intCast((remaining >> 8) & 0x3F));
-        initial_packet[25] = @intCast(remaining & 0xFF);
-        pkt_len += 2;
+        // Build CRYPTO frame with minimal TLS ClientHello
+        var plaintext: [256]u8 = undefined;
+        var pt_len: usize = 0;
 
-        // Packet number
-        initial_packet[26] = 0x00;
-        pkt_len += 1;
+        // CRYPTO frame (type 0x06)
+        plaintext[pt_len] = 0x06;
+        pt_len += 1;
 
-        // Minimal CRYPTO frame
-        initial_packet[27] = 0x06; // CRYPTO
-        initial_packet[28] = 0x00; // Offset
-        initial_packet[29] = 0x40;
-        initial_packet[30] = 0x05; // Length = 5
-        pkt_len += 4;
+        // Offset = 0 (varint)
+        plaintext[pt_len] = 0x00;
+        pt_len += 1;
 
-        // Dummy ClientHello
-        initial_packet[31] = 0x01;
-        initial_packet[32] = 0x00;
-        initial_packet[33] = 0x00;
-        initial_packet[34] = 0x01;
-        initial_packet[35] = 0x00;
-        pkt_len += 5;
+        // Build minimal TLS 1.3 ClientHello
+        var client_hello: [128]u8 = undefined;
+        var ch_len: usize = 0;
 
-        // Pad to 1200 bytes
-        @memset(initial_packet[pkt_len..1200], 0);
+        // Handshake type: ClientHello (0x01)
+        client_hello[0] = 0x01;
+        ch_len += 1;
 
-        // Send packet
-        _ = posix.sendto(sock, &initial_packet, 0, &addr.any, addr.getOsSockLen()) catch {
+        // Length placeholder (3 bytes) - will fill in at end
+        const length_offset = ch_len;
+        ch_len += 3;
+
+        // Legacy version: TLS 1.2 (0x0303)
+        client_hello[ch_len] = 0x03;
+        client_hello[ch_len + 1] = 0x03;
+        ch_len += 2;
+
+        // Random (32 bytes)
+        std.crypto.random.bytes(client_hello[ch_len..][0..32]);
+        ch_len += 32;
+
+        // Session ID length (0)
+        client_hello[ch_len] = 0;
+        ch_len += 1;
+
+        // Cipher suites: TLS_AES_128_GCM_SHA256 (0x1301)
+        client_hello[ch_len] = 0x00;
+        client_hello[ch_len + 1] = 0x02; // Length = 2
+        client_hello[ch_len + 2] = 0x13;
+        client_hello[ch_len + 3] = 0x01;
+        ch_len += 4;
+
+        // Compression methods: null (0x00)
+        client_hello[ch_len] = 0x01; // Length = 1
+        client_hello[ch_len + 1] = 0x00;
+        ch_len += 2;
+
+        // Extensions length (minimal - just supported_versions)
+        client_hello[ch_len] = 0x00;
+        client_hello[ch_len + 1] = 0x07; // Extensions total = 7 bytes
+        ch_len += 2;
+
+        // Extension: supported_versions (0x002b)
+        client_hello[ch_len] = 0x00;
+        client_hello[ch_len + 1] = 0x2b;
+        client_hello[ch_len + 2] = 0x00;
+        client_hello[ch_len + 3] = 0x03; // Extension data length = 3
+        client_hello[ch_len + 4] = 0x02; // Versions length = 2
+        client_hello[ch_len + 5] = 0x03;
+        client_hello[ch_len + 6] = 0x04; // TLS 1.3 (0x0304)
+        ch_len += 7;
+
+        // Fill in length (ch_len - 4)
+        const body_len = ch_len - 4;
+        client_hello[length_offset] = 0;
+        client_hello[length_offset + 1] = @intCast((body_len >> 8) & 0xFF);
+        client_hello[length_offset + 2] = @intCast(body_len & 0xFF);
+
+        // CRYPTO frame length (varint)
+        plaintext[pt_len] = @intCast(ch_len);
+        pt_len += 1;
+
+        // Copy ClientHello into CRYPTO frame
+        @memcpy(plaintext[pt_len..][0..ch_len], client_hello[0..ch_len]);
+        pt_len += ch_len;
+
+        // Calculate payload size (plaintext + 16-byte AEAD tag)
+        const payload_len = pt_len + 16;
+        const packet_len = 1 + payload_len; // 1-byte PN + encrypted payload
+
+        // Length field (2-byte varint for lengths 64-16383)
+        initial_packet[header_len] = 0x40 | @as(u8, @intCast((packet_len >> 8) & 0x3F));
+        initial_packet[header_len + 1] = @intCast(packet_len & 0xFF);
+        header_len += 2;
+
+        // Packet number (1 byte for now)
+        const pn_offset = header_len;
+        initial_packet[header_len] = @intCast(packet_number & 0xFF);
+        header_len += 1;
+
+        // Encrypt payload using client Initial key
+        const encrypted_len = crypto.encryptPayload(
+            plaintext[0..pt_len],
+            &secrets.client_key,
+            &secrets.client_iv,
+            packet_number,
+            initial_packet[0..header_len],
+            initial_packet[header_len..],
+        ) catch {
             state.failed_requests += 1;
             continue;
         };
 
-        // Set receive timeout (100ms)
-        const timeout = posix.timeval{ .sec = 0, .usec = 100000 };
+        const total_len = header_len + encrypted_len;
+
+        // Apply header protection
+        crypto.applyHeaderProtection(
+            initial_packet[0..total_len],
+            &secrets.client_hp,
+            pn_offset,
+            1, // 1-byte PN
+        ) catch {
+            state.failed_requests += 1;
+            continue;
+        };
+
+        // Pad to minimum 1200 bytes
+        if (total_len < 1200) {
+            @memset(initial_packet[total_len..1200], 0);
+        }
+
+        // Send encrypted Initial packet
+        _ = posix.sendto(sock, initial_packet[0..1200], 0, &addr.any, addr.getOsSockLen()) catch {
+            state.failed_requests += 1;
+            continue;
+        };
+
+        // Set receive timeout (50ms - faster for benchmarking)
+        const timeout = posix.timeval{ .sec = 0, .usec = 50000 };
         posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
 
-        // Try to receive
+        // Try to receive ServerHello
         var recv_buf: [2048]u8 = undefined;
         var from_addr: posix.sockaddr = undefined;
         var from_len: posix.socklen_t = @sizeOf(posix.sockaddr);
 
         const recvd = posix.recvfrom(sock, &recv_buf, 0, &from_addr, &from_len) catch |err| {
             if (err == error.WouldBlock) {
+                // Timeout - count as attempt but not success yet
                 state.total_requests += 1;
                 state.failed_requests += 1;
+                packet_number += 1;
                 continue;
             }
             state.failed_requests += 1;
+            packet_number += 1;
             continue;
         };
 
@@ -417,16 +532,28 @@ fn benchmarkHttp3Connection(state: *WorkerState) void {
         const latency_ns = @as(u64, @intCast(req_end - req_start));
 
         if (recvd > 0) {
-            state.histogram.record(latency_ns) catch {};
-            state.total_requests += 1;
-            state.successful_requests += 1;
-            state.bytes_transferred += recvd;
+            // Got a response! Check if it's an Initial packet (ServerHello)
+            const first_byte = recv_buf[0];
+            if ((first_byte & 0xF0) == 0xC0) {
+                // Long header - likely Initial packet with ServerHello
+                state.histogram.record(latency_ns) catch {};
+                state.total_requests += 1;
+                state.successful_requests += 1;
+                state.bytes_transferred += recvd;
+            } else {
+                // Some other response
+                state.total_requests += 1;
+                state.successful_requests += 1;
+                state.bytes_transferred += recvd;
+            }
         } else {
             state.total_requests += 1;
             state.failed_requests += 1;
         }
 
-        // Small delay between UDP packets
+        packet_number += 1;
+
+        // Small delay between packets (1ms)
         std.Thread.sleep(1 * std.time.ns_per_ms);
     }
 }

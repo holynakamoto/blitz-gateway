@@ -131,10 +131,14 @@ pub const TlsContext = struct {
     /// Call this when receiving the first Initial packet
     pub fn newServerConnection(self: *TlsContext, ptls_ctx: *c.ptls_context_t) !void {
         if (self.tls != null) return; // Already have a connection
-        
+
         self.ctx = ptls_ctx;
         self.tls = c.ptls_new(ptls_ctx, 1); // 1 = server mode
-        if (self.tls == null) return error.TlsInitFailed;
+        if (self.tls == null) {
+            std.log.err("[TLS] ptls_new failed", .{});
+            return error.TlsInitFailed;
+        }
+        std.log.info("[TLS] Created new server TLS connection", .{});
     }
 
     /// Feed ClientHello data and process handshake

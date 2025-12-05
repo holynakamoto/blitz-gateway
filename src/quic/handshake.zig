@@ -109,7 +109,8 @@ pub const QuicHandshake = struct {
 
     /// Process incoming INITIAL packet payload
     /// Extracts CRYPTO frames and feeds them to TLS
-    pub fn processInitialPacket(self: *QuicHandshake, packet_payload: []const u8) !void {
+    /// ptls_ctx is the global PicoTLS context (initialized with certs)
+    pub fn processInitialPacket(self: *QuicHandshake, packet_payload: []const u8, ptls_ctx: ?*anyopaque) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
         defer crypto_frames.deinit(self.allocator);
@@ -127,10 +128,37 @@ pub const QuicHandshake = struct {
 
         // Feed accumulated crypto data to TLS
         const crypto_data = self.initial_crypto_stream.getData();
-        if (crypto_data.len > 0 and self.tls_ctx != null) {
-            // Note: newServerConnection requires a ptls_context_t
-            // For now, we track that ClientHello was received
-            self.state = .client_hello_received;
+        if (crypto_data.len > 0) {
+            // ═══════════════════════════════════════════════════════════════
+            // THIS IS THE CALL - FINAL FORM
+            // Feed ClientHello to PicoTLS and generate ServerHello
+            // ═══════════════════════════════════════════════════════════════
+            if (self.tls_ctx) |*tls| {
+                if (ptls_ctx) |ctx| {
+                    // Create server TLS connection if not exists
+                    try tls.newServerConnection(@ptrCast(ctx));
+                }
+                
+                // THE CALL: Feed ClientHello, get ServerHello + handshake
+                const complete = tls.feedClientHello(crypto_data) catch |err| {
+                    std.log.err("[TLS] feedClientHello failed: {}", .{err});
+                    self.state = .error_state;
+                    return err;
+                };
+
+                if (complete) {
+                    self.state = .handshake_complete;
+                    std.log.info("[TLS] Handshake complete!", .{});
+                } else {
+                    self.state = .server_hello_sent;
+                    std.log.info("[TLS] ServerHello sent, waiting for client Finished", .{});
+                }
+
+                // Clear processed crypto data
+                self.initial_crypto_stream.clear();
+            } else {
+                self.state = .client_hello_received;
+            }
         }
     }
 

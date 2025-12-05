@@ -122,8 +122,8 @@ pub const TlsContext = struct {
     pub fn init(allocator: std.mem.Allocator) !TlsContext {
         return TlsContext{
             .allocator = allocator,
-            .initial_output = std.ArrayList(u8).init(allocator),
-            .handshake_output = std.ArrayList(u8).init(allocator),
+            .initial_output = .{},
+            .handshake_output = .{},
         };
     }
 
@@ -167,7 +167,7 @@ pub const TlsContext = struct {
             // For Initial packets, output goes to initial_output
             // For Handshake packets, output goes to handshake_output
             // The epoch is determined by where we are in the handshake
-            try self.initial_output.appendSlice(sendbuf.base[0..sendbuf.off]);
+            try self.initial_output.appendSlice(self.allocator, sendbuf.base[0..sendbuf.off]);
         }
 
         if (rc == 0) {

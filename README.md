@@ -27,67 +27,85 @@ Blitz Gateway is an ultra-low-latency edge API gateway and reverse proxy written
 
 ## Installation
 
-### One-Command Install (Ubuntu 22.04 / 24.04)
+### Download Pre-built Binary (ARM64 Linux)
+
+**Latest Release:** [v1.0.0](https://github.com/holynakamoto/blitz-gateway/releases/tag/v1.0.0)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/holynakamoto/blitz-gateway/main/install.sh | sudo bash
+# Download the latest release
+curl -L -o blitz https://github.com/holynakamoto/blitz-gateway/releases/download/v1.0.0/blitz
+
+# Make executable
+chmod +x blitz
+
+# Verify (should show "statically linked")
+file blitz
+
+# Run
+./blitz --help
 ```
 
-Installs Blitz Gateway as a systemd service. Configure and start:
+**Requirements:**
+- ARM64 (aarch64) Linux
+- Kernel 5.1+ (for io_uring)
+- No other dependencies! Fully static binary (4.7MB)
+
+**Verified platforms:** Ubuntu 22.04/24.04, Debian 11/12, Amazon Linux 2023 (all ARM64)
+
+### Deploy as Systemd Service
 
 ```bash
-# Edit configuration
-sudo nano /etc/blitz-gateway/config.toml
+# Install binary
+sudo mv blitz /usr/local/bin/
+sudo chmod +x /usr/local/bin/blitz
 
-# Start service
-sudo systemctl start blitz-gateway
+# Create service file
+sudo tee /etc/systemd/system/blitz.service > /dev/null <<EOF
+[Unit]
+Description=Blitz QUIC Gateway
+After=network.target
 
-# Enable on boot
-sudo systemctl enable blitz-gateway
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/blitz
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable blitz
+sudo systemctl start blitz
 ```
 
-### Manual APT Install
+### Docker (Minimal Image)
+
+```dockerfile
+FROM scratch
+COPY blitz /blitz
+EXPOSE 443/udp
+ENTRYPOINT ["/blitz"]
+```
 
 ```bash
-# Download .deb from GitHub Releases
-VERSION="0.6.0"
-wget https://github.com/holynakamoto/blitz-gateway/releases/download/v${VERSION}/blitz-gateway_${VERSION}_amd64.deb
-
-# Install
-sudo apt-get install ./blitz-gateway_${VERSION}_amd64.deb
-
-# Or install dependencies first if needed
-sudo apt-get install -y liburing2 libssl3
-sudo dpkg -i blitz-gateway_${VERSION}_amd64.deb
+docker build -t blitz-gateway .
+docker run -p 443:443/udp blitz-gateway
 ```
 
-### Docker
+### Build from Source
 
 ```bash
-# Pull latest image
-docker pull ghcr.io/holynakamoto/blitz-gateway:latest
+# On macOS with Multipass
+./scripts/linux-build.sh build -Doptimize=ReleaseFast
 
-# Run production container
-docker run -d \
-  --name blitz-gateway \
-  -p 8443:8443/udp \
-  -v $(pwd)/config.toml:/etc/blitz-gateway/config.toml \
-  --restart unless-stopped \
-  ghcr.io/holynakamoto/blitz-gateway:latest
-
-# Or use Docker Compose
-git clone https://github.com/holynakamoto/blitz-gateway.git
-cd blitz-gateway
-
-# Development
-make dev up
-
-# Production
-make prod up -d
-
-# With monitoring
-make monitoring up -d
+# Sync binary to Mac
+./scripts/sync_artifacts_to_mac.sh
 ```
+
+See [docs/BUILD_ARTIFACTS.md](docs/BUILD_ARTIFACTS.md) for detailed build instructions.
 
 ## Architecture
 

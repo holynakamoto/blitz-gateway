@@ -296,20 +296,20 @@ fn handleQuicPacket(
     }
 
     // Extract DCID (unprotected part of header)
-    const dcid_len = data[5];
-    if (6 + dcid_len > data.len) {
+    const orig_dcid_len = data[5];
+    if (6 + orig_dcid_len > data.len) {
         std.log.debug("Invalid DCID length", .{});
         return;
     }
-    const dcid = data[6 .. 6 + dcid_len];
+    const dcid = data[6 .. 6 + orig_dcid_len];
 
     // Extract SCID
-    const scid_offset = 6 + dcid_len;
+    const scid_offset = 6 + orig_dcid_len;
     if (scid_offset >= data.len) return;
-    const scid_len = data[scid_offset];
-    const scid = data[scid_offset + 1 .. scid_offset + 1 + scid_len];
+    const orig_scid_len = data[scid_offset];
+    const scid = data[scid_offset + 1 .. scid_offset + 1 + orig_scid_len];
 
-    std.log.info("[QUIC] Initial packet: DCID={} bytes, SCID={} bytes", .{ dcid_len, scid_len });
+    std.log.info("[QUIC] Initial packet: DCID={} bytes, SCID={} bytes", .{ orig_dcid_len, orig_scid_len });
 
     // Derive Initial secrets from DCID
     const secrets = crypto.deriveInitialSecrets(dcid) catch |err| {
@@ -335,56 +335,71 @@ fn handleQuicPacket(
 
     std.log.info("[CRYPTO] Packet number: {}", .{pn});
 
-    // Get packet number length from unprotected first byte
-    const pn_len: usize = (packet_copy[0] & 0x03) + 1;
-    const header_len = pn_offset + pn_len;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NOW RE-PARSE THE PACKET STRUCTURE (length field was also protected!)
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    // Calculate payload boundaries from the length field
-    // The length field is a varint just before the packet number
-    if (pn_offset < 2) return;
-    const len_byte = data[pn_offset - 1];
-    const len_prefix = (len_byte & 0xC0) >> 6;
-    const varint_size: usize = switch (len_prefix) {
-        0 => 1,
-        1 => 2,
-        2 => 4,
-        3 => 8,
+    var pos: usize = 0;
+
+    // First byte (now unprotected)
+    const header_type = packet_copy[pos];
+    pos += 1;
+
+    // Version (4 bytes)
+    pos += 4;
+
+    // DCID len + DCID
+    const dcid_len = packet_copy[pos];
+    pos += 1 + dcid_len;
+
+    // SCID len + SCID
+    const scid_len = packet_copy[pos];
+    pos += 1 + scid_len;
+
+    // Now the REAL payload length (varint, was encrypted before)
+    var payload_len: usize = 0;
+    const bytes_read = std.leb.readILEB128(usize, packet_copy[pos..], &payload_len) catch |err| {
+        std.log.err("[CRYPTO] Failed to read payload length varint: {any}", .{err});
+        return;
+    };
+    pos += bytes_read;
+
+    std.log.info("[CRYPTO] Payload length: {}", .{payload_len});
+
+    // Packet number length (bottom 2 bits of first byte)
+    const pn_len = 1 + @as(usize, header_type & 0x03);
+
+    // Read packet number
+    const packet_number = switch (pn_len) {
+        1 => packet_copy[pos],
+        2 => std.mem.readInt(u16, packet_copy[pos..pos+2], .little),
+        3 => std.mem.readInt(u32, packet_copy[pos..pos+3], .little) & 0x00FFFFFF,
+        4 => std.mem.readInt(u32, packet_copy[pos..pos+4], .little),
         else => unreachable,
     };
+    pos += pn_len;
 
-    var payload_len: usize = 0;
-    const len_offset = pn_offset - varint_size;
-    switch (len_prefix) {
-        0 => payload_len = len_byte & 0x3F,
-        1 => payload_len = (@as(usize, len_byte & 0x3F) << 8) | @as(usize, data[len_offset + 1]),
-        2 => {
-            if (len_offset + 4 > data.len) return;
-            payload_len = (@as(usize, len_byte & 0x3F) << 24) |
-                (@as(usize, data[len_offset + 1]) << 16) |
-                (@as(usize, data[len_offset + 2]) << 8) |
-                @as(usize, data[len_offset + 3]);
-        },
-        3 => return, // 8-byte varint not common for payload length
-        else => unreachable,
-    }
+    std.log.info("[CRYPTO] Re-parsed PN={}, payload_len={}, pos={}", .{packet_number, payload_len, pos});
 
-    // Encrypted payload starts after header
-    const encrypted_start = header_len;
-    const encrypted_len = payload_len - pn_len;
-
-    if (encrypted_start + encrypted_len > data.len) {
-        std.log.err("[CRYPTO] Invalid payload bounds", .{});
+    // Encrypted payload starts here
+    if (pos + payload_len > data.len) {
+        std.log.err("[CRYPTO] Invalid payload bounds: pos={} + payload_len={} > data.len={}", .{pos, payload_len, data.len});
         return;
     }
+
+    const encrypted_payload = packet_copy[pos .. pos + payload_len];
+    const header_aad = packet_copy[0..pos];
+
+    std.log.info("[CRYPTO] Decrypting {} bytes with PN={}, AAD len={}", .{encrypted_payload.len, packet_number, header_aad.len});
 
     // Decrypt payload
     var plaintext: [2048]u8 = undefined;
     const decrypted_len = crypto.decryptPayload(
-        packet_copy[encrypted_start .. encrypted_start + encrypted_len],
+        encrypted_payload,
         &secrets.client_key,
         &secrets.client_iv,
-        pn,
-        packet_copy[0..header_len],
+        packet_number,
+        header_aad,
         &plaintext,
     ) catch |err| {
         std.log.err("[CRYPTO] Decryption failed: {any}", .{err});

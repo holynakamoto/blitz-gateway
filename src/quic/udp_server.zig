@@ -14,7 +14,7 @@ const udp = @import("udp.zig");
 const crypto = @import("crypto.zig");
 
 // Buffer pool for UDP packets
-const UDP_BUFFER_SIZE = 1500; // Standard MTU
+const UDP_BUFFER_SIZE = 65536; // QUIC max packet size (64KB)
 const UDP_BUFFER_POOL_SIZE = 1024;
 
 const UdpBuffer = struct {
@@ -318,7 +318,7 @@ fn handleQuicPacket(
     };
 
     // Make a mutable copy for header protection removal
-    var packet_copy: [2048]u8 = undefined;
+    var packet_copy: [65536]u8 = undefined;
     @memcpy(packet_copy[0..data.len], data);
 
     // Find packet number offset
@@ -333,12 +333,13 @@ fn handleQuicPacket(
         return;
     };
 
-    std.log.info("[CRYPTO] Packet number: {}", .{pn});
+    std.log.info("[CRYPTO] Packet number: {} - header protection removed", .{pn});
 
     // ═══════════════════════════════════════════════════════════════════════════
     // NOW RE-PARSE THE PACKET STRUCTURE (length field was also protected!)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    std.log.info("[CRYPTO] Starting packet re-parsing after header protection");
     var pos: usize = 0;
 
     // First byte (now unprotected)
@@ -356,7 +357,19 @@ fn handleQuicPacket(
     const scid_len = packet_copy[pos];
     pos += 1 + scid_len;
 
-    // Now the REAL payload length (varint, was encrypted before)
+    // Debug: show the next few bytes to understand the varint
+    std.log.info("[CRYPTO] pos={}, next 8 bytes: {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2}", .{
+        pos,
+        if (pos < packet_copy.len) packet_copy[pos] else 0,
+        if (pos+1 < packet_copy.len) packet_copy[pos+1] else 0,
+        if (pos+2 < packet_copy.len) packet_copy[pos+2] else 0,
+        if (pos+3 < packet_copy.len) packet_copy[pos+3] else 0,
+        if (pos+4 < packet_copy.len) packet_copy[pos+4] else 0,
+        if (pos+5 < packet_copy.len) packet_copy[pos+5] else 0,
+        if (pos+6 < packet_copy.len) packet_copy[pos+6] else 0,
+        if (pos+7 < packet_copy.len) packet_copy[pos+7] else 0,
+    });
+
     var payload_len: usize = 0;
     const bytes_read = std.leb.readILEB128(usize, packet_copy[pos..], &payload_len) catch |err| {
         std.log.err("[CRYPTO] Failed to read payload length varint: {any}", .{err});
@@ -364,7 +377,7 @@ fn handleQuicPacket(
     };
     pos += bytes_read;
 
-    std.log.info("[CRYPTO] Payload length: {}", .{payload_len});
+    std.log.info("[CRYPTO] Read payload_len={} in {} bytes", .{payload_len, bytes_read});
 
     // Packet number length (bottom 2 bits of first byte)
     const pn_len = 1 + @as(usize, header_type & 0x03);
@@ -379,8 +392,6 @@ fn handleQuicPacket(
     };
     pos += pn_len;
 
-    std.log.info("[CRYPTO] Re-parsed PN={}, payload_len={}, pos={}", .{packet_number, payload_len, pos});
-
     // Encrypted payload starts here
     if (pos + payload_len > data.len) {
         std.log.err("[CRYPTO] Invalid payload bounds: pos={} + payload_len={} > data.len={}", .{pos, payload_len, data.len});
@@ -390,10 +401,8 @@ fn handleQuicPacket(
     const encrypted_payload = packet_copy[pos .. pos + payload_len];
     const header_aad = packet_copy[0..pos];
 
-    std.log.info("[CRYPTO] Decrypting {} bytes with PN={}, AAD len={}", .{encrypted_payload.len, packet_number, header_aad.len});
-
     // Decrypt payload
-    var plaintext: [2048]u8 = undefined;
+    var plaintext: [65536]u8 = undefined;
     const decrypted_len = crypto.decryptPayload(
         encrypted_payload,
         &secrets.client_key,
@@ -417,7 +426,7 @@ fn handleQuicPacket(
     // Check if we need to send a response (handshake in progress)
     if (conn.state == .handshaking) {
         // Generate response packet
-        var response_buf: [2048]u8 = undefined;
+        var response_buf: [65536]u8 = undefined;
         const response_len = try conn.generateResponsePacket(.initial, &response_buf);
 
         // Get buffer for sending

@@ -29,7 +29,7 @@ pub const TransportParameterId = enum(u64) {
 // Transport Parameters structure
 pub const TransportParameters = struct {
     max_idle_timeout: u64 = 30_000, // 30 seconds (milliseconds)
-    max_udp_payload_size: u64 = 1500, // Standard MTU
+    max_udp_payload_size: u64 = 65536, // QUIC max packet size (64KB)
     initial_max_data: u64 = 10_000_000, // 10 MB
     initial_max_stream_data_bidi_local: u64 = 1_000_000, // 1 MB
     initial_max_stream_data_bidi_remote: u64 = 1_000_000, // 1 MB

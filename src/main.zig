@@ -63,6 +63,10 @@ pub fn main() !void {
     var bench_connections: u32 = 100;
     var bench_threads: ?u32 = null;
 
+    // TLS certificate options (for QUIC mode)
+    var cert_path: ?[]const u8 = null;
+    var key_path: ?[]const u8 = null;
+
     // Simple argument parsing
     var i: usize = 1;
     while (i < args.len) {
@@ -119,6 +123,16 @@ pub fn main() !void {
                 i += 1;
                 port = try std.fmt.parseInt(u16, args[i], 10);
             }
+        } else if (std.mem.eql(u8, args[i], "--cert")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                cert_path = args[i];
+            }
+        } else if (std.mem.eql(u8, args[i], "--key")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                key_path = args[i];
+            }
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             printUsage();
             return;
@@ -131,7 +145,7 @@ pub fn main() !void {
 
     // Route to appropriate mode
     switch (mode) {
-        .quic => try runQuicServer(allocator, config_path, port),
+        .quic => try runQuicServer(allocator, config_path, port, cert_path, key_path),
         .echo => try runEchoServer(port orelse 8080),
         .http => try runHttpServer(port orelse 8080),
         .bench => try runBenchmarkMode(allocator, bench_protocol, bench_duration, bench_connections, bench_threads, port),
@@ -151,6 +165,8 @@ fn printUsage() void {
         \\  --lb <config>       Load balancer mode with config file
         \\  --config <file>     Configuration file path
         \\  --port <port>       Port to listen on (default: 8443 for QUIC, 8080 for others)
+        \\  --cert <file>       TLS certificate file (PEM format, for QUIC mode)
+        \\  --key <file>        TLS private key file (PEM format, for QUIC mode)
         \\
         \\Benchmark Options:
         \\  --bench [protocol]  Run built-in benchmarks (http1, http2, http3, or all)
@@ -222,7 +238,7 @@ fn runBenchmarkMode(
     benchmark.printResults(result);
 }
 
-fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16) !void {
+fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16, cert_path: ?[]const u8, key_path: ?[]const u8) !void {
     if (builtin.os.tag != .linux) {
         std.log.err("QUIC server requires Linux (io_uring support)", .{});
         return error.UnsupportedPlatform;
@@ -230,6 +246,19 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
 
     std.debug.print("Blitz QUIC/HTTP3 Server v0.6.0\n", .{});
     std.debug.print("================================\n\n", .{});
+
+    // Log TLS certificate configuration
+    if (cert_path) |cert| {
+        std.debug.print("TLS Certificate: {s}\n", .{cert});
+    } else {
+        std.debug.print("TLS Certificate: (none - TLS handshake will be limited)\n", .{});
+    }
+    if (key_path) |key| {
+        std.debug.print("TLS Private Key: {s}\n", .{key});
+    } else {
+        std.debug.print("TLS Private Key: (none)\n", .{});
+    }
+    // TODO: Pass cert_path and key_path to QUIC server for TLS initialization
 
     // Initialize io_uring
     try io_uring.init();

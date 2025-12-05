@@ -1,14 +1,41 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+// Build note: We use liburing-ffi.a (built from source in the VM) for proper FFI symbol resolution.
+// Per PRD: The FFI variant exports all io_uring functions as regular symbols (not inline),
+// which resolves undefined symbol errors when cross-compiling with Zig.
+
+// Helper function to link liburing-ffi for proper FFI symbol resolution
+// Per PRD: liburing-ffi.a exports all functions as regular symbols (not inline)
+// This resolves undefined symbol errors like __io_uring_get_cqe, io_uring_queue_init, etc.
+// Helper function to link liburing-ffi for proper FFI symbol resolution
+fn linkLiburingFFI(exe: *std.Build.Step.Compile) void {
+    // Link liburing-ffi for proper symbol resolution
+    exe.addObjectFile(.{ .cwd_relative = "/usr/local/lib/liburing-ffi.a" });
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+}
 
 // Helper function to add all C source files to an executable
 fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget, use_openssl: bool) void {
     if (target.result.os.tag != .linux) return;
+
+    // Add src/core to include path
+    exe.addIncludePath(.{ .cwd_relative = "src/core" });
+
+    // liburing headers are installed to /usr/local/include by the build script
+    // Note: We still need the swab.h stub for cross-compilation (in vendor/liburing/src/include/linux/swab.h)
+    exe.addIncludePath(.{ .cwd_relative = "vendor/liburing/src/include" }); // For swab.h stub only
 
     // Add core C files
     exe.addCSourceFile(.{
         .file = b.path("src/core/bind_wrapper.c"),
         .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
     });
+
+    // Link liburing-ffi for proper FFI symbol resolution
+    // Per PRD: This resolves undefined symbol errors from inline functions
+    linkLiburingFFI(exe);
 
     // Only add OpenSSL wrapper if explicitly requested
     if (use_openssl) {
@@ -20,6 +47,8 @@ fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Buil
 
     // Help Zig find the right architecture-specific headers
     exe.addIncludePath(.{ .cwd_relative = "/usr/include/aarch64-linux-gnu" });
+    // Add /usr/include for Linux kernel headers (linux/swab.h)
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
 }
 
 pub fn build(b: *std.Build) void {
@@ -63,7 +92,8 @@ pub fn build(b: *std.Build) void {
         // Link picotls libraries (built and installed by linux-build.sh)
         exe.linkSystemLibrary("picotls");
         exe.linkSystemLibrary("picotls-minicrypto");
-        exe.linkSystemLibrary("uring");
+        // NOTE: liburing-ffi is linked via addCSourceFiles() -> linkLiburingFFI()
+        // We use liburing-ffi.a (not liburing.a) for proper FFI symbol resolution
 
         // Add library and include paths for picotls
         exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
@@ -103,7 +133,8 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibC();
 
     if (target.result.os.tag == .linux) {
-        unit_tests.linkSystemLibrary("uring");
+        // Link liburing-ffi for unit tests that use io_uring
+        linkLiburingFFI(unit_tests);
     }
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -197,7 +228,7 @@ pub fn build(b: *std.Build) void {
         // Link picotls libraries (built and installed by linux-build.sh)
         quic_handshake_server_exe.linkSystemLibrary("picotls");
         quic_handshake_server_exe.linkSystemLibrary("picotls-minicrypto");
-        quic_handshake_server_exe.linkSystemLibrary("uring");
+        // NOTE: liburing-ffi is linked via addCSourceFiles() -> linkLiburingFFI()
 
         // Add library and include paths for picotls
         quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });

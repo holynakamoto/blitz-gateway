@@ -37,7 +37,7 @@ fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Buil
     // Per PRD: This resolves undefined symbol errors from inline functions
     linkLiburingFFI(exe);
 
-    // Add PicoTLS wrapper for context initialization (minicrypto only, no OpenSSL)
+    // Add PicoTLS wrapper for context initialization (minicrypto + OpenSSL for cert parsing)
     exe.addCSourceFile(.{
         .file = b.path("src/quic/picotls_wrapper.c"),
         .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
@@ -98,6 +98,13 @@ pub fn build(b: *std.Build) void {
         // Link picotls libraries (built and installed by linux-build.sh)
         exe.linkSystemLibrary("picotls");
         exe.linkSystemLibrary("picotls-minicrypto");
+        // Link OpenSSL for certificate parsing (hybrid approach)
+        // We use minicrypto for TLS operations, OpenSSL only for cert parsing
+        // Note: OpenSSL libraries must be linked in order: ssl depends on crypto
+        exe.linkSystemLibrary("crypto");
+        exe.linkSystemLibrary("ssl");
+        exe.linkSystemLibrary("dl"); // Required for OpenSSL dynamic loading
+        exe.linkSystemLibrary("pthread"); // OpenSSL may require pthread
         // NOTE: liburing-ffi is linked via addCSourceFiles() -> linkLiburingFFI()
         // We use liburing-ffi.a (not liburing.a) for proper FFI symbol resolution
 

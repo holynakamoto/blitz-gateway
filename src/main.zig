@@ -282,7 +282,7 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
     // Default: Run QUIC server on port 8443
     const listen_port = port orelse 8443;
     std.debug.print("Starting QUIC/HTTP3 server on port {d}...\n", .{listen_port});
-    try udp_server.runQuicServer(ring, listen_port);
+    try udp_server.runQuicServer(ring, listen_port, cert_path, key_path);
 }
 
 fn runEchoServer(port: u16) !void {

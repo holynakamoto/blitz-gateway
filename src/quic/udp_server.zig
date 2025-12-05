@@ -16,6 +16,9 @@ const crypto = @import("crypto.zig");
 // External C functions from picotls_wrapper.c
 extern fn blitz_get_ptls_ctx() *anyopaque;
 extern fn blitz_ptls_minicrypto_init() void;
+extern fn blitz_load_certificate_file(cert_path: [*c]const u8) c_int;
+extern fn blitz_load_private_key_file(key_path: [*c]const u8) c_int;
+extern fn blitz_ptls_minicrypto_init_with_certs() c_int;
 
 // Buffer pool for UDP packets
 const UDP_BUFFER_SIZE = 65536; // QUIC max packet size (64KB)
@@ -110,7 +113,7 @@ fn setSqeData(sqe: *c.struct_io_uring_sqe, user_data: u64) void {
 }
 
 // Run QUIC UDP server with io_uring event loop
-pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
+pub fn runQuicServer(ring: *c.struct_io_uring, port: u16, cert_path: ?[]const u8, key_path: ?[]const u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -119,15 +122,55 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
     var quic_server = try server_mod.QuicServer.init(allocator, port);
     defer quic_server.deinit();
 
+    // Load certificates if provided
+    if (cert_path) |cert| {
+        // Allocate null-terminated string for C function
+        const cert_cstr = try allocator.alloc(u8, cert.len + 1);
+        defer allocator.free(cert_cstr);
+        @memcpy(cert_cstr[0..cert.len], cert);
+        cert_cstr[cert.len] = 0;
+
+        if (blitz_load_certificate_file(cert_cstr.ptr) != 0) {
+            std.log.err("[TLS] Failed to load certificate from {s}", .{cert});
+            return error.CertificateLoadFailed;
+        }
+        std.log.info("[TLS] Loaded certificate from {s}", .{cert});
+    }
+
+    if (key_path) |key| {
+        // Allocate null-terminated string for C function
+        const key_cstr = try allocator.alloc(u8, key.len + 1);
+        defer allocator.free(key_cstr);
+        @memcpy(key_cstr[0..key.len], key);
+        key_cstr[key.len] = 0;
+
+        if (blitz_load_private_key_file(key_cstr.ptr) != 0) {
+            std.log.err("[TLS] Failed to load private key from {s}", .{key});
+            return error.PrivateKeyLoadFailed;
+        }
+        std.log.info("[TLS] Loaded private key from {s}", .{key});
+    }
+
     // Initialize PicoTLS context with minicrypto backend
-    // The C wrapper handles random bytes internally
-    blitz_ptls_minicrypto_init();
+    // If certificates are loaded, use the cert-aware initialization
+    if (cert_path != null and key_path != null) {
+        if (blitz_ptls_minicrypto_init_with_certs() != 0) {
+            std.log.warn("[TLS] Certificate loading failed, using minimal context", .{});
+            blitz_ptls_minicrypto_init();
+        } else {
+            std.log.info("[TLS] PicoTLS context initialized with certificates", .{});
+        }
+    } else {
+        blitz_ptls_minicrypto_init();
+        std.log.info("[TLS] PicoTLS context initialized (minicrypto, no certificates)", .{});
+    }
+
     const ptls_ctx = blitz_get_ptls_ctx();
 
     // Set the context on the QUIC server
     quic_server.ssl_ctx = ptls_ctx;
 
-    std.log.info("[TLS] PicoTLS context initialized (minicrypto) and attached to QUIC server", .{});
+    std.log.info("[TLS] PicoTLS context attached to QUIC server", .{});
 
     // Initialize buffer pool
     var buffer_pool = try UdpBufferPool.init(allocator);

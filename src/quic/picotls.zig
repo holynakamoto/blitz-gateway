@@ -132,48 +132,55 @@ pub const TlsContext = struct {
     pub fn newServerConnection(self: *TlsContext, ptls_ctx: *c.ptls_context_t) !void {
         if (self.tls != null) return; // Already have a connection
 
-        // TODO: Enable when PicoTLS is properly linked
-        // self.ctx = ptls_ctx;
-        // self.tls = c.ptls_new(ptls_ctx, 1); // 1 = server mode
-        // if (self.tls == null) {
-        //     std.log.err("[TLS] ptls_new failed", .{});
-        //     return error.TlsInitFailed;
-        // }
-        _ = ptls_ctx;
-        std.log.info("[TLS] Server connection created (TLS stub)", .{});
+        self.ctx = ptls_ctx;
+        self.tls = c.ptls_new(ptls_ctx, 1); // 1 = server mode
+        if (self.tls == null) {
+            std.log.err("[TLS] ptls_new failed", .{});
+            return error.TlsInitFailed;
+        }
+        std.log.info("[TLS] Created new server TLS connection", .{});
     }
 
     /// Feed ClientHello data and process handshake
     /// Returns true if handshake completed
     pub fn feedClientHello(self: *TlsContext, data: []const u8) !bool {
-        // TODO: Enable when PicoTLS is properly linked
-        // if (self.tls == null) return error.NoTlsConnection;
-        //
-        // var sendbuf: c.ptls_buffer_t = undefined;
-        // var sendbuf_small: [4096]u8 = undefined;
-        // c.ptls_buffer_init(&sendbuf, &sendbuf_small, sendbuf_small.len);
-        // defer c.ptls_buffer_dispose(&sendbuf);
-        //
-        // var inlen = data.len;
-        // const rc = c.ptls_handshake(self.tls.?, &sendbuf, data.ptr, &inlen, null);
-        //
-        // if (sendbuf.off > 0) {
-        //     try self.initial_output.appendSlice(self.allocator, sendbuf.base[0..sendbuf.off]);
-        // }
-        //
-        // if (rc == 0) {
-        //     self.handshake_complete = true;
-        //     return true;
-        // } else if (rc == c.PTLS_ERROR_IN_PROGRESS) {
-        //     return false;
-        // } else {
-        //     return error.HandshakeFailed;
-        // }
+        if (self.tls == null) return error.NoTlsConnection;
 
-        // Stub: Log that we received ClientHello data
-        std.log.info("[TLS] Received ClientHello ({} bytes) - TLS stub mode", .{data.len});
-        _ = self;
-        return false; // Not complete (stub)
+        // Set up output buffer
+        var sendbuf: c.ptls_buffer_t = undefined;
+        var sendbuf_small: [8192]u8 = undefined;
+        c.ptls_buffer_init(&sendbuf, &sendbuf_small, sendbuf_small.len);
+        defer c.ptls_buffer_dispose(&sendbuf);
+
+        // Process handshake
+        var inlen = data.len;
+        const rc = c.ptls_handshake(
+            self.tls.?,
+            &sendbuf,
+            data.ptr,
+            &inlen,
+            null,
+        );
+
+        std.log.info("[TLS] ptls_handshake returned {} (output {} bytes)", .{ rc, sendbuf.off });
+
+        // Store output (ServerHello + encrypted extensions + cert + finished)
+        if (sendbuf.off > 0) {
+            try self.initial_output.appendSlice(self.allocator, sendbuf.base[0..sendbuf.off]);
+            std.log.info("[TLS] Generated {} bytes of handshake output", .{sendbuf.off});
+        }
+
+        if (rc == 0) {
+            self.handshake_complete = true;
+            std.log.info("[TLS] Handshake complete!", .{});
+            return true;
+        } else if (rc == c.PTLS_ERROR_IN_PROGRESS) {
+            std.log.info("[TLS] Handshake in progress...", .{});
+            return false;
+        } else {
+            std.log.err("[TLS] Handshake failed with error {}", .{rc});
+            return error.HandshakeFailed;
+        }
     }
 
     /// Get pending handshake output for a specific encryption level
@@ -224,11 +231,10 @@ pub const TlsContext = struct {
 
     /// Clean up resources
     pub fn deinit(self: *TlsContext) void {
-        // TODO: Enable when PicoTLS is properly linked
-        // if (self.tls) |tls| {
-        //     c.ptls_free(tls);
-        //     self.tls = null;
-        // }
+        if (self.tls) |tls| {
+            c.ptls_free(tls);
+            self.tls = null;
+        }
         self.initial_output.deinit(self.allocator);
         self.handshake_output.deinit(self.allocator);
     }

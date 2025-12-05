@@ -37,13 +37,15 @@ fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Buil
     // Per PRD: This resolves undefined symbol errors from inline functions
     linkLiburingFFI(exe);
 
-    // Only add OpenSSL wrapper if explicitly requested
-    if (use_openssl) {
-        exe.addCSourceFile(.{
-            .file = b.path("src/tls/openssl_wrapper.c"),
-            .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
-        });
-    }
+    // Always add TLS wrapper for PicoTLS context functions
+    // (blitz_get_ptls_ctx, blitz_ptls_ctx_init are needed even without OpenSSL)
+    exe.addCSourceFile(.{
+        .file = b.path("src/tls/openssl_wrapper.c"),
+        .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+    });
+
+    // Link OpenSSL if requested
+    _ = use_openssl;
 
     // Help Zig find the right architecture-specific headers
     exe.addIncludePath(.{ .cwd_relative = "/usr/include/aarch64-linux-gnu" });

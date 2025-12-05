@@ -20,6 +20,7 @@ const rate_limit = middleware.rate_limit;
 const metrics = @import("metrics/mod.zig");
 const auth = @import("auth/mod.zig");
 const jwt = auth.jwt;
+const benchmark = @import("benchmark.zig");
 
 // C imports for socket timeout configuration
 const c = @cImport({
@@ -39,6 +40,7 @@ const Mode = enum {
     quic, // QUIC/HTTP3 server (default)
     echo, // Echo server demo
     http, // HTTP/1.1 server with JWT
+    bench, // Built-in benchmark mode
 };
 
 pub fn main() !void {
@@ -53,6 +55,12 @@ pub fn main() !void {
     var mode: Mode = .quic;
     var config_path: ?[]const u8 = null;
     var port: ?u16 = null;
+
+    // Benchmark options
+    var bench_protocol: ?[]const u8 = null;
+    var bench_duration: u32 = 30;
+    var bench_connections: u32 = 100;
+    var bench_threads: ?u32 = null;
 
     // Simple argument parsing
     var i: usize = 1;
@@ -71,6 +79,35 @@ pub fn main() !void {
                     return error.InvalidMode;
                 }
             }
+        } else if (std.mem.eql(u8, args[i], "--bench")) {
+            mode = .bench;
+            // Check if next arg is a protocol name
+            if (i + 1 < args.len) {
+                const next = args[i + 1];
+                if (std.mem.eql(u8, next, "http1") or
+                    std.mem.eql(u8, next, "http2") or
+                    std.mem.eql(u8, next, "http3") or
+                    std.mem.eql(u8, next, "all"))
+                {
+                    bench_protocol = next;
+                    i += 1;
+                }
+            }
+        } else if (std.mem.eql(u8, args[i], "--duration")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                bench_duration = try std.fmt.parseInt(u32, args[i], 10);
+            }
+        } else if (std.mem.eql(u8, args[i], "--connections")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                bench_connections = try std.fmt.parseInt(u32, args[i], 10);
+            }
+        } else if (std.mem.eql(u8, args[i], "--threads")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                bench_threads = try std.fmt.parseInt(u32, args[i], 10);
+            }
         } else if (std.mem.eql(u8, args[i], "--lb") or std.mem.eql(u8, args[i], "--config")) {
             if (i + 1 < args.len) {
                 i += 1;
@@ -84,6 +121,9 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             printUsage();
             return;
+        } else if (std.mem.eql(u8, args[i], "--version") or std.mem.eql(u8, args[i], "-v")) {
+            std.debug.print("Blitz Gateway v1.0.0\n", .{});
+            return;
         }
         i += 1;
     }
@@ -93,32 +133,92 @@ pub fn main() !void {
         .quic => try runQuicServer(allocator, config_path, port),
         .echo => try runEchoServer(port orelse 8080),
         .http => try runHttpServer(port orelse 8080),
+        .bench => try runBenchmarkMode(allocator, bench_protocol, bench_duration, bench_connections, bench_threads, port),
     }
 }
 
 fn printUsage() void {
     std.debug.print(
-        \\Blitz Gateway v0.6.0
+        \\Blitz Gateway v1.0.0
         \\High-performance QUIC/HTTP3 reverse proxy and load balancer
         \\
         \\Usage:
-        \\  zig build run [OPTIONS]
+        \\  blitz [OPTIONS]
         \\
-        \\Options:
-        \\  --mode <mode>     Server mode: quic (default), echo, or http
-        \\  --lb <config>     Load balancer mode with config file
-        \\  --config <file>   Configuration file path
-        \\  --port <port>     Port to listen on (default: 8443 for QUIC, 8080 for others)
-        \\  --help, -h        Show this help message
+        \\Server Options:
+        \\  --mode <mode>       Server mode: quic (default), echo, or http
+        \\  --lb <config>       Load balancer mode with config file
+        \\  --config <file>     Configuration file path
+        \\  --port <port>       Port to listen on (default: 8443 for QUIC, 8080 for others)
+        \\
+        \\Benchmark Options:
+        \\  --bench [protocol]  Run built-in benchmarks (http1, http2, http3, or all)
+        \\  --duration <secs>   Benchmark duration in seconds (default: 30)
+        \\  --connections <n>   Concurrent connections (default: 100)
+        \\  --threads <n>       Worker threads (default: CPU count)
+        \\
+        \\General:
+        \\  --help, -h          Show this help message
+        \\  --version, -v       Show version
         \\
         \\Examples:
-        \\  zig build run                           # QUIC/HTTP3 server
-        \\  zig build run -- --mode echo            # Echo server demo
-        \\  zig build run -- --mode http            # HTTP/1.1 server
-        \\  zig build run -- --lb config.toml       # Load balancer mode
-        \\  zig build run -- --port 9000            # Custom port
+        \\  blitz                               # QUIC/HTTP3 server
+        \\  blitz --mode echo                   # Echo server demo
+        \\  blitz --mode http                   # HTTP/1.1 server with JWT
+        \\  blitz --lb config.toml              # Load balancer mode
+        \\  blitz --bench                       # Benchmark all protocols
+        \\  blitz --bench http1                 # Benchmark HTTP/1.1 only
+        \\  blitz --bench http1 --duration 60  # 60-second HTTP/1.1 benchmark
         \\
     , .{});
+}
+
+fn runBenchmarkMode(
+    allocator: std.mem.Allocator,
+    protocol_arg: ?[]const u8,
+    duration: u32,
+    connections: u32,
+    threads_arg: ?u32,
+    port_arg: ?u16,
+) !void {
+    std.debug.print("\n", .{});
+    std.debug.print("╔════════════════════════════════════════════════════════╗\n", .{});
+    std.debug.print("║  Blitz Gateway - Built-in Benchmark Suite             ║\n", .{});
+    std.debug.print("╚════════════════════════════════════════════════════════╝\n", .{});
+    std.debug.print("\n", .{});
+
+    const threads = threads_arg orelse @as(u32, @intCast(std.Thread.getCpuCount() catch 4));
+    const port = port_arg orelse 8080;
+
+    // Determine which protocol(s) to benchmark
+    const protocol = if (protocol_arg) |p|
+        if (std.mem.eql(u8, p, "http1"))
+            benchmark.BenchmarkConfig.Protocol.http1
+        else if (std.mem.eql(u8, p, "http2"))
+            benchmark.BenchmarkConfig.Protocol.http2
+        else if (std.mem.eql(u8, p, "http3"))
+            benchmark.BenchmarkConfig.Protocol.http3
+        else
+            benchmark.BenchmarkConfig.Protocol.all
+    else
+        benchmark.BenchmarkConfig.Protocol.http1; // Default to http1
+
+    std.debug.print("NOTE: Start the server first in another terminal!\n", .{});
+    std.debug.print("  HTTP/1.1: JWT_SECRET=test ./blitz --mode http\n", .{});
+    std.debug.print("  Echo:     ./blitz --mode echo\n", .{});
+    std.debug.print("  QUIC:     ./blitz\n", .{});
+    std.debug.print("\n", .{});
+
+    const cfg = benchmark.BenchmarkConfig{
+        .protocol = protocol,
+        .duration_seconds = duration,
+        .connections = connections,
+        .threads = threads,
+        .port = port,
+    };
+
+    const result = try benchmark.runBenchmark(allocator, cfg);
+    benchmark.printResults(result);
 }
 
 fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16) !void {

@@ -1,2 +1,1 @@
-7f291c5c1c455bc2039b82d0098ea09cd4dfe28a65b8e8082ea83e8ce6621e4b  ./artifacts/aarch64-linux/blitz
-dde6580c24e54349b2bacf8b05e9197de6c231eeebd60ee7911ae5446b398ee6  ./artifacts/aarch64-linux/quic_handshake_server
+7f291c5c1c455bc2039b82d0098ea09cd4dfe28a65b8e8082ea83e8ce6621e4b  artifacts/aarch64-linux/blitz

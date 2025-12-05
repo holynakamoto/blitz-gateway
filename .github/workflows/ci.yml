@@ -1,6 +1,8 @@
-name: Blitz Gateway Linux CI
+name: Blitz Gateway CI
 
 on:
+  push:
+    branches: [ main ]
   pull_request:
     branches: [ "*" ]
 
@@ -9,68 +11,231 @@ permissions:
   packages: write
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: holynakamoto/blitz-gateway
-  ZIG_VERSION: 0.15.2
+  ZIG_VERSION: "0.15.0"
+  LIBURING_VERSION: "liburing-2.7"
 
 jobs:
 
   #############################
-  # LINUX BUILD & RELEASE
+  # STATIC BUILD (x86_64-linux-musl)
   #############################
 
-  build:
-    name: Build (Linux x86_64)
+  build-static-x86:
+    name: Build Static (x86_64-linux-musl)
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: false
+          submodules: recursive
 
-      - uses: ./.github/actions/setup-zig
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Build liburing (static + FFI)
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBURING_VERSION }} https://github.com/axboe/liburing.git /tmp/liburing
+          cd /tmp/liburing
+          ./configure --prefix=/usr/local
+          make -j$(nproc)
+          sudo make install
+          
+          # Build FFI version
+          cd src
+          gcc -c -fPIC -O2 liburing.c -o liburing-ffi.o
+          ar rcs liburing-ffi.a liburing-ffi.o
+          sudo cp liburing-ffi.a /usr/local/lib/
+          
+          echo "✓ liburing installed"
+          ls -la /usr/local/lib/liburing*.a
+
+      - name: Build picotls (minicrypto, no OpenSSL)
+        run: |
+          cd deps/picotls
+          git submodule update --init --recursive
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DPTLS_MINICRYPTO=ON \
+            -DPTLS_OPENSSL=OFF
+          cmake --build build -j$(nproc) --target picotls-core picotls-minicrypto
+          
+          sudo cp build/libpicotls-core.a /usr/local/lib/libpicotls.a
+          sudo cp build/libpicotls-minicrypto.a /usr/local/lib/
+          sudo cp -r include/picotls /usr/local/include/
+          sudo cp include/picotls.h /usr/local/include/
+          
+          echo "✓ picotls installed"
+          ls -la /usr/local/lib/libpicotls*.a
+
+      - name: Build Blitz (static musl)
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+          
+          echo "✓ Build complete"
+          file zig-out/bin/blitz
+          ls -lh zig-out/bin/blitz
+
+      - name: Verify static binary
+        run: |
+          file zig-out/bin/blitz | grep -q "statically linked" && echo "✓ STATIC VERIFIED"
+          # ldd should fail on static binary
+          ! ldd zig-out/bin/blitz 2>/dev/null && echo "✓ No dynamic dependencies"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-linux-x86_64-static
+          path: zig-out/bin/blitz
+
+  #############################
+  # STATIC BUILD (aarch64-linux-musl)
+  #############################
+
+  build-static-arm64:
+    name: Build Static (aarch64-linux-musl)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-aarch64-linux-gnu
+
+      - name: Build liburing (for cross-compile)
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBURING_VERSION }} https://github.com/axboe/liburing.git /tmp/liburing
+          cd /tmp/liburing
+          ./configure --prefix=/usr/local
+          make -j$(nproc)
+          sudo make install
+          
+          # Build FFI version
+          cd src
+          gcc -c -fPIC -O2 liburing.c -o liburing-ffi.o
+          ar rcs liburing-ffi.a liburing-ffi.o
+          sudo cp liburing-ffi.a /usr/local/lib/
+
+      - name: Build picotls (minicrypto)
+        run: |
+          cd deps/picotls
+          git submodule update --init --recursive
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DPTLS_MINICRYPTO=ON \
+            -DPTLS_OPENSSL=OFF
+          cmake --build build -j$(nproc) --target picotls-core picotls-minicrypto
+          
+          sudo cp build/libpicotls-core.a /usr/local/lib/libpicotls.a
+          sudo cp build/libpicotls-minicrypto.a /usr/local/lib/
+          sudo cp -r include/picotls /usr/local/include/
+          sudo cp include/picotls.h /usr/local/include/
+
+      - name: Build Blitz (static musl arm64)
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux-musl
+          
+          echo "✓ Build complete"
+          file zig-out/bin/blitz
+          ls -lh zig-out/bin/blitz
+
+      - name: Verify static binary
+        run: |
+          file zig-out/bin/blitz | grep -q "statically linked" && echo "✓ STATIC VERIFIED"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-linux-arm64-static
+          path: zig-out/bin/blitz
+
+  #############################
+  # TESTS (x86_64)
+  #############################
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: [build-static-x86]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y liburing-dev libssl-dev pkg-config build-essential
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
+          sudo apt-get install -y liburing-dev cmake
 
-      - name: Build
-        run: zig build -Doptimize=ReleaseFast
+      - name: Build picotls for tests
+        run: |
+          cd deps/picotls
+          git submodule update --init --recursive
+          cmake -B build -DPTLS_MINICRYPTO=ON -DPTLS_OPENSSL=OFF
+          cmake --build build -j$(nproc)
+          sudo cp build/libpicotls*.a /usr/local/lib/
+          sudo cp -r include/picotls /usr/local/include/
+          sudo cp include/picotls.h /usr/local/include/
 
       - name: Run tests
         run: zig build test --summary all
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: blitz-linux-x86_64
-          path: zig-out/bin/*
-
-
   #############################
-  # DEBIAN PACKAGE BUILD
+  # DEBIAN PACKAGE
   #############################
 
   deb:
     name: Build .deb Package
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build-static-x86, test]
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - uses: ./.github/actions/setup-zig
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y liburing-dev libssl-dev pkg-config build-essential
+          sudo apt-get install -y liburing-dev cmake
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
+      - name: Build picotls
+        run: |
+          cd deps/picotls
+          git submodule update --init --recursive
+          cmake -B build -DPTLS_MINICRYPTO=ON -DPTLS_OPENSSL=OFF
+          cmake --build build -j$(nproc)
+          sudo cp build/libpicotls*.a /usr/local/lib/
+          sudo cp -r include/picotls /usr/local/include/
+          sudo cp include/picotls.h /usr/local/include/
 
       - name: Build .deb
         run: zig build deb
@@ -79,9 +244,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: blitz-deb
-          path: |
-            zig-out/deb/*.deb
-            zig-out/bin/blitz
+          path: zig-out/deb/*.deb
           if-no-files-found: warn
-
-

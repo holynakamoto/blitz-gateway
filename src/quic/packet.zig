@@ -51,30 +51,32 @@ pub const LongHeaderPacket = struct {
         const src_conn_id = data[offset .. offset + src_conn_id_len];
         offset += src_conn_id_len;
 
-        // Token length (for INITIAL packets)
+        // Token length (for INITIAL packets) - RFC 9000: variable-length integer
         var token_len: usize = 0;
         if (packet_type == PACKET_TYPE_INITIAL) {
-            if (offset + 2 > data.len) {
+            if (offset >= data.len) {
                 return error.IncompletePacket;
             }
-            token_len = std.mem.readInt(u16, data[offset..][0..2], .big);
-            offset += 2;
+            const token_varint = readVarInt(data[offset..]) catch return error.IncompletePacket;
+            token_len = @intCast(token_varint.value);
+            offset += token_varint.bytes_read;
 
-            // Only check token space if token_len > 0
+            // Skip token bytes if present
             if (token_len > 0) {
                 if (offset + token_len > data.len) {
                     return error.IncompletePacket;
                 }
-                offset += token_len; // Skip token
+                offset += token_len;
             }
         }
 
-        // Length field (2 bytes) - must have at least 2 bytes remaining
-        if (offset + 2 > data.len) {
+        // Length field - RFC 9000: variable-length integer
+        if (offset >= data.len) {
             return error.IncompletePacket;
         }
-        const payload_len = std.mem.readInt(u16, data[offset..][0..2], .big);
-        offset += 2;
+        const length_varint = readVarInt(data[offset..]) catch return error.IncompletePacket;
+        const payload_len: usize = @intCast(length_varint.value);
+        offset += length_varint.bytes_read;
 
         // Create payload slice
         // Handle empty payload (payload_len == 0) and non-empty payload

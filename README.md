@@ -31,6 +31,8 @@ Blitz Gateway is an ultra-low-latency edge API gateway and reverse proxy written
 
 **Latest Release:** [v1.0.0](https://github.com/holynakamoto/blitz-gateway/releases/tag/v1.0.0)
 
+#### Quick Install
+
 ```bash
 # Download the latest release
 curl -L -o blitz https://github.com/holynakamoto/blitz-gateway/releases/download/v1.0.0/blitz
@@ -38,50 +40,116 @@ curl -L -o blitz https://github.com/holynakamoto/blitz-gateway/releases/download
 # Make executable
 chmod +x blitz
 
-# Verify (should show "statically linked")
-file blitz
-
-# Run
-./blitz --help
+# Verify
+./blitz --version
 ```
 
-**Requirements:**
-- ARM64 (aarch64) Linux
-- Kernel 5.1+ (for io_uring)
-- No other dependencies! Fully static binary (4.7MB)
-
-**Verified platforms:** Ubuntu 22.04/24.04, Debian 11/12, Amazon Linux 2023 (all ARM64)
-
-### Deploy as Systemd Service
+#### Alternative: Using wget
 
 ```bash
-# Install binary
-sudo mv blitz /usr/local/bin/
-sudo chmod +x /usr/local/bin/blitz
+wget https://github.com/holynakamoto/blitz-gateway/releases/download/v1.0.0/blitz
+chmod +x blitz
+```
 
-# Create service file
-sudo tee /etc/systemd/system/blitz.service > /dev/null <<EOF
+#### Alternative: Using GitHub CLI
+
+```bash
+gh release download v1.0.0 --repo holynakamoto/blitz-gateway --pattern "blitz"
+chmod +x blitz
+```
+
+### System Requirements
+
+- **Architecture:** ARM64 (aarch64) Linux
+- **Kernel:** Linux 5.1+ (for io_uring support)
+- **Dependencies:** None! Fully static binary
+
+### Verified Platforms
+
+✅ Ubuntu 22.04 ARM64  
+✅ Ubuntu 20.04 ARM64  
+✅ Debian 11/12 ARM64  
+✅ Amazon Linux 2023 ARM64  
+✅ Any ARM64 Linux distribution with kernel 5.1+
+
+### Binary Details
+
+- **Size:** 4.7MB (statically linked)
+- **Built with:**
+  - liburing 2.7 (io_uring support)
+  - picotls with minicrypto (TLS 1.3)
+  - musl libc (fully static)
+- **SHA256:** `7f291c5c...` (see [release page](https://github.com/holynakamoto/blitz-gateway/releases/tag/v1.0.0) for full checksum)
+
+### Verify Download
+
+```bash
+# Check it's the correct architecture
+file blitz
+# Expected: ELF 64-bit LSB executable, ARM aarch64, statically linked
+
+# Verify it's truly static (no dependencies)
+ldd blitz 2>&1
+# Expected: "not a dynamic executable" or similar message
+
+# Check size
+ls -lh blitz
+# Expected: ~4.7M
+```
+
+### Deploy to Server
+
+#### Manual Deployment
+
+```bash
+# Copy to server
+scp blitz user@your-server:/tmp/
+
+# SSH and install
+ssh user@your-server
+sudo mv /tmp/blitz /usr/local/bin/
+sudo chmod +x /usr/local/bin/blitz
+```
+
+#### Systemd Service (Recommended)
+
+Create `/etc/systemd/system/blitz.service`:
+
+```ini
 [Unit]
 Description=Blitz QUIC Gateway
 After=network.target
+Documentation=https://github.com/holynakamoto/blitz-gateway
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/blitz
 Restart=always
 RestartSec=5
+User=blitz
+Group=blitz
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/blitz
 
 [Install]
 WantedBy=multi-user.target
-EOF
+```
 
-# Enable and start
+Enable and start:
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable blitz
 sudo systemctl start blitz
+sudo systemctl status blitz
 ```
 
-### Docker (Minimal Image)
+### Docker Deployment
 
 ```dockerfile
 FROM scratch
@@ -90,15 +158,17 @@ EXPOSE 443/udp
 ENTRYPOINT ["/blitz"]
 ```
 
+Build and run:
+
 ```bash
 docker build -t blitz-gateway .
 docker run -p 443:443/udp blitz-gateway
 ```
 
-### Build from Source
+### Building from Source
 
 ```bash
-# On macOS with Multipass
+# On macOS with Multipass installed
 ./scripts/linux-build.sh build -Doptimize=ReleaseFast
 
 # Sync binary to Mac
@@ -106,6 +176,66 @@ docker run -p 443:443/udp blitz-gateway
 ```
 
 See [docs/BUILD_ARTIFACTS.md](docs/BUILD_ARTIFACTS.md) for detailed build instructions.
+
+## Usage
+
+```bash
+# Start the QUIC gateway
+./blitz
+
+# Show help
+./blitz --help
+
+# Run in foreground with logging
+./blitz --verbose
+```
+
+## Upgrading
+
+```bash
+# Download new version
+curl -L -o blitz.new https://github.com/holynakamoto/blitz-gateway/releases/download/v1.1.0/blitz
+
+# Stop service
+sudo systemctl stop blitz
+
+# Replace binary
+sudo mv blitz.new /usr/local/bin/blitz
+sudo chmod +x /usr/local/bin/blitz
+
+# Start service
+sudo systemctl start blitz
+```
+
+## Troubleshooting
+
+### "cannot execute binary file: Exec format error"
+
+You're trying to run an ARM64 binary on a different architecture. Download the appropriate binary for your system:
+- ARM64/aarch64: Use this binary
+- x86_64/AMD64: Coming soon (or build from source)
+
+### "io_uring not supported"
+
+Your kernel is older than 5.1. Check kernel version:
+
+```bash
+uname -r
+```
+
+Upgrade your kernel or use a newer Linux distribution (Ubuntu 22.04 recommended).
+
+### Binary won't start
+
+Check logs:
+
+```bash
+# If using systemd
+sudo journalctl -u blitz -f
+
+# If running manually
+./blitz --verbose
+```
 
 ## Architecture
 

@@ -13,6 +13,10 @@ const packet = @import("packet.zig");
 const udp = @import("udp.zig");
 const crypto = @import("crypto.zig");
 
+// External C functions from picotls_wrapper.c
+extern fn blitz_get_ptls_ctx() *anyopaque;
+extern fn blitz_ptls_minicrypto_init() void;
+
 // Buffer pool for UDP packets
 const UDP_BUFFER_SIZE = 65536; // QUIC max packet size (64KB)
 const UDP_BUFFER_POOL_SIZE = 1024;
@@ -115,9 +119,15 @@ pub fn runQuicServer(ring: *c.struct_io_uring, port: u16) !void {
     var quic_server = try server_mod.QuicServer.init(allocator, port);
     defer quic_server.deinit();
 
-    // TLS context initialization disabled for PicoTLS migration
-    // TODO: Re-enable TLS context when PicoTLS integration is complete
-    quic_server.ssl_ctx = null;
+    // Initialize PicoTLS context with minicrypto backend
+    // The C wrapper handles random bytes internally
+    blitz_ptls_minicrypto_init();
+    const ptls_ctx = blitz_get_ptls_ctx();
+
+    // Set the context on the QUIC server
+    quic_server.ssl_ctx = ptls_ctx;
+
+    std.log.info("[TLS] PicoTLS context initialized (minicrypto) and attached to QUIC server", .{});
 
     // Initialize buffer pool
     var buffer_pool = try UdpBufferPool.init(allocator);
@@ -334,7 +344,11 @@ fn handleQuicPacket(
     };
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // NOW RE-PARSE THE PACKET STRUCTURE (length field was also protected!)
+    // CRITICAL FIX #1: Re-parse packet structure AFTER header protection removal
+    // ═══════════════════════════════════════════════════════════════════════════
+    // The Length field and other header fields are protected by header protection.
+    // We must remove header protection FIRST, then re-parse the packet structure
+    // to read the actual (unprotected) values.
     // ═══════════════════════════════════════════════════════════════════════════
     var pos: usize = 0;
 
@@ -353,32 +367,86 @@ fn handleQuicPacket(
     const scid_len = packet_copy[pos];
     pos += 1 + scid_len;
 
-    // Now the REAL payload length (varint, was encrypted before)
+    // Token Length (varint) - for Initial packets, may be 0
     if (pos >= packet_copy.len) {
-        std.log.err("[CRYPTO] No length field after packet number", .{});
+        std.log.err("[CRYPTO] No token length field after SCID", .{});
+        return;
+    }
+
+    const token_len_first = packet_copy[pos];
+    const token_len_prefix = (token_len_first & 0xC0) >> 6;
+    const token_varint_size: usize = switch (token_len_prefix) {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        else => unreachable,
+    };
+
+    if (pos + token_varint_size > packet_copy.len) {
+        std.log.err("[CRYPTO] Packet too short for token length varint", .{});
+        return;
+    }
+
+    var token_len: usize = 0;
+    switch (token_len_prefix) {
+        0 => {
+            token_len = token_len_first & 0x3F;
+        },
+        1 => {
+            token_len = (@as(usize, token_len_first & 0x3F) << 8) | @as(usize, packet_copy[pos + 1]);
+        },
+        2 => {
+            token_len = (@as(usize, token_len_first & 0x3F) << 24) |
+                (@as(usize, packet_copy[pos + 1]) << 16) |
+                (@as(usize, packet_copy[pos + 2]) << 8) |
+                @as(usize, packet_copy[pos + 3]);
+        },
+        3 => {
+            token_len = (@as(usize, token_len_first & 0x3F) << 56) |
+                (@as(usize, packet_copy[pos + 1]) << 48) |
+                (@as(usize, packet_copy[pos + 2]) << 40) |
+                (@as(usize, packet_copy[pos + 3]) << 32) |
+                (@as(usize, packet_copy[pos + 4]) << 24) |
+                (@as(usize, packet_copy[pos + 5]) << 16) |
+                (@as(usize, packet_copy[pos + 6]) << 8) |
+                @as(usize, packet_copy[pos + 7]);
+        },
+        else => unreachable,
+    }
+    pos += token_varint_size;
+
+    // Skip token data (if any)
+    if (pos + token_len > packet_copy.len) {
+        std.log.err("[CRYPTO] Packet too short for token", .{});
+        return;
+    }
+    pos += token_len;
+
+    // NOW read the REAL payload length (varint, now unprotected after header protection removal)
+    if (pos >= packet_copy.len) {
+        std.log.err("[CRYPTO] No payload length field after token", .{});
         return;
     }
 
     const len_first = packet_copy[pos];
     const len_prefix = (len_first & 0xC0) >> 6;
-
-    // Determine varint size based on prefix
     const varint_size: usize = switch (len_prefix) {
         0 => 1, // 00 prefix: 1 byte
         1 => 2, // 01 prefix: 2 bytes
         2 => 4, // 10 prefix: 4 bytes
         3 => 8, // 11 prefix: 8 bytes
-        else => unreachable, // len_prefix is always 0-3 due to & 0xC0 >> 6
+        else => unreachable,
     };
 
     if (pos + varint_size > packet_copy.len) {
-        std.log.err("[CRYPTO] Packet too short for varint length field", .{});
+        std.log.err("[CRYPTO] Packet too short for payload length varint", .{});
         return;
     }
 
     var payload_len: usize = 0;
 
-    // Read varint value
+    // Read varint value (same as existing readVarInt implementation)
     switch (len_prefix) {
         0 => {
             payload_len = len_first & 0x3F;
@@ -410,26 +478,54 @@ fn handleQuicPacket(
     // Packet number length (bottom 2 bits of first byte)
     const pn_len = 1 + @as(usize, header_type & 0x03);
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRITICAL FIX #2: Length field includes BOTH packet number AND payload
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RFC 9001 Section 17.2: "Length: A variable-length integer specifying the
+    // length in bytes of the remainder of the packet (that is, the Packet Number
+    // and Payload fields)"
+    // We must subtract the packet number length to get the actual encrypted payload length
+    if (payload_len < pn_len) {
+        std.log.err("[CRYPTO] Invalid length: payload_len={} < pn_len={}", .{ payload_len, pn_len });
+        return;
+    }
+    payload_len -= pn_len;
+
     // Read packet number
     const packet_number = switch (pn_len) {
         1 => packet_copy[pos],
-        2 => std.mem.readInt(u16, @as(*const [2]u8, @ptrCast(packet_copy[pos..pos+2].ptr)), .little),
-        3 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos..pos+4].ptr)), .little) & 0x00FFFFFF,
-        4 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos..pos+4].ptr)), .little),
+        2 => std.mem.readInt(u16, @as(*const [2]u8, @ptrCast(packet_copy[pos .. pos + 2].ptr)), .little),
+        3 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos .. pos + 4].ptr)), .little) & 0x00FFFFFF,
+        4 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos .. pos + 4].ptr)), .little),
         else => unreachable,
     };
     pos += pn_len;
 
+    // Clamp payload_len to available data (safety check)
+    const max_payload_len = if (pos < data.len) data.len - pos else 0;
+    if (payload_len > max_payload_len) {
+        std.log.info("[CRYPTO] Clamping payload_len from {} to {} (data.len={}, pos={})", .{ payload_len, max_payload_len, data.len, pos });
+        payload_len = max_payload_len;
+    }
+
     // Encrypted payload starts here
     if (pos + payload_len > data.len) {
-        std.log.err("[CRYPTO] Invalid payload bounds: pos={} + payload_len={} > data.len={}", .{pos, payload_len, data.len});
+        std.log.err("[CRYPTO] Invalid payload bounds: pos={} + payload_len={} > data.len={}", .{ pos, payload_len, data.len });
         return;
     }
 
     const encrypted_payload = packet_copy[pos .. pos + payload_len];
-    // QUIC AAD is the header up to (but NOT including) the packet number
-    // pn_offset is where the packet number starts
-    const header_aad = packet_copy[0..pn_offset];
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRITICAL FIX #3: AAD must include the unprotected packet number
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RFC 9001 Section 5.3: "The associated data, A, for the AEAD is the contents
+    // of the QUIC header, starting from the flags byte of either the short or long
+    // header, up to and including the unprotected packet number."
+    // pos is now AFTER reading the packet number, so it points to the start of
+    // encrypted payload. Therefore packet_copy[0..pos] includes everything up to
+    // and including the unprotected packet number.
+    const header_aad = packet_copy[0..pos];
 
     // Decrypt payload
     var plaintext: [65536]u8 = undefined;

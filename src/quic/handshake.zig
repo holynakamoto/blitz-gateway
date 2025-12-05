@@ -62,7 +62,20 @@ pub const QuicHandshake = struct {
         }
 
         pub fn append(self: *CryptoStream, data: []const u8) !void {
+            // For now, just append - proper offset-based reassembly will be handled
+            // by the CRYPTO frame extraction which should provide data in order
             try self.data.appendSlice(self.allocator, data);
+        }
+        
+        /// Append data at a specific offset (for proper CRYPTO frame reassembly)
+        pub fn appendAtOffset(self: *CryptoStream, offset: u64, data: []const u8) !void {
+            // Ensure we have space up to offset + length
+            const required_len = offset + data.len;
+            while (self.data.items.len < required_len) {
+                try self.data.append(self.allocator, 0);
+            }
+            // Copy data at correct offset
+            @memcpy(self.data.items[@intCast(offset)..@intCast(offset + data.len)], data);
         }
 
         pub fn getData(self: *const CryptoStream) []const u8 {
@@ -115,10 +128,19 @@ pub const QuicHandshake = struct {
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
         defer crypto_frames.deinit(self.allocator);
 
-        // Process each CRYPTO frame
+        std.log.info("[HANDSHAKE] Found {} CRYPTO frames", .{crypto_frames.items.len});
+
+        // Process each CRYPTO frame - reassemble by offset
         for (crypto_frames.items) |frame| {
-            // Append to crypto stream (handles reassembly)
-            try self.initial_crypto_stream.append(frame.data);
+            std.log.info("[HANDSHAKE] CRYPTO frame: offset={}, length={}", .{ frame.offset, frame.length });
+            // Append at correct offset for proper reassembly
+            try self.initial_crypto_stream.appendAtOffset(frame.offset, frame.data);
+        }
+        
+        const total_crypto_data = self.initial_crypto_stream.getData();
+        std.log.info("[HANDSHAKE] Total crypto stream data: {} bytes", .{total_crypto_data.len});
+        if (total_crypto_data.len > 0) {
+            std.log.info("[HANDSHAKE] First byte of crypto stream: 0x{X:0>2}", .{total_crypto_data[0]});
         }
 
         // Initialize TLS context if needed

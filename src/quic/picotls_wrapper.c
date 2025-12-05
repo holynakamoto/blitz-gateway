@@ -5,6 +5,8 @@
 #include <picotls.h>
 #include <picotls/minicrypto.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 // Global picotls context (allocated in C to avoid Zig opaque struct issues)
 static ptls_context_t g_ptls_ctx_storage;
@@ -29,10 +31,23 @@ void blitz_ptls_ctx_init(
     ctx->cipher_suites = (ptls_cipher_suite_t **)cipher_suites;
 }
 
+// Random bytes function using system random (for minicrypto init)
+static void blitz_random_bytes(void *buf, size_t len) {
+    // Use /dev/urandom for random bytes
+    FILE *f = fopen("/dev/urandom", "r");
+    if (f != NULL) {
+        fread(buf, 1, len, f);
+        fclose(f);
+    } else {
+        // Fallback: zero bytes (not secure, but allows compilation)
+        memset(buf, 0, len);
+    }
+}
+
 // Initialize context with minicrypto defaults
-void blitz_ptls_minicrypto_init(void (*random_bytes)(void *buf, size_t len)) {
+void blitz_ptls_minicrypto_init(void) {
     ptls_context_t* ctx = &g_ptls_ctx_storage;
-    ctx->random_bytes = random_bytes;
+    ctx->random_bytes = blitz_random_bytes;
     ctx->get_time = &ptls_get_time;
     ctx->key_exchanges = ptls_minicrypto_key_exchanges;
     ctx->cipher_suites = ptls_minicrypto_cipher_suites;

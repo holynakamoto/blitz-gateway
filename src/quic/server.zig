@@ -124,18 +124,24 @@ pub const QuicServerConnection = struct {
 
                 std.log.info("[FRAME] CRYPTO offset={}, length={}", .{ crypto_frame.offset, crypto_frame.length });
 
-                // Check if this is ClientHello (first byte = 0x01)
-                if (crypto_frame.data.len > 0 and crypto_frame.data[0] == 0x01) {
-                    std.log.info("[TLS] Found ClientHello ({} bytes)", .{crypto_frame.data.len});
-
-                    // Process ClientHello through handshake manager
-                    try self.handshake_mgr.processInitialPacket(payload, @ptrCast(ssl));
-                    return;
-                } else if (crypto_frame.data.len > 0) {
-                    std.log.info("[TLS] CRYPTO frame content type: 0x{X:0>2}", .{crypto_frame.data[0]});
+                // Always process Initial packets with CRYPTO frames through handshake manager
+                // The handshake manager will reassemble fragmented frames and detect ClientHello
+                // Derive Initial secrets if not already done
+                if (self.handshake_mgr.initial_secrets == null) {
+                    try self.handshake_mgr.deriveInitialSecrets(self.quic_conn.remote_conn_id);
                 }
 
-                break;
+                // Process through handshake manager (handles reassembly and ClientHello detection)
+                try self.handshake_mgr.processInitialPacket(payload, @ptrCast(ssl));
+                
+                // Check if we have handshake output to send
+                if (self.handshake_mgr.tls_ctx) |*tls_ctx| {
+                    if (tls_ctx.getHandshakeOutput(.initial)) |output| {
+                        std.log.info("[TLS] ServerHello generated ({} bytes)", .{output.data.len});
+                    }
+                }
+                
+                return;
             } else if (frame_type == 0x01) {
                 // PING frame
                 offset += 1;
@@ -153,30 +159,159 @@ pub const QuicServerConnection = struct {
 
     // Generate response packet (for handshake)
     // Returns the number of bytes written to buf (QUIC packet ready to send)
+    // This builds a complete encrypted Initial packet with ServerHello
     pub fn generateResponsePacket(
         self: *QuicServerConnection,
         packet_type: PacketType,
         buf: []u8,
     ) !usize {
-        // Generate ServerHello wrapped in CRYPTO frame
-        var crypto_frame_buf: [4096]u8 = undefined;
-        const crypto_frame_len = try self.handshake_mgr.generateServerHello(&crypto_frame_buf);
+        const picotls = @import("picotls.zig");
+        const crypto_mod = @import("crypto.zig");
+        const frames_mod = @import("frames.zig");
 
-        // Wrap CRYPTO frame in QUIC packet
-        return switch (packet_type) {
-            .initial => try packet.generateInitialPacket(
-                self.quic_conn.remote_conn_id,
-                self.quic_conn.local_conn_id,
-                crypto_frame_buf[0..crypto_frame_len],
-                buf,
-            ),
-            .handshake => try packet.generateHandshakePacket(
-                self.quic_conn.remote_conn_id,
-                self.quic_conn.local_conn_id,
-                crypto_frame_buf[0..crypto_frame_len],
-                buf,
-            ),
+        // Determine encryption level
+        const encryption_level = switch (packet_type) {
+            .initial => picotls.EncryptionLevel.initial,
+            .handshake => picotls.EncryptionLevel.handshake,
         };
+
+        // Get handshake output from PicoTLS
+        if (self.handshake_mgr.tls_ctx) |*tls_ctx| {
+            const output = tls_ctx.getHandshakeOutput(encryption_level) orelse {
+                std.log.info("[TLS] No handshake output for level {}", .{encryption_level});
+                return 0;
+            };
+
+            std.log.info("[TLS] Building response with {} bytes of handshake data", .{output.data.len});
+
+            // Build CRYPTO frame
+            var crypto_frame_buf: [8192]u8 = undefined;
+            const crypto_frame_len = try frames_mod.CryptoFrame.generate(
+                output.offset,
+                output.data,
+                &crypto_frame_buf,
+            );
+
+            const crypto_frame_data = crypto_frame_buf[0..crypto_frame_len];
+
+            // Derive Initial secrets (for encryption)
+            if (self.handshake_mgr.initial_secrets == null) {
+                std.log.err("[CRYPTO] Initial secrets not derived", .{});
+                return error.NoInitialSecrets;
+            }
+            const secrets = self.handshake_mgr.initial_secrets.?;
+
+            // Get packet number
+            const pn = self.handshake_mgr.getNextInitialPN();
+            const pn_len: usize = 1; // 1-byte packet number
+
+            // Build packet header (unprotected)
+            var header: [256]u8 = undefined;
+            var header_pos: usize = 0;
+
+            // Long header: Initial packet with 1-byte packet number
+            // 0xC0 = 11000000 (long header, Initial, PN length = 1)
+            header[header_pos] = 0xC0;
+            header_pos += 1;
+
+            // Version (QUIC v1 = 0x00000001)
+            std.mem.writeInt(u32, header[header_pos..][0..4], 0x00000001, .big);
+            header_pos += 4;
+
+            // DCID length + DCID (client's connection ID)
+            header[header_pos] = @intCast(self.quic_conn.remote_conn_id.len);
+            header_pos += 1;
+            @memcpy(header[header_pos..][0..self.quic_conn.remote_conn_id.len], self.quic_conn.remote_conn_id);
+            header_pos += self.quic_conn.remote_conn_id.len;
+
+            // SCID length + SCID (server's connection ID)
+            header[header_pos] = @intCast(self.quic_conn.local_conn_id.len);
+            header_pos += 1;
+            @memcpy(header[header_pos..][0..self.quic_conn.local_conn_id.len], self.quic_conn.local_conn_id);
+            header_pos += self.quic_conn.local_conn_id.len;
+
+            // Token length (0 for server Initial)
+            header_pos += writeVarInt(header[header_pos..], 0);
+
+            // Calculate total length: PN + encrypted payload + tag
+            const payload_len = crypto_frame_data.len + crypto_mod.TAG_LEN;
+            const total_len = pn_len + payload_len;
+
+            // Length field (varint) - includes PN + encrypted payload
+            header_pos += writeVarInt(header[header_pos..], total_len);
+
+            // Packet number offset (for header protection)
+            const pn_offset = header_pos;
+
+            // Packet number (1 byte)
+            header[header_pos] = @intCast(pn & 0xFF);
+            header_pos += pn_len;
+
+            // AAD = header up to and including packet number
+            const header_aad = header[0..header_pos];
+
+            // Encrypt the CRYPTO frame
+            var encrypted: [8192]u8 = undefined;
+            const encrypted_len = try crypto_mod.encryptPayload(
+                crypto_frame_data,
+                &secrets.server_key, // CRITICAL: Use SERVER key for server→client
+                &secrets.server_iv,
+                pn,
+                header_aad,
+                &encrypted,
+            );
+
+            // Build complete packet
+            @memcpy(buf[0..header_pos], header[0..header_pos]);
+            @memcpy(buf[header_pos..][0..encrypted_len], encrypted[0..encrypted_len]);
+            const packet_len = header_pos + encrypted_len;
+
+            // Apply header protection
+            try crypto_mod.applyHeaderProtection(
+                buf[0..packet_len],
+                &secrets.server_hp,
+                pn_offset,
+                pn_len,
+            );
+
+            // Mark handshake output as sent
+            tls_ctx.clearOutput(encryption_level, output.data.len);
+
+            std.log.info("[QUIC] Generated {} byte Server Initial packet", .{packet_len});
+
+            return packet_len;
+        } else {
+            std.log.warn("[TLS] No TLS context available for response", .{});
+            return 0;
+        }
+    }
+
+    // Helper: Write variable-length integer (QUIC varint encoding)
+    fn writeVarInt(buf: []u8, value: u64) usize {
+        if (value < 64) {
+            buf[0] = @intCast(value);
+            return 1;
+        } else if (value < 16384) {
+            buf[0] = @intCast(0x40 | (value >> 8));
+            buf[1] = @intCast(value & 0xFF);
+            return 2;
+        } else if (value < 1073741824) {
+            buf[0] = @intCast(0x80 | (value >> 24));
+            buf[1] = @intCast((value >> 16) & 0xFF);
+            buf[2] = @intCast((value >> 8) & 0xFF);
+            buf[3] = @intCast(value & 0xFF);
+            return 4;
+        } else {
+            buf[0] = @intCast(0xC0 | (value >> 56));
+            buf[1] = @intCast((value >> 48) & 0xFF);
+            buf[2] = @intCast((value >> 40) & 0xFF);
+            buf[3] = @intCast((value >> 32) & 0xFF);
+            buf[4] = @intCast((value >> 24) & 0xFF);
+            buf[5] = @intCast((value >> 16) & 0xFF);
+            buf[6] = @intCast((value >> 8) & 0xFF);
+            buf[7] = @intCast(value & 0xFF);
+            return 8;
+        }
     }
 
     pub const PacketType = enum {

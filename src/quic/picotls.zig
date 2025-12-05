@@ -1,16 +1,17 @@
-// picotls bindings for QUIC TLS 1.3 handshake
+// PicoTLS bindings for QUIC TLS 1.3 handshake (MINICRYPTO - NO OPENSSL)
+//
 // picotls is specifically designed for QUIC - it outputs raw handshake messages
 // at the correct encryption level, not TLS records!
 //
-// Uses ptls_server_handle_message() which provides epoch_offsets[5] to tell us
-// exactly where each encryption level's data starts/ends in the output buffer.
+// Uses ptls_minicrypto_* backend for pure static builds without OpenSSL.
 
 const std = @import("std");
 const builtin = @import("builtin");
 
+// PicoTLS with minicrypto backend (NO OpenSSL)
 const c = @cImport({
     @cInclude("picotls.h");
-    @cInclude("picotls/openssl.h");
+    @cInclude("picotls/minicrypto.h");
 });
 
 // Encryption levels (matching QUIC epochs)
@@ -28,267 +29,169 @@ pub const HandshakeOutput = struct {
     offset: u64, // CRYPTO frame offset for this data
 };
 
-// TLS Context for a single connection
+// TLS Context for QUIC connections (minicrypto backend)
+// Currently stubbed - will be fully implemented when wiring TLS handshake
 pub const TlsContext = struct {
-    ctx: c.ptls_context_t,
-    tls: ?*c.ptls_t,
-    sign_cert: c.ptls_openssl_sign_certificate_t,
+    initialized: bool = false,
+    handshake_complete: bool = false,
 
-    // Buffers for handshake output
-    handshake_buffer: [16384]u8,
-    epoch_offsets: [5]usize, // [initial_start, initial_end, handshake_start, handshake_end, total]
+    // Traffic secrets after handshake
+    client_traffic_secret: ?[32]u8 = null,
+    server_traffic_secret: ?[32]u8 = null,
 
-    // CRYPTO frame offsets for each level
-    crypto_offset_initial: u64,
-    crypto_offset_handshake: u64,
+    /// Initialize TLS context with certificate and key
+    /// For static builds, uses minicrypto backend
+    pub fn init(allocator: std.mem.Allocator, cert_path: []const u8, key_path: []const u8) !TlsContext {
+        _ = allocator;
+        _ = cert_path;
+        _ = key_path;
 
-    pub fn init(cert_pem: []const u8, key_pem: []const u8) !TlsContext {
-        var self = TlsContext{
-            .ctx = std.mem.zeroes(c.ptls_context_t),
-            .tls = null,
-            .sign_cert = std.mem.zeroes(c.ptls_openssl_sign_certificate_t),
-            .handshake_buffer = undefined,
-            .epoch_offsets = [_]usize{0} ** 5,
-            .crypto_offset_initial = 0,
-            .crypto_offset_handshake = 0,
+        // TODO: Load certificate using minicrypto
+        // For now, return stub context
+        return TlsContext{
+            .initialized = true,
         };
-
-        // Set up crypto using OpenSSL backend
-        self.ctx.random_bytes = c.ptls_openssl_random_bytes;
-        self.ctx.get_time = &c.ptls_get_time;
-        self.ctx.key_exchanges = &c.ptls_openssl_key_exchanges[0];
-        self.ctx.cipher_suites = &c.ptls_openssl_cipher_suites[0];
-
-        // Load certificate using OpenSSL
-        try self.loadCertificate(cert_pem, key_pem);
-
-        return self;
     }
 
-    fn loadCertificate(self: *TlsContext, cert_pem: []const u8, key_pem: []const u8) !void {
-        // Use OpenSSL to load PEM certificate and key
-        const openssl = @cImport({
-            @cInclude("openssl/ssl.h");
-            @cInclude("openssl/pem.h");
-            @cInclude("openssl/err.h");
-        });
-
-        // Load certificate
-        const cert_bio = openssl.BIO_new_mem_buf(cert_pem.ptr, @intCast(cert_pem.len));
-        if (cert_bio == null) return error.CertLoadFailed;
-        defer openssl.BIO_free(cert_bio);
-
-        const cert = openssl.PEM_read_bio_X509(cert_bio, null, null, null);
-        if (cert == null) return error.CertParseFailed;
-        // Don't free cert yet - picotls needs it
-
-        // Load private key
-        const key_bio = openssl.BIO_new_mem_buf(key_pem.ptr, @intCast(key_pem.len));
-        if (key_bio == null) {
-            openssl.X509_free(cert);
-            return error.KeyLoadFailed;
-        }
-        defer openssl.BIO_free(key_bio);
-
-        const key = openssl.PEM_read_bio_PrivateKey(key_bio, null, null, null);
-        if (key == null) {
-            openssl.X509_free(cert);
-            return error.KeyParseFailed;
-        }
-        // Don't free key yet - picotls needs it
-
-        // Set up sign certificate callback (picotls will use this for signing)
-        const ret = c.ptls_openssl_init_sign_certificate(&self.sign_cert, key);
-        if (ret != 0) {
-            openssl.EVP_PKEY_free(key);
-            openssl.X509_free(cert);
-            return error.SignCertInitFailed;
-        }
-
-        // Set certificate chain in context
-        self.ctx.sign_certificate = &self.sign_cert.super;
-
-        // Load certificate into picotls context
-        const load_ret = c.ptls_openssl_load_certificates(&self.ctx, cert, null);
-        if (load_ret != 0) {
-            c.ptls_openssl_dispose_sign_certificate(&self.sign_cert);
-            openssl.EVP_PKEY_free(key);
-            openssl.X509_free(cert);
-            return error.CertLoadFailed;
-        }
-
-        // Note: cert and key are now owned by picotls context
-    }
-
-    // Start a new TLS connection (server mode)
+    /// Create a new TLS connection (server side)
     pub fn newConnection(self: *TlsContext) !void {
-        self.tls = c.ptls_new(&self.ctx, 1); // 1 = server mode
-        if (self.tls == null) {
-            return error.PicotlsNewFailed;
-        }
-
-        // Reset offsets
-        self.crypto_offset_initial = 0;
-        self.crypto_offset_handshake = 0;
-        self.epoch_offsets = [_]usize{0} ** 5;
+        if (!self.initialized) return error.NotInitialized;
+        // TODO: Create ptls_t with minicrypto cipher suites
     }
 
-    // Process ClientHello and generate server response (QUIC-specific API)
-    // Returns handshake data split by encryption level
+    /// Handle incoming ClientHello
     pub fn handleClientHello(self: *TlsContext, client_hello: []const u8) !void {
-        if (self.tls == null) {
-            try self.newConnection();
-        }
-
-        // Reset buffer and offsets
-        var sendbuf = c.ptls_buffer_t{
-            .base = &self.handshake_buffer,
-            .capacity = self.handshake_buffer.len,
-            .off = 0,
-            .is_allocated = 0,
-        };
-
-        // epoch_offsets[5]: [initial_start, initial_end, handshake_start, handshake_end, total]
-        var epoch_offsets: [5]usize = [_]usize{0} ** 5;
-
-        // Use QUIC-specific API: ptls_server_handle_message
-        // in_epoch = 0 (INITIAL) since ClientHello comes in INITIAL packet
-        const ret = c.ptls_server_handle_message(
-            self.tls,
-            &sendbuf,
-            &epoch_offsets,
-            0, // in_epoch = INITIAL
-            client_hello.ptr,
-            client_hello.len,
-            null, // handshake_properties
-        );
-
-        if (ret != 0 and ret != c.PTLS_ERROR_IN_PROGRESS) {
-            std.log.err("[picotls] Handshake error: {d}", .{ret});
-            return error.TlsHandshakeFailed;
-        }
-
-        // Store epoch offsets
-        self.epoch_offsets = epoch_offsets;
-
-        std.debug.print("[picotls] Generated {} bytes total\n", .{sendbuf.off});
-        std.debug.print("[picotls] Epoch offsets: initial=[{}..{}], handshake=[{}..{}], total={}\n", .{ epoch_offsets[0], epoch_offsets[1], epoch_offsets[2], epoch_offsets[3], epoch_offsets[4] });
+        _ = self;
+        _ = client_hello;
+        // TODO: Feed ClientHello to ptls_handle_message
+        // This will generate ServerHello + EncryptedExtensions + Certificate + CertificateVerify + Finished
     }
 
-    // Get handshake data for a specific encryption level
+    /// Get handshake output for a specific encryption level
     pub fn getHandshakeOutput(self: *TlsContext, level: EncryptionLevel) ?HandshakeOutput {
-        const epoch: usize = @intFromEnum(level);
-
-        // epoch_offsets format: [initial_start, initial_end, handshake_start, handshake_end, total]
-        const start = switch (level) {
-            .initial => self.epoch_offsets[0],
-            .handshake => self.epoch_offsets[2],
-            else => return null,
-        };
-
-        const end = switch (level) {
-            .initial => self.epoch_offsets[1],
-            .handshake => self.epoch_offsets[3],
-            else => return null,
-        };
-
-        if (start >= end) return null;
-
-        const data = self.handshake_buffer[start..end];
-        const offset = switch (level) {
-            .initial => blk: {
-                const off = self.crypto_offset_initial;
-                self.crypto_offset_initial += data.len;
-                break :blk off;
-            },
-            .handshake => blk: {
-                const off = self.crypto_offset_handshake;
-                self.crypto_offset_handshake += data.len;
-                break :blk off;
-            },
-            else => return null,
-        };
-
-        return HandshakeOutput{
-            .level = level,
-            .data = data,
-            .offset = offset,
-        };
+        _ = self;
+        _ = level;
+        // TODO: Return pending handshake data for this level
+        return null;
     }
 
-    // Process incoming handshake data (e.g., client Finished in HANDSHAKE packet)
-    pub fn receiveHandshake(self: *TlsContext, data: []const u8, in_epoch: EncryptionLevel) !bool {
-        var plaintext_buf = c.ptls_buffer_t{
-            .base = &self.handshake_buffer,
-            .capacity = self.handshake_buffer.len,
-            .off = 0,
-            .is_allocated = 0,
-        };
-
-        var sendbuf = c.ptls_buffer_t{
-            .base = &self.handshake_buffer[self.epoch_offsets[4]..],
-            .capacity = self.handshake_buffer.len - self.epoch_offsets[4],
-            .off = 0,
-            .is_allocated = 0,
-        };
-
-        var epoch_offsets: [5]usize = self.epoch_offsets;
-        epoch_offsets[0] = self.epoch_offsets[4]; // Start from where we left off
-
-        const epoch: usize = @intFromEnum(in_epoch);
-        const ret = c.ptls_server_handle_message(
-            self.tls,
-            &sendbuf,
-            &epoch_offsets,
-            epoch,
-            data.ptr,
-            data.len,
-            null,
-        );
-
-        if (ret != 0 and ret != c.PTLS_ERROR_IN_PROGRESS) {
-            return error.TlsReceiveFailed;
-        }
-
-        // Update epoch offsets
-        self.epoch_offsets = epoch_offsets;
-
-        return self.isHandshakeComplete();
-    }
-
-    // Check if handshake is complete
-    pub fn isHandshakeComplete(self: *TlsContext) bool {
-        if (self.tls) |tls| {
-            return c.ptls_handshake_is_complete(tls) != 0;
-        }
+    /// Receive handshake data from peer (e.g., client Finished)
+    pub fn receiveHandshake(self: *TlsContext, data: []const u8, level: EncryptionLevel) !bool {
+        _ = self;
+        _ = data;
+        _ = level;
+        // TODO: Feed data to ptls_handle_message
+        // Returns true if handshake is complete
         return false;
     }
 
-    // Get traffic secrets for QUIC key derivation
-    pub fn getTrafficSecrets(self: *TlsContext, level: EncryptionLevel) ?struct { client: []const u8, server: []const u8 } {
-        if (self.tls) |tls| {
-            const epoch: usize = @intFromEnum(level);
+    /// Check if TLS handshake is complete
+    pub fn isHandshakeComplete(self: *TlsContext) bool {
+        return self.handshake_complete;
+    }
 
-            // Get secrets - picotls provides these via callbacks or direct access
-            // For now, we'll need to use the keylog callback or similar
-            // This is a placeholder - actual implementation depends on picotls API
-            _ = tls;
-            _ = epoch;
+    /// Get traffic secrets after handshake completion
+    pub fn getTrafficSecrets(self: *TlsContext, level: EncryptionLevel) ?struct { client: []const u8, server: []const u8 } {
+        _ = level;
+        if (!self.handshake_complete) return null;
+
+        if (self.client_traffic_secret) |*client| {
+            if (self.server_traffic_secret) |*server| {
+                return .{
+                    .client = client,
+                    .server = server,
+                };
+            }
         }
         return null;
     }
 
+    /// Clean up TLS context
     pub fn deinit(self: *TlsContext) void {
-        if (self.tls) |tls| {
-            c.ptls_free(tls);
-            self.tls = null;
-        }
+        self.initialized = false;
+        self.handshake_complete = false;
+        self.client_traffic_secret = null;
+        self.server_traffic_secret = null;
     }
 };
 
-// Minimal test
-test "picotls context init" {
-    // Skip test - requires actual cert/key
-    // var ctx = try TlsContext.init("", "");
-    // defer ctx.deinit();
+// ═══════════════════════════════════════════════════════════════════════════════
+// MINICRYPTO CIPHER SUITES
+// These are available without OpenSSL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Get minicrypto AES-128-GCM-SHA256 cipher suite
+pub fn getAes128GcmSha256() ?*const c.ptls_cipher_suite_t {
+    // ptls_minicrypto_aes128gcmsha256 is the cipher suite for QUIC
+    return &c.ptls_minicrypto_aes128gcmsha256;
+}
+
+/// Get minicrypto SHA256 hash algorithm
+pub fn getSha256() *const c.ptls_hash_algorithm_t {
+    return &c.ptls_minicrypto_sha256;
+}
+
+/// Get minicrypto X25519 key exchange
+pub fn getX25519() *const c.ptls_key_exchange_algorithm_t {
+    return &c.ptls_minicrypto_x25519;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HKDF USING MINICRYPTO
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// HKDF-Expand-Label using picotls minicrypto
+pub fn hkdfExpandLabel(
+    secret: []const u8,
+    label: []const u8,
+    context: []const u8,
+    out: []u8,
+) !void {
+    const hash_algo = &c.ptls_minicrypto_sha256;
+
+    // Build "tls13 " prefix
+    var full_label_buf: [64]u8 = undefined;
+    const prefix = "tls13 ";
+
+    if (prefix.len + label.len > full_label_buf.len)
+        return error.LabelTooLarge;
+
+    @memcpy(full_label_buf[0..prefix.len], prefix);
+    @memcpy(full_label_buf[prefix.len..][0..label.len], label);
+
+    const full_label = full_label_buf[0 .. prefix.len + label.len];
+
+    // Create iovec structs for PicoTLS API
+    const secret_iovec = c.ptls_iovec_t{
+        .base = @constCast(secret.ptr),
+        .len = secret.len,
+    };
+    const hash_value_iovec = c.ptls_iovec_t{
+        .base = @constCast(context.ptr),
+        .len = context.len,
+    };
+
+    // Call picotls HKDF-Expand-Label
+    const rc = c.ptls_hkdf_expand_label(
+        hash_algo,
+        out.ptr,
+        out.len,
+        secret_iovec,
+        full_label.ptr,
+        hash_value_iovec,
+        prefix.ptr,
+    );
+
+    if (rc != 0)
+        return error.HkdfFailed;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TESTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+test "TlsContext stub" {
+    var ctx = TlsContext{};
+    try std.testing.expect(!ctx.initialized);
+    try std.testing.expect(!ctx.isHandshakeComplete());
 }

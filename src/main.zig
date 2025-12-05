@@ -21,6 +21,7 @@ const metrics = @import("metrics/mod.zig");
 const auth = @import("auth/mod.zig");
 const jwt = auth.jwt;
 const benchmark = @import("benchmark.zig");
+const http2 = @import("http2_minimal.zig");
 
 // C imports for socket timeout configuration
 const c = @cImport({
@@ -341,9 +342,39 @@ fn handleHttpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, jw
     timeout.tv_usec = 0;
     _ = c.setsockopt(fd, c.SOL_SOCKET, c.SO_RCVTIMEO, &timeout, @sizeOf(c.struct_timeval));
 
-    // Read HTTP request with proper handling
-    const request_data = try readHttpRequest(allocator, stream);
+    // Peek at first bytes to detect protocol before full read
+    var peek_buf: [32]u8 = undefined;
+    const peek_read = stream.read(&peek_buf) catch |err| {
+        if (err == error.WouldBlock) return;
+        return err;
+    };
+    if (peek_read == 0) return;
+
+    // Check for direct HTTP/2 connection (prior knowledge - used by h2load)
+    // HTTP/2 preface is "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" (24 bytes)
+    if (peek_read >= 3 and std.mem.startsWith(u8, peek_buf[0..peek_read], "PRI")) {
+        std.log.info("Direct HTTP/2 connection detected", .{});
+        http2.handleDirectHttp2(stream, peek_buf[0..peek_read]) catch |err| {
+            std.log.err("HTTP/2 error: {}", .{err});
+        };
+        return;
+    }
+
+    // Not HTTP/2, continue reading as HTTP/1.1 (prepend what we read)
+    const request_data = try readHttpRequestWithPrefix(allocator, stream, peek_buf[0..peek_read]);
     defer allocator.free(request_data);
+
+    // Check for HTTP/2 upgrade (h2c) BEFORE parsing as HTTP/1.1
+    if (std.mem.indexOf(u8, request_data, "Upgrade: h2c") != null and
+        std.mem.indexOf(u8, request_data, "HTTP2-Settings:") != null)
+    {
+        std.log.info("HTTP/2 cleartext upgrade detected", .{});
+        http2.handleHttp2Upgrade(stream) catch |err| {
+            std.log.err("HTTP/2 error: {}", .{err});
+        };
+        return; // HTTP/2 handler manages the connection
+    }
+
 
     // Parse request
     const header_end = std.mem.indexOf(u8, request_data, "\r\n\r\n") orelse {
@@ -489,6 +520,77 @@ fn readHttpRequest(allocator: std.mem.Allocator, stream: std.net.Stream) ![]u8 {
 
     return try buffer.toOwnedSlice(allocator);
 }
+
+/// Read HTTP request with a prefix already read (for protocol detection)
+fn readHttpRequestWithPrefix(allocator: std.mem.Allocator, stream: std.net.Stream, prefix: []const u8) ![]u8 {
+    var buffer = std.ArrayListUnmanaged(u8){};
+    errdefer buffer.deinit(allocator);
+
+    // Start with the prefix data
+    try buffer.appendSlice(allocator, prefix);
+
+    var read_buf: [READ_BUFFER_SIZE]u8 = undefined;
+    var header_end_pos: ?usize = null;
+    var content_length: ?usize = null;
+    var is_chunked: bool = false;
+
+    // Check if prefix already contains header end
+    if (std.mem.indexOf(u8, buffer.items, "\r\n\r\n")) |pos| {
+        header_end_pos = pos;
+    }
+
+    while (true) {
+        // If we already found headers, check if done
+        if (header_end_pos) |_| {
+            // For simple GET requests without body, we are done
+            break;
+        }
+
+        const bytes_read = stream.read(&read_buf) catch |err| {
+            if (err == error.WouldBlock or err == error.TimedOut) {
+                return error.ReadTimeout;
+            }
+            return err;
+        };
+
+        if (bytes_read == 0) {
+            if (buffer.items.len == 0) return error.ConnectionClosed;
+            if (header_end_pos == null) return error.IncompleteRequest;
+            break;
+        }
+
+        try buffer.appendSlice(allocator, read_buf[0..bytes_read]);
+
+        if (buffer.items.len > MAX_HEADER_SIZE) {
+            return error.HeaderTooLarge;
+        }
+
+        if (std.mem.indexOf(u8, buffer.items, "\r\n\r\n")) |pos| {
+            header_end_pos = pos;
+            // Check for Content-Length or chunked
+            const header_section = buffer.items[0..pos];
+            var lines = std.mem.splitSequence(u8, header_section, "\r\n");
+            _ = lines.next(); // Skip request line
+            while (lines.next()) |line| {
+                if (line.len == 0) break;
+                if (std.mem.indexOf(u8, line, ":")) |colon| {
+                    const name = std.mem.trim(u8, line[0..colon], &std.ascii.whitespace);
+                    const value = std.mem.trim(u8, line[colon + 1 ..], &std.ascii.whitespace);
+                    if (std.ascii.eqlIgnoreCase(name, "content-length")) {
+                        content_length = std.fmt.parseInt(usize, value, 10) catch null;
+                    }
+                    if (std.ascii.eqlIgnoreCase(name, "transfer-encoding") and std.ascii.eqlIgnoreCase(value, "chunked")) {
+                        is_chunked = true;
+                    }
+                }
+            }
+            if (content_length == null and !is_chunked) break;
+        }
+    }
+
+    return try buffer.toOwnedSlice(allocator);
+}
+
 
 fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8), jwt_validator: *jwt.Validator, stream: std.net.Stream) !void {
     var status_code: u16 = 200;

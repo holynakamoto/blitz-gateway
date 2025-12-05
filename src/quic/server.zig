@@ -190,9 +190,8 @@ pub const QuicServer = struct {
         // Look up or create connection
         const conn = try self.getOrCreateConnection(remote_conn_id, client_addr);
 
-        // TODO: Create SSL connection from SSL_CTX for this connection
-        // For now, pass null (handshake will need to be initialized properly)
-        try conn.processPacket(data, null);
+        // Pass the PicoTLS context (if available) to enable TLS handshake
+        try conn.processPacket(data, self.ssl_ctx);
     }
 
     pub fn getOrCreateConnection(

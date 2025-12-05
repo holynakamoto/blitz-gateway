@@ -286,6 +286,7 @@ fn readVarInt(data: []const u8) !VarIntResult {
                 .bytes_read = 8,
             };
         },
+        else => unreachable, // prefix is always 0-3 due to & 0xC0 >> 6
     };
 }
 

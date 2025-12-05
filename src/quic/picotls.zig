@@ -232,8 +232,8 @@ pub const TlsContext = struct {
             c.ptls_free(tls);
             self.tls = null;
         }
-        self.initial_output.deinit();
-        self.handshake_output.deinit();
+        self.initial_output.deinit(self.allocator);
+        self.handshake_output.deinit(self.allocator);
     }
 };
 

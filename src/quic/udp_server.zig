@@ -328,18 +328,14 @@ fn handleQuicPacket(
     };
 
     // Remove header protection
-    const pn = crypto.removeHeaderProtection(packet_copy[0..data.len], &secrets.client_hp, pn_offset) catch |err| {
+    _ = crypto.removeHeaderProtection(packet_copy[0..data.len], &secrets.client_hp, pn_offset) catch |err| {
         std.log.err("[CRYPTO] Failed to remove header protection: {any}", .{err});
         return;
     };
 
-    std.log.info("[CRYPTO] Packet number: {} - header protection removed", .{pn});
-
     // ═══════════════════════════════════════════════════════════════════════════
     // NOW RE-PARSE THE PACKET STRUCTURE (length field was also protected!)
     // ═══════════════════════════════════════════════════════════════════════════
-
-    std.log.info("[CRYPTO] Starting packet re-parsing after header protection");
     var pos: usize = 0;
 
     // First byte (now unprotected)
@@ -357,27 +353,59 @@ fn handleQuicPacket(
     const scid_len = packet_copy[pos];
     pos += 1 + scid_len;
 
-    // Debug: show the next few bytes to understand the varint
-    std.log.info("[CRYPTO] pos={}, next 8 bytes: {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2} {x:0>2}", .{
-        pos,
-        if (pos < packet_copy.len) packet_copy[pos] else 0,
-        if (pos+1 < packet_copy.len) packet_copy[pos+1] else 0,
-        if (pos+2 < packet_copy.len) packet_copy[pos+2] else 0,
-        if (pos+3 < packet_copy.len) packet_copy[pos+3] else 0,
-        if (pos+4 < packet_copy.len) packet_copy[pos+4] else 0,
-        if (pos+5 < packet_copy.len) packet_copy[pos+5] else 0,
-        if (pos+6 < packet_copy.len) packet_copy[pos+6] else 0,
-        if (pos+7 < packet_copy.len) packet_copy[pos+7] else 0,
-    });
+    // Now the REAL payload length (varint, was encrypted before)
+    if (pos >= packet_copy.len) {
+        std.log.err("[CRYPTO] No length field after packet number", .{});
+        return;
+    }
+
+    const len_first = packet_copy[pos];
+    const len_prefix = (len_first & 0xC0) >> 6;
+
+    // Determine varint size based on prefix
+    const varint_size: usize = switch (len_prefix) {
+        0 => 1, // 00 prefix: 1 byte
+        1 => 2, // 01 prefix: 2 bytes
+        2 => 4, // 10 prefix: 4 bytes
+        3 => 8, // 11 prefix: 8 bytes
+        else => unreachable, // len_prefix is always 0-3 due to & 0xC0 >> 6
+    };
+
+    if (pos + varint_size > packet_copy.len) {
+        std.log.err("[CRYPTO] Packet too short for varint length field", .{});
+        return;
+    }
 
     var payload_len: usize = 0;
-    const bytes_read = std.leb.readILEB128(usize, packet_copy[pos..], &payload_len) catch |err| {
-        std.log.err("[CRYPTO] Failed to read payload length varint: {any}", .{err});
-        return;
-    };
-    pos += bytes_read;
 
-    std.log.info("[CRYPTO] Read payload_len={} in {} bytes", .{payload_len, bytes_read});
+    // Read varint value
+    switch (len_prefix) {
+        0 => {
+            payload_len = len_first & 0x3F;
+        },
+        1 => {
+            payload_len = (@as(usize, len_first & 0x3F) << 8) | @as(usize, packet_copy[pos + 1]);
+        },
+        2 => {
+            payload_len = (@as(usize, len_first & 0x3F) << 24) |
+                (@as(usize, packet_copy[pos + 1]) << 16) |
+                (@as(usize, packet_copy[pos + 2]) << 8) |
+                @as(usize, packet_copy[pos + 3]);
+        },
+        3 => {
+            payload_len = (@as(usize, len_first & 0x3F) << 56) |
+                (@as(usize, packet_copy[pos + 1]) << 48) |
+                (@as(usize, packet_copy[pos + 2]) << 40) |
+                (@as(usize, packet_copy[pos + 3]) << 32) |
+                (@as(usize, packet_copy[pos + 4]) << 24) |
+                (@as(usize, packet_copy[pos + 5]) << 16) |
+                (@as(usize, packet_copy[pos + 6]) << 8) |
+                @as(usize, packet_copy[pos + 7]);
+        },
+        else => unreachable,
+    }
+
+    pos += varint_size;
 
     // Packet number length (bottom 2 bits of first byte)
     const pn_len = 1 + @as(usize, header_type & 0x03);
@@ -385,9 +413,9 @@ fn handleQuicPacket(
     // Read packet number
     const packet_number = switch (pn_len) {
         1 => packet_copy[pos],
-        2 => std.mem.readInt(u16, packet_copy[pos..pos+2], .little),
-        3 => std.mem.readInt(u32, packet_copy[pos..pos+3], .little) & 0x00FFFFFF,
-        4 => std.mem.readInt(u32, packet_copy[pos..pos+4], .little),
+        2 => std.mem.readInt(u16, @as(*const [2]u8, @ptrCast(packet_copy[pos..pos+2].ptr)), .little),
+        3 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos..pos+4].ptr)), .little) & 0x00FFFFFF,
+        4 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos..pos+4].ptr)), .little),
         else => unreachable,
     };
     pos += pn_len;
@@ -399,7 +427,9 @@ fn handleQuicPacket(
     }
 
     const encrypted_payload = packet_copy[pos .. pos + payload_len];
-    const header_aad = packet_copy[0..pos];
+    // QUIC AAD is the header up to (but NOT including) the packet number
+    // pn_offset is where the packet number starts
+    const header_aad = packet_copy[0..pn_offset];
 
     // Decrypt payload
     var plaintext: [65536]u8 = undefined;
@@ -408,7 +438,7 @@ fn handleQuicPacket(
         &secrets.client_key,
         &secrets.client_iv,
         packet_number,
-        header_aad,
+        header_aad, // AAD must exclude the packet number per RFC 9001
         &plaintext,
     ) catch |err| {
         std.log.err("[CRYPTO] Decryption failed: {any}", .{err});

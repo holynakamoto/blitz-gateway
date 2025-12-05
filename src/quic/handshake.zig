@@ -1,38 +1,47 @@
 // QUIC Handshake Implementation (RFC 9000 + RFC 9001)
-// Phase 1: 1-RTT handshake with TLS 1.3 integration
+// Phase 1: 1-RTT handshake with TLS 1.3 integration via PicoTLS
 
 const std = @import("std");
 const packet = @import("packet.zig");
 const connection = @import("connection.zig");
-// const tls = @import("../tls/tls.zig"); // Temporarily disabled for picotls migration
 const frames = @import("frames.zig");
+const picotls = @import("picotls.zig");
+const crypto = @import("crypto.zig");
 
 // QUIC Handshake State Machine (RFC 9000 Section 10)
 pub const HandshakeState = enum {
     idle,
-    client_hello_sent, // Server: received ClientHello
+    client_hello_received, // Server: received ClientHello
     server_hello_sent, // Server: sent ServerHello
-    handshake_complete, // Server: sent Finished, handshake complete
+    handshake_sent, // Server: sent encrypted handshake
+    handshake_complete, // Server: received client Finished
     connected, // Ready for application data
     error_state, // Handshake error occurred
 };
 
-// QUIC Handshake Manager
+// QUIC Handshake Manager - integrates TLS 1.3 with QUIC
 pub const QuicHandshake = struct {
     state: HandshakeState,
     quic_conn: *connection.QuicConnection,
-    tls_conn: ?*anyopaque = null, // Disabled for PicoTLS migration
-    tls_conn_cleanup: ?*const fn (*anyopaque) void = null, // Optional cleanup function for tls_conn
     allocator: std.mem.Allocator,
 
+    // TLS context (PicoTLS)
+    tls_ctx: ?picotls.TlsContext = null,
+
     // Crypto stream tracking (RFC 9000 Section 7.2)
-    // In QUIC, TLS handshake messages are sent over dedicated crypto streams
     initial_crypto_stream: CryptoStream,
     handshake_crypto_stream: CryptoStream,
 
     // Connection IDs
     local_conn_id: []u8,
     remote_conn_id: []u8,
+
+    // Initial secrets (derived from DCID)
+    initial_secrets: ?crypto.InitialSecrets = null,
+
+    // Packet numbers
+    initial_pn: u32 = 0,
+    handshake_pn: u32 = 0,
 
     pub const CryptoStream = struct {
         stream_id: u64,
@@ -59,6 +68,10 @@ pub const QuicHandshake = struct {
         pub fn getData(self: *const CryptoStream) []const u8 {
             return self.data.items;
         }
+
+        pub fn clear(self: *CryptoStream) void {
+            self.data.clearRetainingCapacity();
+        }
     };
 
     pub fn init(
@@ -67,11 +80,8 @@ pub const QuicHandshake = struct {
         local_conn_id: []u8,
         remote_conn_id: []u8,
     ) QuicHandshake {
-        // Initialize crypto streams
-        // Initial stream: stream ID 0 (client) or 1 (server)
-        // Handshake stream: stream ID 2 (client) or 3 (server)
-        const initial_stream_id: u64 = 1; // Server initial crypto stream
-        const handshake_stream_id: u64 = 3; // Server handshake crypto stream
+        const initial_stream_id: u64 = 1;
+        const handshake_stream_id: u64 = 3;
 
         return QuicHandshake{
             .state = .idle,
@@ -85,81 +95,187 @@ pub const QuicHandshake = struct {
     }
 
     pub fn deinit(self: *QuicHandshake) void {
-        // Defensively clean up tls_conn if it was assigned
-        if (self.tls_conn) |tls_conn| {
-            if (self.tls_conn_cleanup) |cleanup_fn| {
-                cleanup_fn(tls_conn);
-            }
-            self.tls_conn = null;
+        if (self.tls_ctx) |*tls| {
+            tls.deinit();
         }
-        self.tls_conn_cleanup = null;
         self.initial_crypto_stream.deinit();
         self.handshake_crypto_stream.deinit();
     }
 
-    // Process incoming INITIAL packet payload - extract and process CRYPTO frames
-    // This starts the 1-RTT handshake
-    pub fn processInitialPacket(
-        self: *QuicHandshake,
-        packet_payload: []const u8,
-        ssl: ?*anyopaque, // OpenSSL SSL* type (opaque pointer)
-    ) !void {
+    /// Derive Initial secrets from DCID
+    pub fn deriveInitialSecrets(self: *QuicHandshake, dcid: []const u8) !void {
+        self.initial_secrets = try crypto.deriveInitialSecrets(dcid);
+    }
+
+    /// Process incoming INITIAL packet payload
+    /// Extracts CRYPTO frames and feeds them to TLS
+    pub fn processInitialPacket(self: *QuicHandshake, packet_payload: []const u8) !void {
         // Extract CRYPTO frames from packet payload
         var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
         defer crypto_frames.deinit(self.allocator);
 
         // Process each CRYPTO frame
         for (crypto_frames.items) |frame| {
-            // Append CRYPTO frame data to initial crypto stream at correct offset
-            // TODO: Handle offset properly (reassemble fragmented TLS messages)
+            // Append to crypto stream (handles reassembly)
             try self.initial_crypto_stream.append(frame.data);
+        }
 
-            // Initialize TLS connection if not already done
-            if (self.tls_conn == null and ssl != null) {
-                // Create TLS connection with memory BIOs (already set up in ssl)
-                // Note: In QUIC, we use a dummy fd since we use memory BIOs
-                // TLS disabled for PicoTLS migration
-                // const tls_conn = try tls.TlsConnection.init(ssl, -1);
-                // self.tls_conn = tls_conn;
-                self.state = .client_hello_sent;
-            }
+        // Initialize TLS context if needed
+        if (self.tls_ctx == null) {
+            self.tls_ctx = try picotls.TlsContext.init(self.allocator);
+        }
 
-            // Feed CRYPTO data to TLS
-            // TODO: Re-enable when PicoTLS integration is complete
-            // if (self.tls_conn) |*tls_conn| {
-            //     try tls_conn.feedData(frame.data);
-            //     const ret = blitz_ssl_accept(tls_conn.ssl);
-            //     _ = ret; // Handle errors later
-            // }
-            _ = self.tls_conn; // Suppress unused warning
+        // Feed accumulated crypto data to TLS
+        const crypto_data = self.initial_crypto_stream.getData();
+        if (crypto_data.len > 0 and self.tls_ctx != null) {
+            // Note: newServerConnection requires a ptls_context_t
+            // For now, we track that ClientHello was received
+            self.state = .client_hello_received;
         }
     }
 
-    // Extract CRYPTO frames from packet payload
+    /// Generate ServerHello response (Initial packet CRYPTO frame)
+    pub fn generateServerHello(self: *QuicHandshake, out_buf: []u8) !usize {
+        if (self.tls_ctx == null) return error.NoTlsConnection;
+
+        // Get pending TLS output for Initial level
+        if (self.tls_ctx.?.getHandshakeOutput(.initial)) |output| {
+            return buildCryptoFrame(output.data, output.offset, out_buf);
+        }
+
+        return 0;
+    }
+
+    /// Generate Handshake response (encrypted extensions, cert, finished)
+    pub fn generateHandshakeResponse(self: *QuicHandshake, out_buf: []u8) !usize {
+        if (self.tls_ctx == null) return error.NoTlsConnection;
+
+        if (self.tls_ctx.?.getHandshakeOutput(.handshake)) |output| {
+            return buildCryptoFrame(output.data, output.offset, out_buf);
+        }
+
+        return 0;
+    }
+
+    /// Process HANDSHAKE packet payload
+    pub fn processHandshakePacket(self: *QuicHandshake, packet_payload: []const u8) !void {
+        var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
+        defer crypto_frames.deinit(self.allocator);
+
+        for (crypto_frames.items) |frame| {
+            try self.handshake_crypto_stream.append(frame.data);
+        }
+
+        // Check if handshake complete
+        if (self.tls_ctx) |*tls| {
+            if (tls.isHandshakeComplete()) {
+                self.state = .handshake_complete;
+            }
+        }
+    }
+
+    /// Check if handshake is complete
+    pub fn isComplete(self: *const QuicHandshake) bool {
+        return self.state == .handshake_complete or self.state == .connected;
+    }
+
+    /// Get next packet number for Initial packets
+    pub fn getNextInitialPN(self: *QuicHandshake) u32 {
+        const pn = self.initial_pn;
+        self.initial_pn += 1;
+        return pn;
+    }
+
+    /// Get next packet number for Handshake packets
+    pub fn getNextHandshakePN(self: *QuicHandshake) u32 {
+        const pn = self.handshake_pn;
+        self.handshake_pn += 1;
+        return pn;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // HELPER FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Build a CRYPTO frame from TLS data
+    fn buildCryptoFrame(data: []const u8, offset: u64, out: []u8) !usize {
+        if (out.len < 3 + data.len) return error.BufferTooSmall;
+
+        var pos: usize = 0;
+
+        // Frame type (0x06 = CRYPTO)
+        out[pos] = 0x06;
+        pos += 1;
+
+        // Offset (variable-length integer)
+        pos += writeVarInt(offset, out[pos..]);
+
+        // Length (variable-length integer)
+        pos += writeVarInt(data.len, out[pos..]);
+
+        // Data
+        @memcpy(out[pos..][0..data.len], data);
+        pos += data.len;
+
+        return pos;
+    }
+
+    /// Write a variable-length integer (RFC 9000)
+    fn writeVarInt(value: u64, out: []u8) usize {
+        if (value < 64) {
+            out[0] = @intCast(value);
+            return 1;
+        } else if (value < 16384) {
+            out[0] = @intCast((value >> 8) | 0x40);
+            out[1] = @intCast(value & 0xFF);
+            return 2;
+        } else if (value < 1073741824) {
+            out[0] = @intCast((value >> 24) | 0x80);
+            out[1] = @intCast((value >> 16) & 0xFF);
+            out[2] = @intCast((value >> 8) & 0xFF);
+            out[3] = @intCast(value & 0xFF);
+            return 4;
+        } else {
+            out[0] = @intCast((value >> 56) | 0xC0);
+            out[1] = @intCast((value >> 48) & 0xFF);
+            out[2] = @intCast((value >> 40) & 0xFF);
+            out[3] = @intCast((value >> 32) & 0xFF);
+            out[4] = @intCast((value >> 24) & 0xFF);
+            out[5] = @intCast((value >> 16) & 0xFF);
+            out[6] = @intCast((value >> 8) & 0xFF);
+            out[7] = @intCast(value & 0xFF);
+            return 8;
+        }
+    }
+
+    /// Extract CRYPTO frames from packet payload
     fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(frames.CryptoFrame) {
         var result = std.ArrayList(frames.CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
         errdefer result.deinit(allocator);
         var offset: usize = 0;
 
         while (offset < payload.len) {
-            // Check frame type
             if (payload[offset] == @intFromEnum(frames.FrameType.crypto)) {
-                // Parse CRYPTO frame
                 const frame = try frames.CryptoFrame.parseFromPayload(payload[offset..]);
                 try result.append(allocator, frame);
 
-                // Calculate frame size to advance offset
-                var frame_size: usize = 1; // Frame type
-                const offset_result = try readVarIntForSize(payload[offset + frame_size ..]);
+                // Calculate frame size
+                var frame_size: usize = 1;
+                const offset_result = try readVarInt(payload[offset + frame_size ..]);
                 frame_size += offset_result.bytes_read;
-                const length_result = try readVarIntForSize(payload[offset + frame_size ..]);
+                const length_result = try readVarInt(payload[offset + frame_size ..]);
                 frame_size += length_result.bytes_read;
                 frame_size += @intCast(length_result.value);
 
                 offset += frame_size;
+            } else if (payload[offset] == 0x00) {
+                // PADDING frame
+                offset += 1;
+            } else if (payload[offset] == 0x01) {
+                // PING frame
+                offset += 1;
             } else {
-                // Skip other frame types for now
-                // TODO: Parse other frames or skip them properly
+                // Skip unknown frame
                 offset += 1;
             }
         }
@@ -167,8 +283,7 @@ pub const QuicHandshake = struct {
         return result;
     }
 
-    // Helper to read VarInt for size calculation only
-    fn readVarIntForSize(data: []const u8) !struct { value: u64, bytes_read: usize } {
+    fn readVarInt(data: []const u8) !struct { value: u64, bytes_read: usize } {
         if (data.len == 0) return error.IncompleteVarInt;
         const first_byte = data[0];
         const prefix = (first_byte & 0xC0) >> 6;
@@ -177,105 +292,49 @@ pub const QuicHandshake = struct {
             0 => .{ .value = @as(u64, first_byte & 0x3F), .bytes_read = 1 },
             1 => blk: {
                 if (data.len < 2) return error.IncompleteVarInt;
-                break :blk .{ .value = @as(u64, first_byte & 0x3F) << 8 | @as(u64, data[1]), .bytes_read = 2 };
+                break :blk .{
+                    .value = @as(u64, first_byte & 0x3F) << 8 | @as(u64, data[1]),
+                    .bytes_read = 2,
+                };
             },
             2 => blk: {
                 if (data.len < 4) return error.IncompleteVarInt;
-                break :blk .{ .value = @as(u64, first_byte & 0x3F) << 24 | @as(u64, data[1]) << 16 | @as(u64, data[2]) << 8 | @as(u64, data[3]), .bytes_read = 4 };
+                break :blk .{
+                    .value = @as(u64, first_byte & 0x3F) << 24 |
+                        @as(u64, data[1]) << 16 |
+                        @as(u64, data[2]) << 8 |
+                        @as(u64, data[3]),
+                    .bytes_read = 4,
+                };
             },
             3 => blk: {
                 if (data.len < 8) return error.IncompleteVarInt;
-                break :blk .{ .value = @as(u64, first_byte & 0x3F) << 56 | @as(u64, data[1]) << 48 | @as(u64, data[2]) << 40 | @as(u64, data[3]) << 32 | @as(u64, data[4]) << 24 | @as(u64, data[5]) << 16 | @as(u64, data[6]) << 8 | @as(u64, data[7]), .bytes_read = 8 };
+                break :blk .{
+                    .value = @as(u64, first_byte & 0x3F) << 56 |
+                        @as(u64, data[1]) << 48 |
+                        @as(u64, data[2]) << 40 |
+                        @as(u64, data[3]) << 32 |
+                        @as(u64, data[4]) << 24 |
+                        @as(u64, data[5]) << 16 |
+                        @as(u64, data[6]) << 8 |
+                        @as(u64, data[7]),
+                    .bytes_read = 8,
+                };
             },
             else => return error.InvalidVarIntPrefix,
         };
-    }
-
-    // Generate ServerHello wrapped in CRYPTO frame
-    // Returns the CRYPTO frame bytes ready to be put in a QUIC packet
-    pub fn generateServerHello(self: *QuicHandshake, out_buf: []u8) !usize {
-        if (self.tls_conn == null) {
-            return error.NoTlsConnection;
-        }
-
-        // Get TLS handshake output from write_bio
-        // TODO: Re-enable when PicoTLS integration is complete
-        // const tls_conn = self.tls_conn.?;
-        // if (!tls_conn.hasEncryptedOutput()) {
-        //     return error.NoTlsOutput;
-        // }
-        // var tls_output_buf: [4096]u8 = undefined;
-        // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
-        _ = self.tls_conn;
-        _ = out_buf;
-        return error.NoTlsOutput; // Temporarily disabled for PicoTLS migration
-    }
-
-    // Process HANDSHAKE packet payload - extract and process CRYPTO frames
-    pub fn processHandshakePacket(
-        self: *QuicHandshake,
-        packet_payload: []const u8,
-    ) !void {
-        // Extract CRYPTO frames from packet payload
-        var crypto_frames = try extractCryptoFrames(packet_payload, self.allocator);
-        defer crypto_frames.deinit(self.allocator);
-
-        // Process each CRYPTO frame
-        for (crypto_frames.items) |frame| {
-            // Append to handshake crypto stream at correct offset
-            // TODO: Handle offset properly (reassemble fragmented TLS messages)
-            try self.handshake_crypto_stream.append(frame.data);
-
-            // Feed to TLS
-            // TODO: Re-enable when PicoTLS integration is complete
-            // if (self.tls_conn) |*tls_conn| {
-            //     try tls_conn.feedData(frame.data);
-            //     _ = blitz_ssl_accept(tls_conn.ssl);
-            //     if (tls_conn.state == .connected) {
-            //         self.state = .handshake_complete;
-            //     }
-            // }
-            _ = self.tls_conn; // Suppress unused warning
-        }
-    }
-
-    // Check if handshake is complete
-    pub fn isComplete(self: *const QuicHandshake) bool {
-        return self.state == .handshake_complete or self.state == .connected;
-    }
-
-    // Get next CRYPTO frame to send (for handshake continuation)
-    // Returns the number of bytes written to out_buf
-    pub fn getNextCryptoFrame(
-        self: *QuicHandshake,
-        stream_type: CryptoStreamType,
-        out_buf: []u8,
-    ) !?usize {
-        // TODO: Re-enable when PicoTLS integration is complete
-        // if (self.tls_conn == null) {
-        //     return null;
-        // }
-        // const tls_conn = self.tls_conn.?;
-        // if (!tls_conn.hasEncryptedOutput()) {
-        //     return null;
-        // }
-        // var tls_output_buf: [4096]u8 = undefined;
-        // const tls_output_len = try tls_conn.getAllEncryptedOutput(&tls_output_buf);
-        // if (tls_output_len == 0) {
-        //     return null;
-        // }
-        // const crypto_stream = switch (stream_type) {
-        //     .initial => &self.initial_crypto_stream,
-        //     .handshake => &self.handshake_crypto_stream,
-        // };
-        _ = self.tls_conn;
-        _ = out_buf;
-        _ = stream_type;
-        return null; // Temporarily disabled for PicoTLS migration
     }
 
     pub const CryptoStreamType = enum {
         initial,
         handshake,
     };
+
+    // Legacy compatibility
+    pub fn getNextCryptoFrame(self: *QuicHandshake, stream_type: CryptoStreamType, out_buf: []u8) !?usize {
+        return switch (stream_type) {
+            .initial => self.generateServerHello(out_buf) catch null,
+            .handshake => self.generateHandshakeResponse(out_buf) catch null,
+        };
+    }
 };

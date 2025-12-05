@@ -38,3 +38,13 @@ void blitz_ptls_minicrypto_init(void (*random_bytes)(void *buf, size_t len)) {
     ctx->cipher_suites = ptls_minicrypto_cipher_suites;
 }
 
+// Wrapper for inline function ptls_buffer_init
+void blitz_ptls_buffer_init(ptls_buffer_t *buf, void *smallbuf, size_t smallbuf_size) {
+    ptls_buffer_init(buf, smallbuf, smallbuf_size);
+}
+
+// Wrapper for inline function ptls_buffer_dispose
+void blitz_ptls_buffer_dispose(ptls_buffer_t *buf) {
+    ptls_buffer_dispose(buf);
+}
+

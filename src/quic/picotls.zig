@@ -44,7 +44,8 @@ const c = struct {
     pub extern var ptls_minicrypto_sha256: ptls_hash_algorithm_t;
 
     // Core picotls functions
-    pub extern fn ptls_new(ctx: *ptls_context_t, is_server: c_int) ?*ptls_t;
+    pub extern fn ptls_server_new(ctx: *ptls_context_t) ?*ptls_t;
+    pub extern fn ptls_client_new(ctx: *ptls_context_t) ?*ptls_t;
     pub extern fn ptls_free(tls: *ptls_t) void;
     pub extern fn ptls_handshake(
         tls: *ptls_t,
@@ -56,9 +57,9 @@ const c = struct {
     pub extern fn ptls_is_server(tls: *ptls_t) c_int;
     pub extern fn ptls_handshake_is_complete(tls: *ptls_t) c_int;
 
-    // Buffer operations
-    pub extern fn ptls_buffer_init(buf: *ptls_buffer_t, smallbuf: ?[*]u8, smallbuf_size: usize) void;
-    pub extern fn ptls_buffer_dispose(buf: *ptls_buffer_t) void;
+    // Buffer operations (wrapped from inline functions)
+    pub extern fn blitz_ptls_buffer_init(buf: *ptls_buffer_t, smallbuf: ?[*]u8, smallbuf_size: usize) void;
+    pub extern fn blitz_ptls_buffer_dispose(buf: *ptls_buffer_t) void;
 
     // HKDF operations (for key derivation)
     pub extern fn ptls_hkdf_expand_label(
@@ -133,7 +134,7 @@ pub const TlsContext = struct {
         if (self.tls != null) return; // Already have a connection
 
         self.ctx = ptls_ctx;
-        self.tls = c.ptls_new(ptls_ctx, 1); // 1 = server mode
+        self.tls = c.ptls_server_new(ptls_ctx);
         if (self.tls == null) {
             std.log.err("[TLS] ptls_new failed", .{});
             return error.TlsInitFailed;
@@ -149,8 +150,8 @@ pub const TlsContext = struct {
         // Set up output buffer
         var sendbuf: c.ptls_buffer_t = undefined;
         var sendbuf_small: [8192]u8 = undefined;
-        c.ptls_buffer_init(&sendbuf, &sendbuf_small, sendbuf_small.len);
-        defer c.ptls_buffer_dispose(&sendbuf);
+        c.blitz_ptls_buffer_init(&sendbuf, &sendbuf_small, sendbuf_small.len);
+        defer c.blitz_ptls_buffer_dispose(&sendbuf);
 
         // Process handshake
         var inlen = data.len;

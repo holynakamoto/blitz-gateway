@@ -202,46 +202,6 @@ pub fn build(b: *std.Build) void {
     const quic_packet_simple_test_step = b.step("test-quic-packet-simple", "Run simple QUIC packet generation test");
     quic_packet_simple_test_step.dependOn(&run_quic_packet_simple_tests.step);
 
-    // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
-
-    // QUIC Handshake Server (full TLS integration)
-    // Create a new module with src/main.zig as root, then override entry point
-    const quic_handshake_server_module = b.addModule("quic_handshake_server", .{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-    });
-    const quic_handshake_server_exe = b.addExecutable(.{
-        .name = "quic_handshake_server",
-        .root_module = quic_handshake_server_module,
-    });
-    quic_handshake_server_exe.linkLibC();
-    if (target.result.os.tag == .linux) {
-        // Add architecture-specific library paths
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/aarch64-linux-gnu" });
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" }); // For picotls
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/lib/aarch64-linux-gnu" });
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/lib" });
-
-        // Link picotls libraries (built and installed by linux-build.sh)
-        quic_handshake_server_exe.linkSystemLibrary("picotls");
-        quic_handshake_server_exe.linkSystemLibrary("picotls-minicrypto");
-        // NOTE: liburing-ffi is linked via addCSourceFiles() -> linkLiburingFFI()
-
-        // Add library and include paths for picotls
-        quic_handshake_server_exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
-
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "src" });
-
-        // Add all C source files (required for Zig 0.15.2+)
-        addCSourceFiles(b, quic_handshake_server_exe, target, use_openssl);
-    }
-    b.installArtifact(quic_handshake_server_exe);
-
     // Transport parameters tests
     const transport_params_tests = b.addTest(.{
         .root_module = b.addModule("transport_params_root", .{

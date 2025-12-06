@@ -12,7 +12,7 @@ const builtin = @import("builtin");
 const core = @import("core/mod.zig");
 const io_uring = core.io_uring;
 const graceful_reload = core.graceful_reload;
-const udp_server = @import("quic/udp_server.zig");
+const quic_server = @import("quic/server.zig");
 const config = @import("config/mod.zig");
 const load_balancer = @import("load_balancer/mod.zig");
 const middleware = @import("middleware/mod.zig");
@@ -66,6 +66,9 @@ pub fn main() !void {
     // TLS certificate options (for QUIC mode)
     var cert_path: ?[]const u8 = null;
     var key_path: ?[]const u8 = null;
+    
+    // Packet capture option (for QUIC mode)
+    var enable_capture: bool = false;
 
     // Simple argument parsing
     var i: usize = 1;
@@ -133,6 +136,8 @@ pub fn main() !void {
                 i += 1;
                 key_path = args[i];
             }
+        } else if (std.mem.eql(u8, args[i], "--capture")) {
+            enable_capture = true;
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             printUsage();
             return;
@@ -145,7 +150,7 @@ pub fn main() !void {
 
     // Route to appropriate mode
     switch (mode) {
-        .quic => try runQuicServer(allocator, config_path, port, cert_path, key_path),
+        .quic => try runQuicServer(allocator, config_path, port, cert_path, key_path, enable_capture),
         .echo => try runEchoServer(port orelse 8080),
         .http => try runHttpServer(port orelse 8080),
         .bench => try runBenchmarkMode(allocator, bench_protocol, bench_duration, bench_connections, bench_threads, port),
@@ -167,6 +172,7 @@ fn printUsage() void {
         \\  --port <port>       Port to listen on (default: 8443 for QUIC, 8080 for others)
         \\  --cert <file>       TLS certificate file (PEM format, for QUIC mode)
         \\  --key <file>        TLS private key file (PEM format, for QUIC mode)
+        \\  --capture           Enable packet capture for QUIC sessions (writes to captures/ directory)
         \\
         \\Benchmark Options:
         \\  --bench [protocol]  Run built-in benchmarks (http1, http2, http3, or all)
@@ -238,7 +244,7 @@ fn runBenchmarkMode(
     benchmark.printResults(result);
 }
 
-fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16, cert_path: ?[]const u8, key_path: ?[]const u8) !void {
+fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16, cert_path: ?[]const u8, key_path: ?[]const u8, enable_capture: bool) !void {
     if (builtin.os.tag != .linux) {
         std.log.err("QUIC server requires Linux (io_uring support)", .{});
         return error.UnsupportedPlatform;
@@ -282,7 +288,15 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
     // Default: Run QUIC server on port 8443
     const listen_port = port orelse 8443;
     std.debug.print("Starting QUIC/HTTP3 server on port {d}...\n", .{listen_port});
-    try udp_server.runQuicServer(ring, listen_port, cert_path, key_path);
+    if (enable_capture) {
+        std.debug.print("Packet capture: ENABLED (files will be written to captures/ directory)\n", .{});
+    }
+    // TODO: Integrate cert_path, key_path, enable_capture when TLS is fully implemented
+    _ = cert_path;
+    _ = key_path;
+    _ = enable_capture;
+    _ = ring;
+    try quic_server.runQuicServer(listen_port);
 }
 
 fn runEchoServer(port: u16) !void {

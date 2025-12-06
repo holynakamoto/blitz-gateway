@@ -1,44 +1,18 @@
-//! QUIC Protocol Implementation
-//! Public API for QUIC connection handling, packet processing, and handshake
+// Pure Zig QUIC v1 Implementation
+// RFC 9000, 9001, 9002, 9114 compliant
+// Zero C dependencies - 100% Zig
 
-// Public types and constants
-pub const QuicServerConnection = @import("server.zig").QuicServerConnection;
-pub const QuicServer = @import("server.zig").QuicServer;
+pub const varint = @import("varint.zig");
+pub const packet = @import("packet.zig");
+pub const constants = @import("constants.zig");
+pub const types = @import("types.zig");
+pub const crypto = @import("crypto/mod.zig");
+pub const frame = @import("frame/mod.zig");
+pub const connection = @import("connection.zig");
+pub const server = @import("server.zig");
+pub const client = @import("client.zig");
+pub const version = @import("version.zig");
+pub const pn_space = @import("pn_space.zig");
+pub const connection_id = @import("connection_id.zig");
+pub const token = @import("token.zig");
 
-pub const QuicConnection = @import("connection.zig").QuicConnection;
-pub const ConnectionState = @import("connection.zig").ConnectionState;
-pub const Stream = @import("connection.zig").Stream;
-pub const StreamState = @import("connection.zig").StreamState;
-
-pub const QuicHandshake = @import("handshake.zig").QuicHandshake;
-pub const HandshakeState = @import("handshake.zig").HandshakeState;
-
-pub const Packet = @import("packet.zig").Packet;
-pub const LongHeaderPacket = @import("packet.zig").LongHeaderPacket;
-pub const ShortHeaderPacket = @import("packet.zig").ShortHeaderPacket;
-pub const QUIC_VERSION_1 = @import("packet.zig").QUIC_VERSION_1;
-
-pub const CryptoFrame = @import("frames.zig").CryptoFrame;
-pub const FrameType = @import("frames.zig").FrameType;
-
-// Cryptographic primitives are intentionally not exported to prevent misuse.
-// These should only be accessed internally by QUIC protocol handlers.
-// External code should use higher-level APIs like QuicServer, QuicServerConnection, etc.
-
-pub const TransportParameters = @import("transport_params.zig").TransportParameters;
-pub const TransportParameterId = @import("transport_params.zig").TransportParameterId;
-
-// UDP utilities
-pub const createUdpSocket = @import("udp.zig").createUdpSocket;
-pub const UdpConnection = @import("udp.zig").UdpConnection;
-pub const prepRecvFrom = @import("udp.zig").prepRecvFrom;
-pub const prepSendTo = @import("udp.zig").prepSendTo;
-
-// UDP server
-pub const UdpBufferPool = @import("udp_server.zig").UdpBufferPool;
-pub const runQuicServer = @import("udp_server.zig").runQuicServer;
-
-// PicoTLS integration
-pub const TlsContext = @import("picotls.zig").TlsContext;
-pub const EncryptionLevel = @import("picotls.zig").EncryptionLevel;
-pub const HandshakeOutput = @import("picotls.zig").HandshakeOutput;

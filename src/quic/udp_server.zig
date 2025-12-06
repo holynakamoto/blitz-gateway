@@ -1,627 +1,150 @@
-// QUIC UDP Server with io_uring event loop
-// Integrates QUIC server with io_uring for high-performance UDP packet handling
+// QUIC UDP Server - Production Integration
+// Thin UDP layer that routes packets to connections
+// Uses pure Zig std library - no C dependencies
 
 const std = @import("std");
-const builtin = @import("builtin");
-
-// Import io_uring C bindings from parent module for type compatibility
-const io_uring_mod = @import("../core/io_uring.zig");
-const c = io_uring_mod.c;
-
+const os = std.os;
+const net = std.net;
+const constants = @import("constants.zig");
 const server_mod = @import("server.zig");
-const packet = @import("packet.zig");
-const udp = @import("udp.zig");
-const crypto = @import("crypto.zig");
 
-// External C functions from picotls_wrapper.c
-extern fn blitz_get_ptls_ctx() *anyopaque;
-extern fn blitz_ptls_minicrypto_init() void;
-extern fn blitz_load_certificate_file(cert_path: [*c]const u8) c_int;
-extern fn blitz_load_private_key_file(key_path: [*c]const u8) c_int;
-extern fn blitz_ptls_minicrypto_init_with_certs() c_int;
-
-// Buffer pool for UDP packets
-const UDP_BUFFER_SIZE = 65536; // QUIC max packet size (64KB)
-const UDP_BUFFER_POOL_SIZE = 1024;
-
-const UdpBuffer = struct {
-    data: [UDP_BUFFER_SIZE]u8,
-    in_use: bool = false,
-    client_addr: c.struct_sockaddr_in = std.mem.zeroes(c.struct_sockaddr_in),
-    client_addr_len: c.socklen_t = @sizeOf(c.struct_sockaddr_in),
-};
-
-pub const UdpBufferPool = struct {
-    buffers: []UdpBuffer,
-    free_list: std.ArrayList(usize),
+/// High-performance QUIC UDP server
+pub const UdpServer = struct {
+    socket: os.socket_t,
+    server: server_mod.Server,
     allocator: std.mem.Allocator,
+    recv_buffer: [65536]u8, // Max QUIC packet size
 
-    pub fn init(allocator: std.mem.Allocator) !UdpBufferPool {
-        const buffers = try allocator.alloc(UdpBuffer, UDP_BUFFER_POOL_SIZE);
-        errdefer allocator.free(buffers);
+    pub fn init(allocator: std.mem.Allocator, port: u16) !UdpServer {
+        // Create UDP socket
+        const sock = try os.socket(os.AF.INET, os.SOCK.DGRAM, 0);
+        errdefer os.closeSocket(sock);
 
-        var free_list = std.ArrayList(usize).initCapacity(allocator, UDP_BUFFER_POOL_SIZE) catch @panic("Failed to init buffer pool free list");
-        errdefer free_list.deinit();
+        // Set socket options
+        const reuse: c_int = 1;
+        try os.setsockopt(sock, os.SOL.SOCKET, os.SO.REUSEADDR, std.mem.asBytes(&reuse));
 
-        // Initialize all buffers as free
-        for (0..UDP_BUFFER_POOL_SIZE) |i| {
-            free_list.appendAssumeCapacity(i);
-        }
+        // Bind to port
+        const addr = try net.Address.parseIp4("0.0.0.0", port);
+        try os.bind(sock, &addr.any, addr.getOsSockLen());
 
-        return UdpBufferPool{
-            .buffers = buffers,
-            .free_list = free_list,
+        // Initialize QUIC server
+        const server = try server_mod.Server.init(allocator);
+
+        return UdpServer{
+            .socket = sock,
+            .server = server,
             .allocator = allocator,
+            .recv_buffer = undefined,
         };
     }
 
-    pub fn deinit(self: *UdpBufferPool) void {
-        self.allocator.free(self.buffers);
-        self.free_list.deinit();
+    pub fn deinit(self: *UdpServer) void {
+        self.server.deinit();
+        os.closeSocket(self.socket);
     }
 
-    pub fn acquire(self: *UdpBufferPool) ?*UdpBuffer {
-        const idx = self.free_list.pop() orelse return null;
-        self.buffers[idx].in_use = true;
-        return &self.buffers[idx];
+    /// Run the server (blocking)
+    pub fn run(self: *UdpServer) !void {
+        std.log.info("QUIC server listening on UDP port", .{});
+
+        var client_addr: os.sockaddr = undefined;
+        var addr_len: os.socklen_t = @sizeOf(os.sockaddr);
+
+        while (true) {
+            // Receive UDP packet
+            const n = try os.recvfrom(
+                self.socket,
+                &self.recv_buffer,
+                0,
+                &client_addr,
+                &addr_len,
+            );
+
+            if (n == 0) continue;
+
+            const packet_data = self.recv_buffer[0..n];
+
+            // Parse peer address
+            const peer = net.Address{ .in = @bitCast(client_addr.in) };
+
+            // Quick parse to get DCID (for connection lookup)
+            const dcid = try self.extractDcid(packet_data);
+
+            // Get or create connection
+            const conn = try self.server.getOrCreateConnection(dcid, peer);
+
+            // Handle packet
+            conn.handleIncomingPacket(packet_data) catch |err| {
+                std.log.warn("Error handling packet from {any}: {any}", .{ peer, err });
+                // Remove connection on error
+                self.server.removeConnection(dcid);
+                continue;
+            };
+
+            // Generate response if handshake is in progress
+            if (conn.state == .handshaking) {
+                var response_buffer: [65536]u8 = undefined;
+                const response_len = conn.generateResponsePacket(&response_buffer) catch |err| {
+                    std.log.warn("Error generating response: {any}", .{err});
+                    continue;
+                };
+
+                // Send response
+                _ = try os.sendto(
+                    self.socket,
+                    response_buffer[0..response_len],
+                    0,
+                    &client_addr,
+                    addr_len,
+                );
+
+                std.log.info("Sent ServerHello response ({} bytes)", .{response_len});
+            }
+        }
     }
 
-    pub fn release(self: *UdpBufferPool, buf: *UdpBuffer) void {
-        const idx = @intFromPtr(buf) - @intFromPtr(self.buffers.ptr);
-        const buffer_idx = idx / @sizeOf(UdpBuffer);
-        if (buffer_idx < self.buffers.len) {
-            self.buffers[buffer_idx].in_use = false;
-            self.free_list.append(self.allocator, buffer_idx) catch {};
+    /// Extract DCID from packet (fast path for connection lookup)
+    fn extractDcid(self: *UdpServer, data: []const u8) ![]const u8 {
+        _ = self;
+
+        if (data.len < 7) {
+            return error.PacketTooShort;
+        }
+
+        const first_byte = data[0];
+        const is_long_header = (first_byte & constants.LONG_HEADER_BIT) != 0;
+
+        if (is_long_header) {
+            // Long header: DCID is at offset 5 (after version)
+            if (data.len < 6) {
+                return error.InsufficientData;
+            }
+            const dcid_len = data[5];
+            if (dcid_len > constants.MAX_CONNECTION_ID_LEN or data.len < 6 + dcid_len) {
+                return error.InvalidConnectionIdLength;
+            }
+            return data[6 .. 6 + dcid_len];
+        } else {
+            // Short header: DCID starts at offset 1
+            // For short headers, we need to know the DCID length from connection state
+            // For now, assume 8 bytes (common default)
+            if (data.len < 9) {
+                return error.InsufficientData;
+            }
+            return data[1..9];
         }
     }
 };
 
-// User data encoding for io_uring
-const UserData = struct {
-    fd: c_int,
-    op: Operation,
-    buffer_idx: usize = 0,
-
-    pub const Operation = enum {
-        recvfrom,
-        sendto,
-    };
-};
-
-fn encodeUserData(fd: c_int, op: UserData.Operation, buffer_idx: usize) u64 {
-    const fd_part: u64 = @intCast(fd & 0xFFFF);
-    const op_part: u64 = @as(u64, @intCast(@intFromEnum(op))) << 16;
-    const buf_part: u64 = @as(u64, @intCast(buffer_idx)) << 24;
-    return fd_part | op_part | buf_part;
-}
-
-fn decodeUserData(user_data: u64) UserData {
-    return UserData{
-        .fd = @intCast(user_data & 0xFFFF),
-        .op = @enumFromInt((user_data >> 16) & 0xFF),
-        .buffer_idx = @intCast((user_data >> 24) & 0xFFFFFFFF),
-    };
-}
-
-// Helper to get SQE (from io_uring.zig pattern)
-fn getSqe(ring: *c.struct_io_uring) ?*c.struct_io_uring_sqe {
-    return c.io_uring_get_sqe(ring);
-}
-
-fn setSqeData(sqe: *c.struct_io_uring_sqe, user_data: u64) void {
-    c.io_uring_sqe_set_data(sqe, @as(?*anyopaque, @ptrFromInt(user_data)));
-}
-
-// Run QUIC UDP server with io_uring event loop
-pub fn runQuicServer(ring: *c.struct_io_uring, port: u16, cert_path: ?[]const u8, key_path: ?[]const u8) !void {
+/// Run QUIC server on specified port
+pub fn runQuicServer(port: u16) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Initialize QUIC server
-    var quic_server = try server_mod.QuicServer.init(allocator, port);
-    defer quic_server.deinit();
+    var server = try UdpServer.init(allocator, port);
+    defer server.deinit();
 
-    // Load certificates if provided
-    if (cert_path) |cert| {
-        // Allocate null-terminated string for C function
-        const cert_cstr = try allocator.alloc(u8, cert.len + 1);
-        defer allocator.free(cert_cstr);
-        @memcpy(cert_cstr[0..cert.len], cert);
-        cert_cstr[cert.len] = 0;
-
-        if (blitz_load_certificate_file(cert_cstr.ptr) != 0) {
-            std.log.err("[TLS] Failed to load certificate from {s}", .{cert});
-            return error.CertificateLoadFailed;
-        }
-        std.log.info("[TLS] Loaded certificate from {s}", .{cert});
-    }
-
-    if (key_path) |key| {
-        // Allocate null-terminated string for C function
-        const key_cstr = try allocator.alloc(u8, key.len + 1);
-        defer allocator.free(key_cstr);
-        @memcpy(key_cstr[0..key.len], key);
-        key_cstr[key.len] = 0;
-
-        if (blitz_load_private_key_file(key_cstr.ptr) != 0) {
-            std.log.err("[TLS] Failed to load private key from {s}", .{key});
-            return error.PrivateKeyLoadFailed;
-        }
-        std.log.info("[TLS] Loaded private key from {s}", .{key});
-    }
-
-    // Initialize PicoTLS context with minicrypto backend
-    // If certificates are loaded, use the cert-aware initialization
-    if (cert_path != null and key_path != null) {
-        if (blitz_ptls_minicrypto_init_with_certs() != 0) {
-            std.log.warn("[TLS] Certificate loading failed, using minimal context", .{});
-            blitz_ptls_minicrypto_init();
-        } else {
-            std.log.info("[TLS] PicoTLS context initialized with certificates", .{});
-        }
-    } else {
-        blitz_ptls_minicrypto_init();
-        std.log.info("[TLS] PicoTLS context initialized (minicrypto, no certificates)", .{});
-    }
-
-    const ptls_ctx = blitz_get_ptls_ctx();
-
-    // Set the context on the QUIC server
-    quic_server.ssl_ctx = ptls_ctx;
-
-    std.log.info("[TLS] PicoTLS context attached to QUIC server", .{});
-
-    // Initialize buffer pool
-    var buffer_pool = try UdpBufferPool.init(allocator);
-    defer buffer_pool.deinit();
-
-    std.log.info("QUIC server listening on UDP port {d}", .{port});
-
-    // Submit initial recvfrom operations (multiple for better throughput)
-    const initial_recvs = 32;
-    for (0..initial_recvs) |_| {
-        const buf = buffer_pool.acquire() orelse break;
-
-        const sqe_opt = getSqe(ring);
-        if (sqe_opt == null) {
-            buffer_pool.release(buf);
-            break;
-        }
-        const sqe = sqe_opt.?;
-
-        const buffer_idx = @intFromPtr(buf) - @intFromPtr(buffer_pool.buffers.ptr);
-        const idx = buffer_idx / @sizeOf(UdpBuffer);
-
-        udp.prepRecvFrom(sqe, quic_server.udp_fd, &buf.data, &buf.client_addr, &buf.client_addr_len);
-        setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, idx));
-    }
-    _ = c.io_uring_submit(ring);
-
-    // Main event loop
-    while (true) {
-        var cqe: ?*c.struct_io_uring_cqe = null;
-        _ = c.io_uring_wait_cqe(ring, &cqe);
-
-        if (cqe == null) {
-            continue;
-        }
-
-        const res = cqe.?.res;
-        const user_data = cqe.?.user_data;
-        const decoded = decodeUserData(user_data);
-
-        c.io_uring_cqe_seen(ring, cqe);
-
-        if (res < 0) {
-            // Error handling
-            if (decoded.op == .recvfrom) {
-                // Release buffer and resubmit recvfrom
-                if (decoded.buffer_idx < buffer_pool.buffers.len) {
-                    buffer_pool.release(&buffer_pool.buffers[decoded.buffer_idx]);
-                }
-
-                // Resubmit recvfrom
-                const buf = buffer_pool.acquire() orelse continue;
-
-                const sqe_opt = getSqe(ring);
-                if (sqe_opt == null) {
-                    buffer_pool.release(buf);
-                    continue;
-                }
-                const sqe = sqe_opt.?;
-
-                const buffer_idx = @intFromPtr(buf) - @intFromPtr(buffer_pool.buffers.ptr);
-                const idx = buffer_idx / @sizeOf(UdpBuffer);
-
-                udp.prepRecvFrom(sqe, quic_server.udp_fd, &buf.data, &buf.client_addr, &buf.client_addr_len);
-                setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, idx));
-                _ = c.io_uring_submit(ring);
-            } else if (decoded.op == .sendto) {
-                // Release buffer for failed sendto operation (do not resubmit)
-                if (decoded.buffer_idx < buffer_pool.buffers.len) {
-                    buffer_pool.release(&buffer_pool.buffers[decoded.buffer_idx]);
-                }
-            }
-            continue;
-        }
-
-        switch (decoded.op) {
-            .recvfrom => {
-                const buf = &buffer_pool.buffers[decoded.buffer_idx];
-                const packet_data = buf.data[0..@intCast(res)];
-
-                // Process QUIC packet (client_addr is already filled by recvfrom)
-                handleQuicPacket(
-                    &quic_server,
-                    packet_data,
-                    &buf.client_addr,
-                    &buf.client_addr_len,
-                    ring,
-                    &buffer_pool,
-                ) catch |err| {
-                    std.log.debug("Error handling QUIC packet: {any}", .{err});
-                };
-
-                // Resubmit recvfrom for next packet
-                const next_buf = buffer_pool.acquire() orelse {
-                    // Pool exhausted - reuse this buffer
-                    // Use the buffer's own client_addr fields (heap-allocated, not stack)
-                    const sqe_opt = getSqe(ring);
-                    if (sqe_opt == null) {
-                        buffer_pool.release(buf);
-                        continue;
-                    }
-                    const sqe = sqe_opt.?;
-
-                    udp.prepRecvFrom(sqe, quic_server.udp_fd, &buf.data, &buf.client_addr, &buf.client_addr_len);
-                    setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, decoded.buffer_idx));
-                    _ = c.io_uring_submit(ring);
-                    continue;
-                };
-
-                const sqe_opt = getSqe(ring);
-                if (sqe_opt == null) {
-                    buffer_pool.release(next_buf);
-                    buffer_pool.release(buf);
-                    continue;
-                }
-                const sqe = sqe_opt.?;
-
-                const buffer_idx = @intFromPtr(next_buf) - @intFromPtr(buffer_pool.buffers.ptr);
-                const idx = buffer_idx / @sizeOf(UdpBuffer);
-
-                // Use the buffer's own client_addr fields (heap-allocated, not stack)
-                udp.prepRecvFrom(sqe, quic_server.udp_fd, &next_buf.data, &next_buf.client_addr, &next_buf.client_addr_len);
-                setSqeData(sqe, encodeUserData(quic_server.udp_fd, .recvfrom, idx));
-                _ = c.io_uring_submit(ring);
-
-                // Release the buffer we just used
-                buffer_pool.release(buf);
-            },
-            .sendto => {
-                // Send completed - release buffer
-                if (decoded.buffer_idx < buffer_pool.buffers.len) {
-                    buffer_pool.release(&buffer_pool.buffers[decoded.buffer_idx]);
-                }
-            },
-        }
-    }
-}
-
-fn handleQuicPacket(
-    quic_server: *server_mod.QuicServer,
-    data: []const u8,
-    client_addr: *c.struct_sockaddr_in,
-    client_addr_len: *c.socklen_t,
-    ring: *c.struct_io_uring,
-    buffer_pool: *UdpBufferPool,
-) !void {
-    // Convert C sockaddr to Zig address
-    const client_ip = std.net.Ip4Address.init(
-        @as([4]u8, @bitCast(client_addr.sin_addr.s_addr)),
-        @intCast(c.ntohs(client_addr.sin_port)),
-    );
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // QUIC PACKET DECRYPTION FLOW (from working quic_handshake_server.zig)
-    // Must decrypt BEFORE parsing! QUIC uses encryption-at-rest.
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    if (data.len < 18) {
-        std.log.debug("Packet too short: {} bytes", .{data.len});
-        return;
-    }
-
-    const first_byte = data[0];
-
-    // Check if long header (bit 7 = 1)
-    if ((first_byte & 0x80) == 0) {
-        std.log.debug("Short header packet (1-RTT) - not handled yet", .{});
-        return;
-    }
-
-    // Check packet type (bits 4-5): 0 = Initial
-    const packet_type = (first_byte & 0x30) >> 4;
-    if (packet_type != 0) {
-        std.log.debug("Non-Initial packet type {} - not handled yet", .{packet_type});
-        return;
-    }
-
-    // Extract DCID (unprotected part of header)
-    const orig_dcid_len = data[5];
-    if (6 + orig_dcid_len > data.len) {
-        std.log.debug("Invalid DCID length", .{});
-        return;
-    }
-    const dcid = data[6 .. 6 + orig_dcid_len];
-
-    // Extract SCID
-    const scid_offset = 6 + orig_dcid_len;
-    if (scid_offset >= data.len) return;
-    const orig_scid_len = data[scid_offset];
-    const scid = data[scid_offset + 1 .. scid_offset + 1 + orig_scid_len];
-
-    std.log.info("[QUIC] Initial packet: DCID={} bytes, SCID={} bytes", .{ orig_dcid_len, orig_scid_len });
-
-    // Derive Initial secrets from DCID
-    const secrets = crypto.deriveInitialSecrets(dcid) catch |err| {
-        std.log.err("[CRYPTO] Failed to derive secrets: {any}", .{err});
-        return;
-    };
-
-    // Make a mutable copy for header protection removal
-    var packet_copy: [65536]u8 = undefined;
-    @memcpy(packet_copy[0..data.len], data);
-
-    // Find packet number offset
-    const pn_offset = crypto.findPacketNumberOffset(packet_copy[0..data.len]) catch |err| {
-        std.log.err("[CRYPTO] Failed to find PN offset: {any}", .{err});
-        return;
-    };
-
-    // Remove header protection
-    _ = crypto.removeHeaderProtection(packet_copy[0..data.len], &secrets.client_hp, pn_offset) catch |err| {
-        std.log.err("[CRYPTO] Failed to remove header protection: {any}", .{err});
-        return;
-    };
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CRITICAL FIX #1: Re-parse packet structure AFTER header protection removal
-    // ═══════════════════════════════════════════════════════════════════════════
-    // The Length field and other header fields are protected by header protection.
-    // We must remove header protection FIRST, then re-parse the packet structure
-    // to read the actual (unprotected) values.
-    // ═══════════════════════════════════════════════════════════════════════════
-    var pos: usize = 0;
-
-    // First byte (now unprotected)
-    const header_type = packet_copy[pos];
-    pos += 1;
-
-    // Version (4 bytes)
-    pos += 4;
-
-    // DCID len + DCID
-    const dcid_len = packet_copy[pos];
-    pos += 1 + dcid_len;
-
-    // SCID len + SCID
-    const scid_len = packet_copy[pos];
-    pos += 1 + scid_len;
-
-    // Token Length (varint) - for Initial packets, may be 0
-    if (pos >= packet_copy.len) {
-        std.log.err("[CRYPTO] No token length field after SCID", .{});
-        return;
-    }
-
-    const token_len_first = packet_copy[pos];
-    const token_len_prefix = (token_len_first & 0xC0) >> 6;
-    const token_varint_size: usize = switch (token_len_prefix) {
-        0 => 1,
-        1 => 2,
-        2 => 4,
-        3 => 8,
-        else => unreachable,
-    };
-
-    if (pos + token_varint_size > packet_copy.len) {
-        std.log.err("[CRYPTO] Packet too short for token length varint", .{});
-        return;
-    }
-
-    var token_len: usize = 0;
-    switch (token_len_prefix) {
-        0 => {
-            token_len = token_len_first & 0x3F;
-        },
-        1 => {
-            token_len = (@as(usize, token_len_first & 0x3F) << 8) | @as(usize, packet_copy[pos + 1]);
-        },
-        2 => {
-            token_len = (@as(usize, token_len_first & 0x3F) << 24) |
-                (@as(usize, packet_copy[pos + 1]) << 16) |
-                (@as(usize, packet_copy[pos + 2]) << 8) |
-                @as(usize, packet_copy[pos + 3]);
-        },
-        3 => {
-            token_len = (@as(usize, token_len_first & 0x3F) << 56) |
-                (@as(usize, packet_copy[pos + 1]) << 48) |
-                (@as(usize, packet_copy[pos + 2]) << 40) |
-                (@as(usize, packet_copy[pos + 3]) << 32) |
-                (@as(usize, packet_copy[pos + 4]) << 24) |
-                (@as(usize, packet_copy[pos + 5]) << 16) |
-                (@as(usize, packet_copy[pos + 6]) << 8) |
-                @as(usize, packet_copy[pos + 7]);
-        },
-        else => unreachable,
-    }
-    pos += token_varint_size;
-
-    // Skip token data (if any)
-    if (pos + token_len > packet_copy.len) {
-        std.log.err("[CRYPTO] Packet too short for token", .{});
-        return;
-    }
-    pos += token_len;
-
-    // NOW read the REAL payload length (varint, now unprotected after header protection removal)
-    if (pos >= packet_copy.len) {
-        std.log.err("[CRYPTO] No payload length field after token", .{});
-        return;
-    }
-
-    const len_first = packet_copy[pos];
-    const len_prefix = (len_first & 0xC0) >> 6;
-    const varint_size: usize = switch (len_prefix) {
-        0 => 1, // 00 prefix: 1 byte
-        1 => 2, // 01 prefix: 2 bytes
-        2 => 4, // 10 prefix: 4 bytes
-        3 => 8, // 11 prefix: 8 bytes
-        else => unreachable,
-    };
-
-    if (pos + varint_size > packet_copy.len) {
-        std.log.err("[CRYPTO] Packet too short for payload length varint", .{});
-        return;
-    }
-
-    var payload_len: usize = 0;
-
-    // Read varint value (same as existing readVarInt implementation)
-    switch (len_prefix) {
-        0 => {
-            payload_len = len_first & 0x3F;
-        },
-        1 => {
-            payload_len = (@as(usize, len_first & 0x3F) << 8) | @as(usize, packet_copy[pos + 1]);
-        },
-        2 => {
-            payload_len = (@as(usize, len_first & 0x3F) << 24) |
-                (@as(usize, packet_copy[pos + 1]) << 16) |
-                (@as(usize, packet_copy[pos + 2]) << 8) |
-                @as(usize, packet_copy[pos + 3]);
-        },
-        3 => {
-            payload_len = (@as(usize, len_first & 0x3F) << 56) |
-                (@as(usize, packet_copy[pos + 1]) << 48) |
-                (@as(usize, packet_copy[pos + 2]) << 40) |
-                (@as(usize, packet_copy[pos + 3]) << 32) |
-                (@as(usize, packet_copy[pos + 4]) << 24) |
-                (@as(usize, packet_copy[pos + 5]) << 16) |
-                (@as(usize, packet_copy[pos + 6]) << 8) |
-                @as(usize, packet_copy[pos + 7]);
-        },
-        else => unreachable,
-    }
-
-    pos += varint_size;
-
-    // Packet number length (bottom 2 bits of first byte)
-    const pn_len = 1 + @as(usize, header_type & 0x03);
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CRITICAL FIX #2: Length field includes BOTH packet number AND payload
-    // ═══════════════════════════════════════════════════════════════════════════
-    // RFC 9001 Section 17.2: "Length: A variable-length integer specifying the
-    // length in bytes of the remainder of the packet (that is, the Packet Number
-    // and Payload fields)"
-    // We must subtract the packet number length to get the actual encrypted payload length
-    if (payload_len < pn_len) {
-        std.log.err("[CRYPTO] Invalid length: payload_len={} < pn_len={}", .{ payload_len, pn_len });
-        return;
-    }
-    payload_len -= pn_len;
-
-    // Read packet number
-    const packet_number = switch (pn_len) {
-        1 => packet_copy[pos],
-        2 => std.mem.readInt(u16, @as(*const [2]u8, @ptrCast(packet_copy[pos .. pos + 2].ptr)), .little),
-        3 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos .. pos + 4].ptr)), .little) & 0x00FFFFFF,
-        4 => std.mem.readInt(u32, @as(*const [4]u8, @ptrCast(packet_copy[pos .. pos + 4].ptr)), .little),
-        else => unreachable,
-    };
-    pos += pn_len;
-
-    // Clamp payload_len to available data (safety check)
-    const max_payload_len = if (pos < data.len) data.len - pos else 0;
-    if (payload_len > max_payload_len) {
-        std.log.info("[CRYPTO] Clamping payload_len from {} to {} (data.len={}, pos={})", .{ payload_len, max_payload_len, data.len, pos });
-        payload_len = max_payload_len;
-    }
-
-    // Encrypted payload starts here
-    if (pos + payload_len > data.len) {
-        std.log.err("[CRYPTO] Invalid payload bounds: pos={} + payload_len={} > data.len={}", .{ pos, payload_len, data.len });
-        return;
-    }
-
-    const encrypted_payload = packet_copy[pos .. pos + payload_len];
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CRITICAL FIX #3: AAD must include the unprotected packet number
-    // ═══════════════════════════════════════════════════════════════════════════
-    // RFC 9001 Section 5.3: "The associated data, A, for the AEAD is the contents
-    // of the QUIC header, starting from the flags byte of either the short or long
-    // header, up to and including the unprotected packet number."
-    // pos is now AFTER reading the packet number, so it points to the start of
-    // encrypted payload. Therefore packet_copy[0..pos] includes everything up to
-    // and including the unprotected packet number.
-    const header_aad = packet_copy[0..pos];
-
-    // Decrypt payload
-    var plaintext: [65536]u8 = undefined;
-    const decrypted_len = crypto.decryptPayload(
-        encrypted_payload,
-        &secrets.client_key,
-        &secrets.client_iv,
-        packet_number,
-        header_aad, // AAD must exclude the packet number per RFC 9001
-        &plaintext,
-    ) catch |err| {
-        std.log.err("[CRYPTO] Decryption failed: {any}", .{err});
-        return;
-    };
-
-    std.log.info("[CRYPTO] Decrypted {} bytes", .{decrypted_len});
-
-    // Get or create connection using SCID as remote connection ID
-    const conn = try quic_server.getOrCreateConnection(scid, client_ip);
-
-    // Process decrypted payload (contains CRYPTO frames with ClientHello)
-    try conn.processDecryptedPayload(plaintext[0..decrypted_len], quic_server.ssl_ctx);
-
-    // Check if we need to send a response (handshake in progress)
-    if (conn.state == .handshaking) {
-        // Generate response packet
-        var response_buf: [65536]u8 = undefined;
-        const response_len = try conn.generateResponsePacket(.initial, &response_buf);
-
-        // Get buffer for sending
-        const send_buf = buffer_pool.acquire() orelse {
-            std.log.warn("Buffer pool exhausted, dropping response", .{});
-            return;
-        };
-
-        // Copy response to buffer
-        if (response_len <= send_buf.data.len) {
-            @memcpy(send_buf.data[0..response_len], response_buf[0..response_len]);
-
-            // Submit sendto
-            const sqe_opt = getSqe(ring);
-            if (sqe_opt) |sqe| {
-                const buffer_idx = @intFromPtr(send_buf) - @intFromPtr(buffer_pool.buffers.ptr);
-                const idx = buffer_idx / @sizeOf(UdpBuffer);
-
-                udp.prepSendTo(sqe, quic_server.udp_fd, send_buf.data[0..response_len], client_addr, client_addr_len.*);
-                setSqeData(sqe, encodeUserData(quic_server.udp_fd, .sendto, idx));
-                _ = c.io_uring_submit(ring);
-            } else {
-                buffer_pool.release(send_buf);
-            }
-        } else {
-            buffer_pool.release(send_buf);
-        }
-    }
+    try server.run();
 }

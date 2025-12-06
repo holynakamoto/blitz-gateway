@@ -83,7 +83,7 @@ pub const Config = struct {
                 self.allocator.free(path);
             }
         }
-        self.backends.deinit(self.allocator);
+        self.backends.deinit();
     }
 
     pub fn addBackend(self: *Config, backend: Backend) !void {

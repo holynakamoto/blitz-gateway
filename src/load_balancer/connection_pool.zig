@@ -134,9 +134,7 @@ pub const ConnectionPool = struct {
         const addr_ptr: *const c.struct_sockaddr = @ptrCast(&addr);
 
         // Connect
-        var sockaddr_arg: c.__CONST_SOCKADDR_ARG = undefined;
-        sockaddr_arg.__sockaddr__ = addr_ptr;
-        const connect_result = c.connect(sockfd, sockaddr_arg, @sizeOf(c.struct_sockaddr_in));
+        const connect_result = c.connect(sockfd, addr_ptr, @sizeOf(c.struct_sockaddr_in));
         if (connect_result < 0) {
             _ = c.close(sockfd);
             return error.ConnectionFailed;

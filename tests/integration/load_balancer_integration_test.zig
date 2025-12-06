@@ -61,7 +61,7 @@ test "Load Balancer Integration: Load Balancer Initialization" {
     const allocator = std.testing.allocator;
 
     // Create test configuration
-    var test_config = config.Config.init(allocator);
+    var test_config = try config.Config.init(allocator);
     defer test_config.deinit();
 
     test_config.mode = .load_balancer;

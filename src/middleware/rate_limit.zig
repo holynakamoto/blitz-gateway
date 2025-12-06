@@ -38,7 +38,28 @@ pub const RateLimitResult = enum {
     unavailable,
 };
 
-/// Rate limiting statistics
+/// Rate limiting statistics (internal, thread-safe atomic version)
+const RateLimitStatsInternal = struct {
+    /// Total requests processed
+    total_requests: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    /// Requests allowed
+    allowed_requests: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    /// Requests denied (global limit)
+    denied_global: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    /// Requests denied (per-IP limit)
+    denied_per_ip: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    /// Current active IP addresses being tracked
+    active_ips: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+
+    /// Memory usage in bytes
+    memory_usage: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+};
+
+/// Rate limiting statistics (public, non-atomic snapshot)
 pub const RateLimitStats = struct {
     /// Total requests processed
     total_requests: u64 = 0,
@@ -71,8 +92,14 @@ pub const RateLimiter = struct {
     /// Per-IP tracking (userspace fallback)
     ip_buckets: std.AutoHashMap(u32, IpBucket),
 
-    /// Statistics
-    stats: RateLimitStats = .{},
+    /// Mutex to protect concurrent access to ip_buckets
+    ip_buckets_mutex: std.Thread.Mutex = .{},
+
+    /// Mutex to protect concurrent access to global token bucket
+    global_tokens_mutex: std.Thread.Mutex = .{},
+
+    /// Statistics (thread-safe atomic counters)
+    stats: RateLimitStatsInternal = .{},
 
     /// eBPF manager (when available)
     ebpf_manager: ?ebpf.EbpfManager = null,
@@ -92,7 +119,10 @@ pub const RateLimiter = struct {
 
         // Try to initialize eBPF if enabled and on Linux
         if (config.enable_ebpf and builtin.os.tag == .linux) {
-            limiter.ebpf_manager = try initEbpf(&limiter);
+            limiter.ebpf_manager = initEbpf(&limiter) catch {
+                // initEbpf already logs warnings, so we continue in userspace-only mode
+                null;
+            };
         }
 
         return limiter;
@@ -108,7 +138,7 @@ pub const RateLimiter = struct {
 
     /// Check if a request should be allowed
     pub fn checkRequest(self: *RateLimiter, client_ip: u32) RateLimitResult {
-        self.stats.total_requests += 1;
+        _ = self.stats.total_requests.fetchAdd(1, .monotonic);
 
         // If eBPF is available, use it for high-performance checking
         if (self.ebpf_manager) |*manager| {
@@ -127,7 +157,7 @@ pub const RateLimiter = struct {
         if (self.config.global_rps) |global_limit| {
             const global_result = self.checkGlobalLimit(now, global_limit);
             if (global_result != .allow) {
-                self.stats.denied_global += 1;
+                _ = self.stats.denied_global.fetchAdd(1, .monotonic);
                 return global_result;
             }
         }
@@ -136,12 +166,12 @@ pub const RateLimiter = struct {
         if (self.config.per_ip_rps) |ip_limit| {
             const ip_result = self.checkIpLimit(client_ip, now, ip_limit);
             if (ip_result != .allow) {
-                self.stats.denied_per_ip += 1;
+                _ = self.stats.denied_per_ip.fetchAdd(1, .monotonic);
                 return ip_result;
             }
         }
 
-        self.stats.allowed_requests += 1;
+        _ = self.stats.allowed_requests.fetchAdd(1, .monotonic);
         return .allow;
     }
 
@@ -149,6 +179,10 @@ pub const RateLimiter = struct {
     fn checkGlobalLimit(self: *RateLimiter, now: i64, limit_rps: u32) RateLimitResult {
         const limit_per_second: f64 = @floatFromInt(limit_rps);
         const burst_limit = limit_per_second * self.config.burst_multiplier;
+
+        // Serialize concurrent access to global token bucket state
+        self.global_tokens_mutex.lock();
+        defer self.global_tokens_mutex.unlock();
 
         // Calculate tokens to add since last update
         const time_diff_seconds: f64 = @as(f64, @floatFromInt(now - self.global_last_update)) / 1000.0;
@@ -171,6 +205,10 @@ pub const RateLimiter = struct {
         const limit_per_second: f64 = @floatFromInt(limit_rps);
         const burst_limit = limit_per_second * self.config.burst_multiplier;
 
+        // Serialize concurrent access to ip_buckets map
+        self.ip_buckets_mutex.lock();
+        defer self.ip_buckets_mutex.unlock();
+
         // Get or create IP bucket
         var bucket = self.ip_buckets.get(client_ip) orelse IpBucket{
             .tokens = burst_limit, // Start with full burst allowance
@@ -184,18 +222,21 @@ pub const RateLimiter = struct {
         bucket.tokens = @min(bucket.tokens + tokens_to_add, burst_limit);
         bucket.last_update = now;
 
-        // Update the bucket in the map
-        self.ip_buckets.put(client_ip, bucket) catch {
-            // If we can't update, allow the request (fail open)
-            return .allow;
-        };
-
-        // Check if we have tokens
+        // Check if we have tokens and decrement if available
         if (bucket.tokens >= 1.0) {
             bucket.tokens -= 1.0;
-            self.ip_buckets.put(client_ip, bucket) catch {};
+            // Update the bucket in the map after decrementing tokens
+            self.ip_buckets.put(client_ip, bucket) catch {
+                // If we can't update, allow the request (fail open)
+                return .allow;
+            };
             return .allow;
         }
+
+        // Update the bucket even if we're denying (to track token state)
+        self.ip_buckets.put(client_ip, bucket) catch {
+            // If we can't update, deny the request (fail closed)
+        };
 
         return .deny_per_ip;
     }
@@ -222,6 +263,8 @@ pub const RateLimiter = struct {
     /// Initialize eBPF manager (Linux only)
     fn initEbpf(self: *RateLimiter) !ebpf.EbpfManager {
         var manager = ebpf.EbpfManager.init(self.allocator);
+        var should_deinit = true;
+        defer if (should_deinit) manager.deinit();
 
         // Try to compile and load the eBPF program
         const ebpf_source = "src/middleware/ebpf_rate_limit.c";
@@ -229,31 +272,31 @@ pub const RateLimiter = struct {
 
         // Compile eBPF program (only if source exists and clang is available)
         ebpf.compileEbpfProgram(ebpf_source, ebpf_object) catch |err| {
-            std.log.warn("eBPF compilation failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF compilation failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Load eBPF program
         manager.loadEbpfProgram(ebpf_object) catch |err| {
-            std.log.warn("eBPF program loading failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF program loading failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Create eBPF maps
         manager.createMaps() catch |err| {
-            std.log.warn("eBPF map creation failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF map creation failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Load eBPF program into kernel
         manager.loadProgram() catch |err| {
-            std.log.warn("eBPF program loading failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF program loading failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         // Try to attach to network interface (eth0 by default)
         manager.attachXdp("eth0") catch |err| {
-            std.log.warn("XDP attachment failed ({}), eBPF rate limiting disabled", .{err});
+            std.log.warn("XDP attachment failed ({any}), eBPF rate limiting disabled", .{err});
             std.log.info("eBPF program loaded but not attached - falling back to userspace", .{});
             return err;
         };
@@ -266,21 +309,34 @@ pub const RateLimiter = struct {
         };
 
         manager.updateConfig(ebpf_config) catch |err| {
-            std.log.warn("eBPF config update failed ({}), falling back to userspace", .{err});
+            std.log.warn("eBPF config update failed ({any}), falling back to userspace", .{err});
             return err;
         };
 
         std.log.info("eBPF rate limiting successfully initialized and attached to eth0", .{});
 
+        // Success - cancel the deferred deinit to avoid double-free
+        should_deinit = false;
         return manager;
     }
 
-    /// Get current statistics
+    /// Get current statistics (returns a non-atomic snapshot)
     pub fn getStats(self: *const RateLimiter) RateLimitStats {
-        var stats = self.stats;
-        stats.active_ips = self.ip_buckets.count();
-        stats.memory_usage = self.ip_buckets.capacity() * @sizeOf(IpBucket) + @sizeOf(RateLimiter);
-        return stats;
+        // Serialize concurrent access to ip_buckets map for reading
+        // Note: mutex.lock() requires mutable access, so we use @constCast
+        // This is safe because we're only reading and the mutex protects the map
+        const mutable_self = @constCast(self);
+        mutable_self.ip_buckets_mutex.lock();
+        defer mutable_self.ip_buckets_mutex.unlock();
+
+        return RateLimitStats{
+            .total_requests = self.stats.total_requests.load(.monotonic),
+            .allowed_requests = self.stats.allowed_requests.load(.monotonic),
+            .denied_global = self.stats.denied_global.load(.monotonic),
+            .denied_per_ip = self.stats.denied_per_ip.load(.monotonic),
+            .active_ips = self.ip_buckets.count(),
+            .memory_usage = self.ip_buckets.capacity() * @sizeOf(IpBucket) + @sizeOf(RateLimiter),
+        };
     }
 
     /// Cleanup expired entries (call periodically)
@@ -288,11 +344,27 @@ pub const RateLimiter = struct {
         const now = std.time.milliTimestamp();
         const expiry_time = now - (@as(i64, @intCast(self.config.cleanup_interval_seconds)) * 1000);
 
+        // Serialize concurrent access to ip_buckets map
+        self.ip_buckets_mutex.lock();
+        defer self.ip_buckets_mutex.unlock();
+
+        // First pass: collect keys to remove
+        var keys_to_remove = std.ArrayList(u32).init(self.allocator);
+        defer keys_to_remove.deinit();
+
         var iterator = self.ip_buckets.iterator();
         while (iterator.next()) |entry| {
             if (entry.value_ptr.last_update < expiry_time) {
-                _ = self.ip_buckets.remove(entry.key_ptr.*);
+                keys_to_remove.append(entry.key_ptr.*) catch {
+                    // If we can't allocate, skip this key and continue
+                    continue;
+                };
             }
+        }
+
+        // Second pass: remove collected keys
+        for (keys_to_remove.items) |key| {
+            _ = self.ip_buckets.remove(key);
         }
     }
 };

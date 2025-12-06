@@ -1,0 +1,13 @@
+Build Date: 2025-12-05 12:50:11 UTC
+Build Host: zig-build
+Kernel: 5.15.0-161-generic
+Zig Version: 0.15.2
+
+Static Libraries:
+-rw-r--r-- 1 root root 1.1M Dec  5 05:38 /usr/local/lib/libpicotls-minicrypto.a
+-rw-r--r-- 1 root root 855K Dec  5 05:38 /usr/local/lib/libpicotls.a
+-rw-r--r-- 1 root root  50K Dec  5 05:46 /usr/local/lib/liburing-ffi.a
+-rw-r--r-- 1 root root  29K Dec  5 05:46 /usr/local/lib/liburing.a
+
+liburing version:
+liburing-2.7

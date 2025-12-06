@@ -24,6 +24,12 @@ Quick navigation to all Blitz Gateway documentation.
 - **[Bare Metal Quick Start](benchmark/QUICK-START-BARE-METAL.md)** - Production benchmarking
 - **[Hardware Specifications](benchmark/benchmark-machine-spec.md)** - Recommended hardware
 
+## 🔧 Troubleshooting
+
+- **[Build Fixes Summary](BUILD_FIXES.md)** - Complete guide to all build script fixes
+- **[liburing Linking Fix](LIBURING_FIX.md)** - Fix for undefined symbol errors with Zig 0.15.2
+- **[Migration Guide](MIGRATION_GUIDE.md)** - Step-by-step guide to updating your Zig code
+
 ## 🔍 Quick Links
 
 **Common Tasks:**

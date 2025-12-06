@@ -1,0 +1,10 @@
+# Ignore binaries by default (they're large)
+# Remove these lines if you want to commit binaries to git
+*.so
+*.dylib
+aarch64-linux/blitz
+aarch64-linux/quic_handshake_server
+
+# Keep metadata
+!checksums/
+!metadata/

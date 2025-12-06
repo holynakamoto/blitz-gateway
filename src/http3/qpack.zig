@@ -276,7 +276,7 @@ pub const QpackEncoder = struct {
     // Returns encoded bytes (caller owns)
     pub fn encode(self: *QpackEncoder, headers: []const HeaderField) ![]u8 {
         var buffer = std.ArrayList(u8).initCapacity(self.allocator, 256) catch return error.OutOfMemory;
-        errdefer buffer.deinit(self.allocator);
+        errdefer buffer.deinit();
 
         // QPACK header block prefix (RFC 9204 Section 4.5.1)
         // Required Insert Count (QPACK uses 0 for static-only encoding)
@@ -290,7 +290,7 @@ pub const QpackEncoder = struct {
         return buffer.toOwnedSlice(self.allocator);
     }
 
-    fn encodeField(self: *QpackEncoder, buffer: *std.ArrayList(u8), field: HeaderField) !void {
+    fn encodeField(_: *QpackEncoder, buffer: *std.ArrayList(u8), field: HeaderField) !void {
         // Try static table first (most efficient)
         if (StaticTable.findExact(field.name, field.value)) |index| {
             // Indexed Field Line - Static (RFC 9204 Section 4.5.2)
@@ -301,7 +301,7 @@ pub const QpackEncoder = struct {
             var fbs = std.io.fixedBufferStream(&temp_buf);
             const writer = fbs.writer();
             _ = try writePrefixInt(writer, index, 6, prefix);
-            try buffer.appendSlice(self.allocator, fbs.getWritten());
+            try buffer.appendSlice(fbs.getWritten());
             return;
         }
 
@@ -315,7 +315,7 @@ pub const QpackEncoder = struct {
             const writer = fbs.writer();
             _ = try writePrefixInt(writer, name_index, 4, prefix);
             _ = try writeString(writer, field.value, 7);
-            try buffer.appendSlice(self.allocator, fbs.getWritten());
+            try buffer.appendSlice(fbs.getWritten());
             return;
         }
 
@@ -327,7 +327,7 @@ pub const QpackEncoder = struct {
         const writer = fbs.writer();
         _ = try writeString(writer, field.name, 3);
         _ = try writeString(writer, field.value, 7);
-        try buffer.appendSlice(self.allocator, fbs.getWritten());
+        try buffer.appendSlice(fbs.getWritten());
     }
 };
 
@@ -381,7 +381,7 @@ pub const QpackDecoder = struct {
         offset += base_result.bytes_read;
 
         var headers = std.ArrayList(HeaderField).initCapacity(self.allocator, 16) catch return error.OutOfMemory;
-        errdefer headers.deinit(self.allocator);
+        errdefer headers.deinit();
 
         // Decode field lines
         while (offset < data.len) {

@@ -209,7 +209,7 @@ fn writeVarInt(buf: []u8, value: u64) !usize {
 pub fn extractCryptoFrames(payload: []const u8, allocator: std.mem.Allocator) !std.ArrayList(CryptoFrame) {
     // Zig 0.15.2: Use initCapacity for managed ArrayList
     var frames = std.ArrayList(CryptoFrame).initCapacity(allocator, 4) catch return error.OutOfMemory;
-    errdefer frames.deinit(allocator);
+    errdefer frames.deinit();
 
     var offset: usize = 0;
 

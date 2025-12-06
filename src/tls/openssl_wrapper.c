@@ -4,9 +4,14 @@
 #include <openssl/err.h>
 #include <openssl/conf.h>
 #include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/evp.h>
+#include <openssl/ec.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <limits.h>
 #include <picotls.h>
 #include <picotls/minicrypto.h>
 
@@ -284,5 +289,125 @@ void blitz_ssl_ctx_free(SSL_CTX* ctx) {
 // Get error string
 const char* blitz_ssl_error_string(void) {
     return ERR_error_string(ERR_get_error(), NULL);
+}
+
+// Storage for sign certificate (needed for minicrypto)
+static ptls_minicrypto_secp256r1sha256_sign_certificate_t g_sign_cert;
+// Storage for certificate DER (needed to keep it alive)
+static unsigned char* g_cert_der = NULL;
+
+// Load certificate and key from PEM buffers and set on picotls context
+// Returns 0 on success, non-zero on error
+int blitz_ptls_load_certificate(const unsigned char* cert_pem, size_t cert_len,
+                                const unsigned char* key_pem, size_t key_len) {
+    ptls_context_t* ctx = &g_ptls_ctx_storage;
+
+    // Check bounds to prevent truncation when casting size_t to int
+    if (cert_len > INT_MAX) {
+        fprintf(stderr, "Certificate PEM buffer too large: %zu bytes (max: %d)\n", cert_len, INT_MAX);
+        return -11;
+    }
+
+    // Parse certificate from PEM
+    BIO* cert_bio = BIO_new_mem_buf(cert_pem, (int)cert_len);
+    if (cert_bio == NULL) {
+        return -1;
+    }
+    
+    X509* cert = PEM_read_bio_X509(cert_bio, NULL, NULL, NULL);
+    BIO_free(cert_bio);
+    if (cert == NULL) {
+        return -2;
+    }
+
+    // Check bounds to prevent truncation when casting size_t to int
+    if (key_len > INT_MAX) {
+        fprintf(stderr, "Private key PEM buffer too large: %zu bytes (max: %d)\n", key_len, INT_MAX);
+        X509_free(cert);
+        return -12;
+    }
+
+    // Parse private key from PEM
+    BIO* key_bio = BIO_new_mem_buf(key_pem, (int)key_len);
+    if (key_bio == NULL) {
+        X509_free(cert);
+        return -3;
+    }
+    
+    EVP_PKEY* key = PEM_read_bio_PrivateKey(key_bio, NULL, NULL, NULL);
+    BIO_free(key_bio);
+    if (key == NULL) {
+        X509_free(cert);
+        return -4;
+    }
+    
+    // Extract raw private key bytes for minicrypto (secp256r1 only)
+    // Minicrypto only supports secp256r1 (P-256) keys
+    EC_KEY* ec_key = EVP_PKEY_get1_EC_KEY(key);
+    if (ec_key == NULL) {
+        EVP_PKEY_free(key);
+        X509_free(cert);
+        return -5; // Not an EC key or extraction failed
+    }
+    
+    const BIGNUM* priv_key_bn = EC_KEY_get0_private_key(ec_key);
+    if (priv_key_bn == NULL) {
+        EC_KEY_free(ec_key);
+        EVP_PKEY_free(key);
+        X509_free(cert);
+        return -6;
+    }
+    
+    // Extract the 32-byte private key
+    unsigned char priv_key_bytes[32];
+    if (BN_bn2binpad(priv_key_bn, priv_key_bytes, 32) != 32) {
+        EC_KEY_free(ec_key);
+        EVP_PKEY_free(key);
+        X509_free(cert);
+        return -7;
+    }
+    
+    EC_KEY_free(ec_key);
+    EVP_PKEY_free(key);
+    
+    // Initialize minicrypto sign certificate with raw key bytes
+    ptls_iovec_t key_vec = ptls_iovec_init(priv_key_bytes, 32);
+    int ret = ptls_minicrypto_init_secp256r1sha256_sign_certificate(&g_sign_cert, key_vec);
+    if (ret != 0) {
+        X509_free(cert);
+        return -8;
+    }
+    
+    // Set sign certificate on context
+    ctx->sign_certificate = &g_sign_cert.super;
+    
+    // Convert certificate to DER format
+    unsigned char* cert_der_temp = NULL;
+    int cert_der_len = i2d_X509(cert, &cert_der_temp);
+    X509_free(cert);
+    if (cert_der_len < 0 || cert_der_temp == NULL) {
+        return -9;
+    }
+    
+    // Allocate storage for certificate DER (keep it alive)
+    if (g_cert_der != NULL) {
+        free(g_cert_der);
+    }
+    g_cert_der = (unsigned char*)malloc(cert_der_len);
+    if (g_cert_der == NULL) {
+        OPENSSL_free(cert_der_temp);
+        return -10;
+    }
+    memcpy(g_cert_der, cert_der_temp, cert_der_len);
+    OPENSSL_free(cert_der_temp);
+    
+    // Set certificate in context
+    static ptls_iovec_t certs[1];
+    certs[0].base = g_cert_der;
+    certs[0].len = cert_der_len;
+    ctx->certificates.list = certs;
+    ctx->certificates.count = 1;
+    
+    return 0;
 }
 

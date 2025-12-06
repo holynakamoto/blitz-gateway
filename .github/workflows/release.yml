@@ -1,0 +1,252 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.2)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  ZIG_VERSION: "0.15.0"
+  LIBURING_VERSION: "liburing-2.7"
+
+jobs:
+
+  #############################
+  # BUILD STATIC BINARIES
+  #############################
+
+  build-x86:
+    name: Build x86_64-linux-musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Build liburing
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBURING_VERSION }} https://github.com/axboe/liburing.git /tmp/liburing
+          cd /tmp/liburing && ./configure --prefix=/usr/local && make -j$(nproc) && sudo make install
+          cd src && gcc -c -fPIC -O2 liburing.c -o liburing-ffi.o && ar rcs liburing-ffi.a liburing-ffi.o
+          sudo cp liburing-ffi.a /usr/local/lib/
+
+      - name: Build picotls
+        run: |
+          cd deps/picotls && git submodule update --init --recursive
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DPTLS_MINICRYPTO=ON -DPTLS_OPENSSL=OFF
+          cmake --build build -j$(nproc) --target picotls-core picotls-minicrypto
+          sudo cp build/libpicotls-core.a /usr/local/lib/libpicotls.a
+          sudo cp build/libpicotls-minicrypto.a /usr/local/lib/
+          sudo cp -r include/picotls /usr/local/include/ && sudo cp include/picotls.h /usr/local/include/
+
+      - name: Build static binary
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+          mv zig-out/bin/blitz blitz-linux-x86_64
+          chmod +x blitz-linux-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-linux-x86_64
+          path: blitz-linux-x86_64
+
+  build-arm64:
+    name: Build aarch64-linux-musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-aarch64-linux-gnu
+
+      - name: Build liburing
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBURING_VERSION }} https://github.com/axboe/liburing.git /tmp/liburing
+          cd /tmp/liburing && ./configure --prefix=/usr/local && make -j$(nproc) && sudo make install
+          cd src && gcc -c -fPIC -O2 liburing.c -o liburing-ffi.o && ar rcs liburing-ffi.a liburing-ffi.o
+          sudo cp liburing-ffi.a /usr/local/lib/
+
+      - name: Build picotls
+        run: |
+          cd deps/picotls && git submodule update --init --recursive
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DPTLS_MINICRYPTO=ON -DPTLS_OPENSSL=OFF
+          cmake --build build -j$(nproc) --target picotls-core picotls-minicrypto
+          sudo cp build/libpicotls-core.a /usr/local/lib/libpicotls.a
+          sudo cp build/libpicotls-minicrypto.a /usr/local/lib/
+          sudo cp -r include/picotls /usr/local/include/ && sudo cp include/picotls.h /usr/local/include/
+
+      - name: Build static binary
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux-musl
+          mv zig-out/bin/blitz blitz-linux-arm64
+          chmod +x blitz-linux-arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-linux-arm64
+          path: blitz-linux-arm64
+
+  #############################
+  # CREATE RELEASE
+  #############################
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-x86, build-arm64]
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download x86_64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: blitz-linux-x86_64
+
+      - name: Download arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: blitz-linux-arm64
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Blitz Gateway ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            blitz-linux-x86_64
+            blitz-linux-arm64
+          body: |
+            # Blitz Gateway ${{ steps.version.outputs.VERSION }}
+            
+            High-performance HTTP/1.1, HTTP/2, and HTTP/3 (QUIC) gateway written in Zig.
+            
+            ## Downloads
+            
+            | Platform | Binary | Size |
+            |----------|--------|------|
+            | Linux x86_64 | `blitz-linux-x86_64` | ~5 MB |
+            | Linux ARM64 | `blitz-linux-arm64` | ~5 MB |
+            
+            Both binaries are **fully static** (musl libc) - zero runtime dependencies.
+            
+            ## Quick Start
+            
+            ```bash
+            # Download (x86_64)
+            curl -L -o blitz https://github.com/holynakamoto/blitz-gateway/releases/download/${{ steps.version.outputs.VERSION }}/blitz-linux-x86_64
+            chmod +x blitz
+            
+            # Download (ARM64 / Graviton / Raspberry Pi)
+            curl -L -o blitz https://github.com/holynakamoto/blitz-gateway/releases/download/${{ steps.version.outputs.VERSION }}/blitz-linux-arm64
+            chmod +x blitz
+            ```
+            
+            ## Server Modes
+            
+            ```bash
+            # HTTP/1.1 + HTTP/2 (h2c) server
+            JWT_SECRET=your-secret ./blitz --mode http --port 8080
+            
+            # QUIC/HTTP/3 server
+            ./blitz --mode quic --port 8443
+            
+            # Echo server (for testing)
+            ./blitz --mode echo --port 8080
+            ```
+            
+            ## Built-in Benchmarks
+            
+            Blitz includes a triple-protocol benchmark suite - no external tools needed!
+            
+            ```bash
+            # Run all three benchmarks (HTTP/1.1, HTTP/2, HTTP/3)
+            ./blitz --bench all --duration 30 --connections 100
+            
+            # Individual protocol benchmarks
+            ./blitz --bench http1 --duration 10 --connections 100
+            ./blitz --bench http2 --duration 10 --connections 100
+            ./blitz --bench http3 --duration 10 --connections 100 --port 8443
+            ```
+            
+            ### Benchmark Options
+            
+            | Flag | Description | Default |
+            |------|-------------|---------|
+            | `--bench <protocol>` | Protocol: `http1`, `http2`, `http3`, or `all` | - |
+            | `--duration <secs>` | Test duration in seconds | 30 |
+            | `--connections <n>` | Concurrent connections | 100 |
+            | `--port <port>` | Target port | 8080 |
+            
+            ### Expected Performance (bare metal)
+            
+            | Protocol | Expected RPS | Notes |
+            |----------|--------------|-------|
+            | HTTP/1.1 | 1.5M - 2M | Keep-alive connections |
+            | HTTP/2 | 1.2M - 1.5M | Real h2c with HPACK |
+            | HTTP/3 | 1M - 1.4M | QUIC (TLS in progress) |
+            
+            ## Features
+            
+            - ✅ HTTP/1.1 with keep-alive
+            - ✅ HTTP/2 cleartext (h2c) with multiplexing
+            - ✅ QUIC/HTTP/3 packet handling
+            - ✅ JWT authentication
+            - ✅ Built-in benchmark suite
+            - ✅ Zero dependencies (fully static)
+            - ⏳ Full TLS handshake (coming in Final Form)
+            
+            ## Verify Static Binary
+            
+            ```bash
+            file blitz
+            # Output: ELF 64-bit LSB executable, ... statically linked
+            
+            ldd blitz
+            # Output: not a dynamic executable
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

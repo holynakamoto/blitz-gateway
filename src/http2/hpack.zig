@@ -106,12 +106,11 @@ pub const HpackDecoder = struct {
         var offset: usize = 0;
         while (offset < data.len) {
             const header = try self.decodeHeaderField(data[offset..]);
-            // Zig 0.15.2: append requires allocator
-            try headers.append(header.field);
+            try headers.append(self.allocator, header.field);
             offset += header.bytes_consumed;
         }
 
-        return headers.toOwnedSlice();
+        return headers.toOwnedSlice(self.allocator);
     }
 
     const DecodeResult = struct {
@@ -293,7 +292,7 @@ pub const HpackDecoder = struct {
         // Evict entries if needed
         while (self.getTableSize() + entry_size > self.max_table_size) {
             if (self.dynamic_table.items.len == 0) break;
-            const old_field = self.dynamic_table.pop();
+            const old_field = self.dynamic_table.pop() orelse break;
             // Free the old field's memory
             self.allocator.free(old_field.name);
             self.allocator.free(old_field.value);
@@ -306,7 +305,7 @@ pub const HpackDecoder = struct {
         const value_copy = try self.allocator.dupe(u8, field.value);
         errdefer self.allocator.free(value_copy);
 
-        try self.dynamic_table.append(.{
+        try self.dynamic_table.append(self.allocator, .{
             .name = name_copy,
             .value = value_copy,
         });
@@ -530,7 +529,7 @@ pub const HpackEncoder = struct {
         // Evict entries if needed
         while (self.getTableSize() + entry_size > self.max_table_size) {
             if (self.dynamic_table.items.len == 0) break;
-            const old_field = self.dynamic_table.pop();
+            const old_field = self.dynamic_table.pop() orelse break;
             // Free the old field's memory
             self.allocator.free(old_field.name);
             self.allocator.free(old_field.value);
@@ -543,7 +542,7 @@ pub const HpackEncoder = struct {
         const value_copy = try self.allocator.dupe(u8, field.value);
         errdefer self.allocator.free(value_copy);
 
-        try self.dynamic_table.append(.{
+        try self.dynamic_table.append(self.allocator, .{
             .name = name_copy,
             .value = value_copy,
         });

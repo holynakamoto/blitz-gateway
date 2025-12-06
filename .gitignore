@@ -44,5 +44,13 @@ deps/
 *.p12
 *.pfx
 
+# Environment files with secrets (never commit these!)
+.env
+.env.local
+.env.*.local
+*.env
+secrets.*
+*.secret
+
 # Fuzz corpora (too large, belongs in CI/fuzzing setup)
 deps/picotls/fuzz/*-corpus/

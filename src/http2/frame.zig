@@ -102,7 +102,7 @@ pub const SettingsFrame = struct {
         }
 
         // Parse settings from payload
-        var settings_list = std.ArrayList(SettingsFrame.Setting).init(allocator);
+        var settings_list = try std.ArrayList(SettingsFrame.Setting).initCapacity(allocator, 0);
         errdefer settings_list.deinit(allocator);
 
         var offset: usize = FrameHeader.SIZE;
@@ -116,7 +116,7 @@ pub const SettingsFrame = struct {
             const id = std.mem.readInt(u16, data[offset..][0..2], .big);
             const value = std.mem.readInt(u32, data[offset + 2 ..][0..4], .big);
 
-            try settings_list.append(Setting{
+            try settings_list.append(allocator, Setting{
                 .id = id,
                 .value = value,
             });

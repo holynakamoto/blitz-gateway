@@ -10,7 +10,7 @@ test "Graceful Reload: Initialize and deinitialize" {
     const allocator = std.testing.allocator;
 
     // Create test configuration
-    var test_config = config.Config.init(allocator);
+    var test_config = try config.Config.init(allocator);
     defer test_config.deinit();
 
     test_config.mode = .origin;
@@ -32,7 +32,7 @@ test "Graceful Reload: Configuration reload" {
     const allocator = std.testing.allocator;
 
     // Create initial configuration
-    var initial_config = config.Config.init(allocator);
+    var initial_config = try config.Config.init(allocator);
     defer initial_config.deinit();
     initial_config.mode = .origin;
 

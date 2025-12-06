@@ -1,8 +1,75 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+// Build note: We use liburing-ffi.a (built from source in the VM) for proper FFI symbol resolution.
+// Per PRD: The FFI variant exports all io_uring functions as regular symbols (not inline),
+// which resolves undefined symbol errors when cross-compiling with Zig.
+
+// Helper function to link liburing-ffi for proper FFI symbol resolution
+// Per PRD: liburing-ffi.a exports all functions as regular symbols (not inline)
+// This resolves undefined symbol errors like __io_uring_get_cqe, io_uring_queue_init, etc.
+// Helper function to link liburing-ffi for proper FFI symbol resolution
+fn linkLiburingFFI(exe: *std.Build.Step.Compile) void {
+    // Link liburing-ffi for proper symbol resolution
+    exe.addObjectFile(.{ .cwd_relative = "/usr/local/lib/liburing-ffi.a" });
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+}
+
+// Helper function to add all C source files to an executable
+fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget, use_openssl: bool) void {
+    if (target.result.os.tag != .linux) return;
+
+    // Add src/core to include path
+    exe.addIncludePath(.{ .cwd_relative = "src/core" });
+
+    // liburing headers are installed to /usr/local/include by the build script
+    // Note: We still need the swab.h stub for cross-compilation (in vendor/liburing/src/include/linux/swab.h)
+    exe.addIncludePath(.{ .cwd_relative = "vendor/liburing/src/include" }); // For swab.h stub only
+
+    // Add core C files
+    exe.addCSourceFile(.{
+        .file = b.path("src/core/bind_wrapper.c"),
+        .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+    });
+
+    // Link liburing-ffi for proper FFI symbol resolution
+    // Per PRD: This resolves undefined symbol errors from inline functions
+    linkLiburingFFI(exe);
+
+    // Add PicoTLS wrapper for context initialization (minicrypto + OpenSSL for cert parsing)
+    exe.addCSourceFile(.{
+        .file = b.path("src/quic/picotls_wrapper.c"),
+        .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+    });
+
+    // Optionally add OpenSSL wrapper if requested
+    if (use_openssl) {
+        exe.addCSourceFile(.{
+            .file = b.path("src/tls/openssl_wrapper.c"),
+            .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+        });
+    }
+
+    // Help Zig find the right architecture-specific headers
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include/aarch64-linux-gnu" });
+    // Add /usr/include for Linux kernel headers (linux/swab.h)
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
+}
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    // Explicitly set default target to Linux aarch64 (required for cross-compilation)
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_arch = .aarch64,
+            .os_tag = .linux,
+            .abi = .gnu,
+        },
+    });
     _ = b.standardOptimizeOption(.{}); // Optimize options are used via command line
+
+    // Build option to use OpenSSL (default: false, use picotls)
+    const use_openssl = b.option(bool, "use-openssl", "Use OpenSSL instead of picotls (default: false)") orelse false;
 
     const root_module = b.addModule("root", .{
         .root_source_file = b.path("src/main.zig"),
@@ -12,7 +79,6 @@ pub fn build(b: *std.Build) void {
         .name = "blitz",
         .root_module = root_module,
     });
-    // Target and optimize are set via standardTargetOptions/standardOptimizeOption above
 
     // Link libc (required for C interop)
     exe.linkLibC();
@@ -20,44 +86,38 @@ pub fn build(b: *std.Build) void {
     // Platform-specific configuration
     if (target.result.os.tag == .linux) {
         // Add architecture-specific library paths for Ubuntu/Debian
-        // Docker containers use /usr/lib/x86_64-linux-gnu/
+        // Support both x86_64 and aarch64 architectures
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/aarch64-linux-gnu" });
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" }); // For picotls
         exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
+        exe.addLibraryPath(.{ .cwd_relative = "/lib/aarch64-linux-gnu" });
         exe.addLibraryPath(.{ .cwd_relative = "/lib" });
 
-        // Link liburing
-        exe.linkSystemLibrary("uring");
-
-        // Link OpenSSL for TLS 1.3
-        exe.linkSystemLibrary("ssl");
+        // Link picotls libraries (built and installed by linux-build.sh)
+        exe.linkSystemLibrary("picotls");
+        exe.linkSystemLibrary("picotls-minicrypto");
+        // Link OpenSSL for certificate parsing (hybrid approach)
+        // We use minicrypto for TLS operations, OpenSSL only for cert parsing
+        // Note: OpenSSL libraries must be linked in order: ssl depends on crypto
         exe.linkSystemLibrary("crypto");
+        exe.linkSystemLibrary("ssl");
+        exe.linkSystemLibrary("dl"); // Required for OpenSSL dynamic loading
+        exe.linkSystemLibrary("pthread"); // OpenSSL may require pthread
+        // NOTE: liburing-ffi is linked via addCSourceFiles() -> linkLiburingFFI()
+        // We use liburing-ffi.a (not liburing.a) for proper FFI symbol resolution
 
-        // Add C wrappers with proper flags
-        exe.addCSourceFile(.{
-            .file = b.path("src/core/bind_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
+        // Add library and include paths for picotls
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+        exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
 
-        exe.addCSourceFile(.{
-            .file = b.path("src/tls/openssl_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
+        // Add all C source files
+        addCSourceFiles(b, exe, target, use_openssl);
 
         // Add include paths for headers
         exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         exe.addIncludePath(.{ .cwd_relative = "src" });
-
-        // Add picotls include paths (needed for openssl_wrapper.c)
-        exe.addIncludePath(b.path("deps/picotls/include"));
     }
 
     // Install the binary
@@ -86,7 +146,8 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibC();
 
     if (target.result.os.tag == .linux) {
-        unit_tests.linkSystemLibrary("uring");
+        // Link liburing-ffi for unit tests that use io_uring
+        linkLiburingFFI(unit_tests);
     }
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -153,29 +214,6 @@ pub fn build(b: *std.Build) void {
     const run_quic_packet_simple_tests = b.addRunArtifact(quic_packet_simple_tests);
     const quic_packet_simple_test_step = b.step("test-quic-packet-simple", "Run simple QUIC packet generation test");
     quic_packet_simple_test_step.dependOn(&run_quic_packet_simple_tests.step);
-
-    // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
-
-    // QUIC Handshake Server (full TLS integration)
-    // Create a new module with src/main.zig as root, then override entry point
-    const quic_handshake_server_module = b.addModule("quic_handshake_server", .{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-    });
-    const quic_handshake_server_exe = b.addExecutable(.{
-        .name = "quic_handshake_server",
-        .root_module = quic_handshake_server_module,
-    });
-    quic_handshake_server_exe.linkLibC();
-    if (target.result.os.tag == .linux) {
-        quic_handshake_server_exe.linkSystemLibrary("ssl");
-        quic_handshake_server_exe.linkSystemLibrary("crypto");
-        quic_handshake_server_exe.linkSystemLibrary("uring");
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "src" });
-        quic_handshake_server_exe.addIncludePath(b.path("deps/picotls/include"));
-    }
-    b.installArtifact(quic_handshake_server_exe);
 
     // Transport parameters tests
     const transport_params_tests = b.addTest(.{

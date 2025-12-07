@@ -150,10 +150,12 @@ sleep 10
 echo "Installing build dependencies for curl with HTTP/3..."
 apt-get update -qq
 # Install basic build tools (already installed, but ensure they're there)
+# GnuTLS is needed for ngtcp2 (OpenSSL on Ubuntu doesn't have QUIC support)
 apt-get install -y \
     build-essential \
     pkg-config \
     libssl-dev \
+    libgnutls28-dev \
     git \
     autoconf \
     automake \
@@ -191,14 +193,14 @@ autoreconf -i
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
 
-# Link against OpenSSL and the nghttp3 library we just installed
-# ngtcp2 uses pkg-config to find OpenSSL, and --with-nghttp3 is not a valid flag
-# It will find nghttp3 via PKG_CONFIG_PATH
-./configure --prefix=/usr/local --enable-lib-only --with-openssl || {
+# Use GnuTLS instead of OpenSSL for ngtcp2
+# Ubuntu's OpenSSL doesn't have QUIC support, but GnuTLS does
+# ngtcp2 will find nghttp3 via PKG_CONFIG_PATH
+./configure --prefix=/usr/local --enable-lib-only --with-gnutls || {
     echo "  ❌ ngtcp2 configure failed"
-    echo "  Checking OpenSSL installation..."
+    echo "  Checking GnuTLS installation..."
+    pkg-config --exists gnutls && echo "    ✓ GnuTLS found via pkg-config" || echo "    ✗ GnuTLS not found via pkg-config"
     pkg-config --exists openssl && echo "    ✓ OpenSSL found via pkg-config" || echo "    ✗ OpenSSL not found via pkg-config"
-    ls -la /usr/lib/aarch64-linux-gnu/libssl* 2>/dev/null | head -3 || echo "    OpenSSL libraries not found"
     echo "  Configure output:"
     cat config.log 2>/dev/null | tail -50 || echo "  (config.log not available)"
     exit 1

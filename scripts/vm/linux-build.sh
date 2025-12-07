@@ -238,14 +238,21 @@ export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
 export PATH="/usr/local/bin:$PATH"
 
 # Configure cURL to use OpenSSL, nghttp3, and ngtcp2 from /usr/local
-# Note: ngtcp2 was built with GnuTLS, so we must specify --with-ngtcp2-crypto=gnutls
+# Note: ngtcp2 was built with GnuTLS, but curl's configure looks for quictls by default
+# Workaround: create a symlink so curl finds the gnutls crypto backend
 echo "  Configuring curl build..."
+# Set PKG_CONFIG_PATH explicitly
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+# Create symlink so curl's configure finds gnutls backend when it looks for quictls
+if [ -f /usr/local/lib/pkgconfig/libngtcp2_crypto_gnutls.pc ] && [ ! -f /usr/local/lib/pkgconfig/libngtcp2_crypto_quictls.pc ]; then
+    echo "  Creating symlink: libngtcp2_crypto_quictls.pc -> libngtcp2_crypto_gnutls.pc"
+    ln -sf libngtcp2_crypto_gnutls.pc /usr/local/lib/pkgconfig/libngtcp2_crypto_quictls.pc
+fi
 # Use full paths for dependencies to guarantee linking
 ./configure --prefix=/usr/local \
     --with-ssl \
     --with-nghttp3=/usr/local \
     --with-ngtcp2=/usr/local \
-    --with-ngtcp2-crypto=gnutls \
     --disable-shared \
     --enable-static || {
     echo "  ❌ curl configure failed"

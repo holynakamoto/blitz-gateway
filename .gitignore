@@ -3,6 +3,11 @@ zig-out/
 zig-cache/
 .zig-cache/
 
+# Rust build artifacts
+target/
+Cargo.lock
+**/*.rs.bk
+
 # Benchmark results
 benches/results/
 benches/*.txt

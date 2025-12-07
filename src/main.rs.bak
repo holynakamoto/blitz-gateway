@@ -1,0 +1,256 @@
+//! Blitz Gateway - High-performance HTTP/3 reverse proxy
+//!
+//! A Rust-based HTTP/3 reverse proxy using quinn and h3, built with Zig's cross-compilation toolchain.
+//!
+//! Usage:
+//!   cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.17
+//!   ./target/aarch64-unknown-linux-gnu.2.17/release/blitz-gateway
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use h3::server::RequestStream;
+use h3_quinn::quinn;
+use quinn::{Endpoint, ServerConfig};
+use rustls::{Certificate, PrivateKey, ServerConfig as RustlsServerConfig};
+use rustls_pemfile::{certs, pkcs8_private_keys};
+use std::{
+    collections::HashMap,
+    fs,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tracing::{error, info, warn};
+
+/// Blitz Gateway HTTP/3 Proxy Server
+#[derive(Parser, Debug)]
+#[command(name = "blitz-gateway")]
+#[command(about = "High-performance HTTP/3 reverse proxy", long_about = None)]
+struct Args {
+    /// Listen address (default: 0.0.0.0:8443)
+    #[arg(short, long, default_value = "0.0.0.0:8443")]
+    listen: SocketAddr,
+
+    /// TLS certificate file (PEM format)
+    #[arg(short, long, default_value = "certs/server.crt")]
+    cert: PathBuf,
+
+    /// TLS private key file (PEM format)
+    #[arg(short, long, default_value = "certs/server.key")]
+    key: PathBuf,
+
+    /// Proxy rules configuration file
+    #[arg(short, long, default_value = "config/proxy_rules.json")]
+    config: PathBuf,
+
+    /// Enable verbose logging
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+/// Proxy rule configuration
+#[derive(Debug, serde::Deserialize)]
+struct ProxyRules {
+    /// Default backend if no rule matches
+    default_backend: Option<String>,
+    /// Route rules: path prefix -> backend URL
+    routes: HashMap<String, String>,
+}
+
+impl ProxyRules {
+    /// Load proxy rules from JSON file
+    fn load(path: &PathBuf) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {:?}", path))?;
+        let rules: ProxyRules = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse config file: {:?}", path))?;
+        Ok(rules)
+    }
+
+    /// Find backend URL for a given request path
+    fn find_backend(&self, path: &str) -> Option<&String> {
+        // Try to find matching route (longest prefix match)
+        let mut best_match: Option<(&String, &String)> = None;
+        for (route_prefix, backend) in &self.routes {
+            if path.starts_with(route_prefix) {
+                match best_match {
+                    None => best_match = Some((route_prefix, backend)),
+                    Some((best_prefix, _)) => {
+                        if route_prefix.len() > best_prefix.len() {
+                            best_match = Some((route_prefix, backend));
+                        }
+                    }
+                }
+            }
+        }
+
+        best_match.map(|(_, backend)| backend).or_else(|| {
+            self.default_backend.as_ref()
+        })
+    }
+}
+
+/// Load TLS certificate and key from files
+fn load_tls_config(cert_path: &PathBuf, key_path: &PathBuf) -> Result<RustlsServerConfig> {
+    // Read certificate
+    let cert_data = fs::read(cert_path)
+        .with_context(|| format!("Failed to read certificate: {:?}", cert_path))?;
+    let cert_chain: Vec<Certificate> = certs(&mut &cert_data[..])
+        .collect::<std::result::Result<_, _>>()
+        .context("Failed to parse certificate")?
+        .into_iter()
+        .map(Certificate)
+        .collect();
+
+    // Read private key
+    let key_data = fs::read(key_path)
+        .with_context(|| format!("Failed to read private key: {:?}", key_path))?;
+    let mut keys = pkcs8_private_keys(&mut &key_data[..])
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("Failed to parse private key")?;
+
+    if keys.is_empty() {
+        anyhow::bail!("No private keys found in key file");
+    }
+
+    let key = PrivateKey(keys.remove(0));
+
+    // Build TLS config
+    let config = RustlsServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .context("Failed to build TLS config")?;
+
+    Ok(config)
+}
+
+/// Handle an HTTP/3 connection
+async fn handle_connection(
+    connection: quinn::Connection,
+    proxy_rules: Arc<ProxyRules>,
+) -> Result<()> {
+    info!("New connection from {}", connection.remote_address());
+
+    let (mut driver, mut incoming) = h3::server::new(h3_quinn::Connection::new(connection))
+        .await
+        .context("Failed to create h3 server")?;
+
+    // Spawn connection driver
+    let driver_task = tokio::spawn(async move {
+        if let Err(e) = driver.await {
+            error!("Connection driver error: {:?}", e);
+        }
+    });
+
+    // Handle incoming requests
+    while let Some((req, mut stream)) = incoming.accept().await.transpose()? {
+        let proxy_rules = Arc::clone(&proxy_rules);
+        tokio::spawn(async move {
+            if let Err(e) = handle_request(req, stream, proxy_rules).await {
+                error!("Request handling error: {:?}", e);
+            }
+        });
+    }
+
+    driver_task.abort();
+    Ok(())
+}
+
+/// Handle a single HTTP/3 request
+async fn handle_request(
+    req: h3::server::Request<bytes::Bytes>,
+    mut stream: RequestStream<h3_quinn::BidiStream<bytes::Bytes>, bytes::Bytes>,
+    proxy_rules: Arc<ProxyRules>,
+) -> Result<()> {
+    let method = req.method().to_string();
+    let path = req.uri().path();
+    info!("{} {}", method, path);
+
+    // Find backend for this request
+    let backend_url = proxy_rules
+        .find_backend(path)
+        .ok_or_else(|| anyhow::anyhow!("No backend found for path: {}", path))?;
+
+    info!("Proxying {} {} to {}", method, path, backend_url);
+
+    // Read request body if present
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.recv_data().await? {
+        body.extend_from_slice(&chunk);
+    }
+
+    // For now, return a simple response indicating proxy is working
+    // TODO: Implement actual HTTP/3 forwarding to backend
+    let response_body = format!(
+        r#"{{"status":"proxied","method":"{}","path":"{}","backend":"{}","body_size":{}}}"#,
+        method, path, backend_url, body.len()
+    );
+
+    let response = h3::server::Response::builder()
+        .status(200)
+        .header("content-type", "application/json")
+        .body(response_body)?;
+
+    stream.send_response(response).await?;
+    stream.finish().await?;
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Initialize logging
+    let log_level = if args.verbose { "debug" } else { "info" };
+    tracing_subscriber::fmt()
+        .with_env_filter(format!("blitz_gateway={},h3={},quinn={}", log_level, log_level, log_level))
+        .init();
+
+    info!("Blitz Gateway HTTP/3 Proxy v1.0.0");
+    info!("===================================");
+
+    // Load proxy rules
+    info!("Loading proxy rules from: {:?}", args.config);
+    let proxy_rules = Arc::new(ProxyRules::load(&args.config)?);
+    info!("Loaded {} route rules", proxy_rules.routes.len());
+    if let Some(ref default) = proxy_rules.default_backend {
+        info!("Default backend: {}", default);
+    }
+
+    // Load TLS configuration
+    info!("Loading TLS certificate: {:?}", args.cert);
+    info!("Loading TLS private key: {:?}", args.key);
+    let tls_config = load_tls_config(&args.cert, &args.key)?;
+
+    // Build QUIC server configuration
+    let mut server_config = ServerConfig::with_crypto(Arc::new(tls_config));
+    let transport = Arc::get_mut(&mut server_config.transport).unwrap();
+    transport.max_concurrent_bidi_streams(100_u8.into());
+
+    // Create QUIC endpoint
+    let endpoint = Endpoint::server(server_config, args.listen)?;
+    info!("Listening on {}", args.listen);
+
+    // Accept connections
+    while let Some(conn) = endpoint.accept().await {
+        let proxy_rules = Arc::clone(&proxy_rules);
+        tokio::spawn(async move {
+            match conn.await {
+                Ok(connection) => {
+                    if let Err(e) = handle_connection(connection, proxy_rules).await {
+                        error!("Connection error: {:?}", e);
+                    }
+                }
+                Err(e) => {
+                    error!("Connection accept error: {:?}", e);
+                }
+            }
+        });
+    }
+
+    Ok(())
+}
+

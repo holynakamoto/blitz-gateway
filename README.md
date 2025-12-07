@@ -169,7 +169,7 @@ docker run -p 443:443/udp blitz-gateway
 
 ```bash
 # On macOS with Multipass installed
-./scripts/linux-build.sh build -Doptimize=ReleaseFast
+./scripts/vm/linux-build.sh build -Doptimize=ReleaseFast
 
 # Sync binary to Mac
 ./scripts/sync_artifacts_to_mac.sh

@@ -96,18 +96,18 @@ Test Linux builds locally using Multipass (Ubuntu VM) without waiting for CI.
 
 ```bash
 # First time setup (creates VM and installs Zig automatically)
-./scripts/linux-build.sh build test
+./scripts/vm/linux-build.sh build test
 
 # Regular usage - test release build
-./scripts/linux-build.sh build -Drelease-safe
+./scripts/vm/linux-build.sh build -Drelease-safe
 
 # Clean and recreate VM (if something goes wrong)
-./scripts/linux-build.sh --clean build test
+./scripts/vm/linux-build.sh --clean build test
 
 # Run any zig command
-./scripts/linux-build.sh build
-./scripts/linux-build.sh test
-./scripts/linux-build.sh build-exe src/main.zig
+./scripts/vm/linux-build.sh build
+./scripts/vm/linux-build.sh test
+./scripts/vm/linux-build.sh build-exe src/main.zig
 ```
 
 ### What It Does
@@ -139,7 +139,7 @@ This takes ~2-3 minutes. Subsequent runs are instant.
 If the VM gets into a broken state, use the `--clean` flag to delete and recreate it:
 
 ```bash
-./scripts/linux-build.sh --clean build test
+./scripts/vm/linux-build.sh --clean build test
 ```
 
 This will:

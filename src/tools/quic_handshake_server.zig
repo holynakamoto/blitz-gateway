@@ -9,8 +9,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const frames = @import("quic/frames.zig");
-const crypto = @import("quic/crypto.zig");
+// const frames = @import("quic/frames.zig"); // Disabled - old QUIC code removed
+// const crypto = @import("quic/crypto/mod.zig"); // Disabled - using msquic now
 const frame = @import("http3/frame.zig");
 const qpack = @import("http3/qpack.zig");
 const tls_session = @import("tls/session.zig");

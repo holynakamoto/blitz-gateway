@@ -19,7 +19,7 @@
 **Workflow:**
 ```bash
 # On Mac:
-./scripts/linux-build.sh build -Doptimize=ReleaseFast
+./scripts/vm/linux-build.sh build -Doptimize=ReleaseFast
 
 # Sync artifacts
 ./scripts/sync_artifacts_to_mac.sh
@@ -205,7 +205,7 @@ jobs:
 ```bash
 # Your workflow:
 1. Code changes on Mac
-2. Run: ./scripts/linux-build.sh build -Doptimize=ReleaseFast
+2. Run: ./scripts/vm/linux-build.sh build -Doptimize=ReleaseFast
 3. Run: ./scripts/sync_artifacts_to_mac.sh
 4. Commit code + metadata: git commit -am "feat: new feature"
 5. When releasing: gh release create v1.2.3 artifacts/aarch64-linux/*
@@ -257,7 +257,7 @@ blitz-gateway/
 vim src/main.zig
 
 # 2. Build locally
-./scripts/linux-build.sh build -Doptimize=ReleaseFast
+./scripts/vm/linux-build.sh build -Doptimize=ReleaseFast
 
 # 3. Sync artifacts to Mac
 ./scripts/sync_artifacts_to_mac.sh
@@ -276,7 +276,7 @@ git tag v1.2.3
 git push --tags
 
 # 2. Build release artifacts
-./scripts/linux-build.sh build -Doptimize=ReleaseFast
+./scripts/vm/linux-build.sh build -Doptimize=ReleaseFast
 ./scripts/sync_artifacts_to_mac.sh
 
 # 3. Create GitHub release with binaries

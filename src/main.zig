@@ -1,18 +1,18 @@
-//! Blitz Gateway - High-performance QUIC/HTTP3 reverse proxy and load balancer
+//! Blitz Gateway - High-performance HTTP/1.1 and HTTP/2 reverse proxy and load balancer
 //!
 //! Usage:
-//!   zig build run                    # Run QUIC/HTTP3 server (default)
+//!   zig build run                    # Run HTTP/1.1 server (default)
 //!   zig build run -- --mode echo     # Run echo server demo
 //!   zig build run -- --mode http     # Run HTTP/1.1 server with JWT
-//!   zig build run -- --mode quic     # Run QUIC/HTTP3 server
 //!   zig build run -- --lb config.toml # Run load balancer mode
+//!
+//! Note: HTTP/3 (QUIC) is handled by Caddy. See scripts/bench/bench.sh for setup.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("core/mod.zig");
 const io_uring = core.io_uring;
 const graceful_reload = core.graceful_reload;
-const quic_server = @import("quic/server.zig");
 const config = @import("config/mod.zig");
 const load_balancer = @import("load_balancer/mod.zig");
 const middleware = @import("middleware/mod.zig");
@@ -22,6 +22,7 @@ const auth = @import("auth/mod.zig");
 const jwt = auth.jwt;
 const benchmark = @import("benchmark.zig");
 const http2 = @import("http2_minimal.zig");
+
 
 // C imports for socket timeout configuration
 const c = @cImport({
@@ -38,9 +39,9 @@ const READ_TIMEOUT_SECONDS: u64 = 30; // 30 second read timeout
 const READ_BUFFER_SIZE: usize = 8192; // 8KB read buffer
 
 const Mode = enum {
-    quic, // QUIC/HTTP3 server (default)
+    quic, // QUIC/HTTP3 server (deprecated - use Caddy for HTTP/3)
     echo, // Echo server demo
-    http, // HTTP/1.1 server with JWT
+    http, // HTTP/1.1 server with JWT (default)
     bench, // Built-in benchmark mode
 };
 
@@ -53,7 +54,7 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    var mode: Mode = .quic;
+    var mode: Mode = .http;
     var config_path: ?[]const u8 = null;
     var port: ?u16 = null;
 
@@ -160,19 +161,19 @@ pub fn main() !void {
 fn printUsage() void {
     std.debug.print(
         \\Blitz Gateway v1.0.0
-        \\High-performance QUIC/HTTP3 reverse proxy and load balancer
+        \\High-performance HTTP/1.1 and HTTP/2 reverse proxy and load balancer
         \\
         \\Usage:
         \\  blitz [OPTIONS]
         \\
         \\Server Options:
-        \\  --mode <mode>       Server mode: quic (default), echo, or http
+        \\  --mode <mode>       Server mode: http (default), echo, or quic (deprecated)
         \\  --lb <config>       Load balancer mode with config file
         \\  --config <file>     Configuration file path
-        \\  --port <port>       Port to listen on (default: 8443 for QUIC, 8080 for others)
-        \\  --cert <file>       TLS certificate file (PEM format, for QUIC mode)
-        \\  --key <file>        TLS private key file (PEM format, for QUIC mode)
-        \\  --capture           Enable packet capture for QUIC sessions (writes to captures/ directory)
+        \\  --port <port>       Port to listen on (default: 8080)
+        \\  --cert <file>       TLS certificate file (PEM format, deprecated for QUIC mode)
+        \\  --key <file>        TLS private key file (PEM format, deprecated for QUIC mode)
+        \\  --capture           Enable packet capture (deprecated for QUIC mode)
         \\
         \\Benchmark Options:
         \\  --bench [protocol]  Run built-in benchmarks (http1, http2, http3, or all)
@@ -185,13 +186,15 @@ fn printUsage() void {
         \\  --version, -v       Show version
         \\
         \\Examples:
-        \\  blitz                               # QUIC/HTTP3 server
+        \\  blitz                               # HTTP/1.1 server (default)
         \\  blitz --mode echo                   # Echo server demo
         \\  blitz --mode http                   # HTTP/1.1 server with JWT
         \\  blitz --lb config.toml              # Load balancer mode
         \\  blitz --bench                       # Benchmark all protocols
         \\  blitz --bench http1                 # Benchmark HTTP/1.1 only
         \\  blitz --bench http1 --duration 60  # 60-second HTTP/1.1 benchmark
+        \\
+        \\Note: HTTP/3 (QUIC) is handled by Caddy. See scripts/bench/bench.sh for setup.
         \\
     , .{});
 }
@@ -244,35 +247,10 @@ fn runBenchmarkMode(
     benchmark.printResults(result);
 }
 
-fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16, cert_path: ?[]const u8, key_path: ?[]const u8, enable_capture: bool) !void {
-    if (builtin.os.tag != .linux) {
-        std.log.err("QUIC server requires Linux (io_uring support)", .{});
-        return error.UnsupportedPlatform;
-    }
+fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, _: ?u16, _: ?[]const u8, _: ?[]const u8, _: bool) !void {
+    std.log.info("Blitz Gateway starting up (Zig HTTP/1.1 and HTTP/2 only)", .{});
 
-    std.debug.print("Blitz QUIC/HTTP3 Server v0.6.0\n", .{});
-    std.debug.print("================================\n\n", .{});
-
-    // Log TLS certificate configuration
-    if (cert_path) |cert| {
-        std.debug.print("TLS Certificate: {s}\n", .{cert});
-    } else {
-        std.debug.print("TLS Certificate: (none - TLS handshake will be limited)\n", .{});
-    }
-    if (key_path) |key| {
-        std.debug.print("TLS Private Key: {s}\n", .{key});
-    } else {
-        std.debug.print("TLS Private Key: (none)\n", .{});
-    }
-    // TODO: Pass cert_path and key_path to QUIC server for TLS initialization
-
-    // Initialize io_uring
-    try io_uring.init();
-    defer io_uring.deinit();
-
-    const ring = &io_uring.ring;
-
-    // Load configuration if provided
+    // Load configuration if provided (for load balancer mode)
     if (config_path) |cfg_path| {
         std.debug.print("Loading configuration from: {s}\n", .{cfg_path});
         var cfg = try config.loadConfig(allocator, cfg_path);
@@ -285,18 +263,10 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
         }
     }
 
-    // Default: Run QUIC server on port 8443
-    const listen_port = port orelse 8443;
-    std.debug.print("Starting QUIC/HTTP3 server on port {d}...\n", .{listen_port});
-    if (enable_capture) {
-        std.debug.print("Packet capture: ENABLED (files will be written to captures/ directory)\n", .{});
-    }
-    // TODO: Integrate cert_path, key_path, enable_capture when TLS is fully implemented
-    _ = cert_path;
-    _ = key_path;
-    _ = enable_capture;
-    _ = ring;
-    try quic_server.runQuicServer(listen_port);
+    std.log.err("QUIC/HTTP/3 mode is no longer supported in Zig.", .{});
+    std.log.err("Please use Caddy for HTTP/3 support. See scripts/bench/bench.sh for an example.", .{});
+    std.log.err("Blitz Gateway now supports HTTP/1.1 and HTTP/2 (h2c) only.", .{});
+    return error.QuicModeNotSupported;
 }
 
 fn runEchoServer(port: u16) !void {

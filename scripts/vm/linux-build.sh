@@ -238,12 +238,14 @@ export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
 export PATH="/usr/local/bin:$PATH"
 
 # Configure cURL to use OpenSSL, nghttp3, and ngtcp2 from /usr/local
+# Note: ngtcp2 was built with GnuTLS, so we must specify --with-ngtcp2-crypto=gnutls
 echo "  Configuring curl build..."
 # Use full paths for dependencies to guarantee linking
 ./configure --prefix=/usr/local \
     --with-ssl \
     --with-nghttp3=/usr/local \
     --with-ngtcp2=/usr/local \
+    --with-ngtcp2-crypto=gnutls \
     --disable-shared \
     --enable-static || {
     echo "  ❌ curl configure failed"

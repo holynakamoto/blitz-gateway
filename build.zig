@@ -1,8 +1,161 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+// Build note: We use liburing-ffi.a (built from source in the VM) for proper FFI symbol resolution.
+// Per PRD: The FFI variant exports all io_uring functions as regular symbols (not inline),
+// which resolves undefined symbol errors when cross-compiling with Zig.
+
+// Helper function to link liburing-ffi for proper FFI symbol resolution
+// Per PRD: liburing-ffi.a exports all functions as regular symbols (not inline)
+// This resolves undefined symbol errors like __io_uring_get_cqe, io_uring_queue_init, etc.
+// Helper function to link liburing-ffi for proper FFI symbol resolution
+fn linkLiburingFFI(exe: *std.Build.Step.Compile) void {
+    // Link liburing-ffi for proper symbol resolution
+    exe.addObjectFile(.{ .cwd_relative = "/usr/local/lib/liburing-ffi.a" });
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+}
+
+// Helper function to add all C source files to an executable
+fn addCSourceFiles(b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
+    if (target.result.os.tag != .linux) return;
+
+    // Add src/core to include path
+    exe.addIncludePath(.{ .cwd_relative = "src/core" });
+
+    // liburing headers are installed to /usr/local/include by the build script
+    // Note: We still need the swab.h stub for cross-compilation (in vendor/liburing/src/include/linux/swab.h)
+    exe.addIncludePath(.{ .cwd_relative = "vendor/liburing/src/include" }); // For swab.h stub only
+
+    // Add core C files
+    exe.addCSourceFile(.{
+        .file = b.path("src/core/bind_wrapper.c"),
+        .flags = &.{ "-std=c99", "-fno-sanitize=undefined" },
+    });
+
+    // Link liburing-ffi for proper FFI symbol resolution
+    // Per PRD: This resolves undefined symbol errors from inline functions
+    linkLiburingFFI(exe);
+
+    // Picoquic integration - DISABLED (HTTP/3 now handled by Caddy)
+    // Note: Picoquic sources are no longer compiled since we use Caddy for HTTP/3
+    // addPicoquicSources(b, exe);
+
+    // Help Zig find the right architecture-specific headers
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include/aarch64-linux-gnu" });
+    // Add /usr/include for Linux kernel headers (linux/swab.h)
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
+}
+
+// MsQuic linking removed - HTTP/3 is now handled by Caddy (see scripts/bench/bench.sh)
+
+// Helper function to add Picoquic C sources and dependencies
+// Note: This function will cause build errors if Picoquic is not cloned
+// To enable Picoquic: 1) Run ./deps/picoquic_setup.sh, 2) Uncomment addPicoquicSources() call in addCSourceFiles()
+fn addPicoquicSources(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    const picoquic_dir = "deps/picoquic";
+    const picotls_dir = "deps/picotls";
+
+    // Add include paths for Picoquic and Picotls
+    // Order matters: system headers first to avoid macro redefinition
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include" }); // System headers first
+    exe.addIncludePath(.{ .cwd_relative = "/usr/local/include" }); // For installed picotls headers
+    exe.addIncludePath(.{ .cwd_relative = picoquic_dir }); // Picoquic headers
+    exe.addIncludePath(.{ .cwd_relative = picotls_dir }); // Picotls headers
+
+    // Common C flags for Picoquic
+    // Note: -Wno-macro-redefined to suppress macro redefinition warnings from system headers
+    // -D_GNU_SOURCE ensures pthread types are available
+    const cflags = &.{
+        "-std=c99",
+        "-fno-sanitize=undefined",
+        "-DPICOQUIC_USE_PICOTLS=1",
+        "-D_GNU_SOURCE", // Required for pthread types on Linux
+        "-Wno-macro-redefined",
+        "-Wno-unused-parameter",
+        "-Wno-unused-variable",
+        "-Wno-deprecated-declarations",
+    };
+
+    // Main Picoquic source files (from CMakeLists.txt, using Picotls backend)
+    const picoquic_sources = [_][]const u8{
+        "picoquic/bbr.c",
+        "picoquic/bbr1.c",
+        "picoquic/bytestream.c",
+        "picoquic/cc_common.c",
+        "picoquic/config.c",
+        "picoquic/cubic.c",
+        "picoquic/c4.c",
+        "picoquic/ech.c",
+        "picoquic/error_names.c",
+        "picoquic/fastcc.c",
+        "picoquic/frames.c",
+        "picoquic/intformat.c",
+        "picoquic/logger.c",
+        "picoquic/logwriter.c",
+        "picoquic/loss_recovery.c",
+        "picoquic/newreno.c",
+        "picoquic/pacing.c",
+        "picoquic/packet.c",
+        "picoquic/paths.c",
+        "picoquic/performance_log.c",
+        "picoquic/picohash.c",
+        "picoquic/picoquic_lb.c",
+        "picoquic/picoquic_ptls_minicrypto.c", // Picotls minicrypto backend
+        "picoquic/picosocks.c",
+        "picoquic/picosplay.c",
+        "picoquic/port_blocking.c",
+        "picoquic/prague.c",
+        "picoquic/quicctx.c",
+        "picoquic/register_all_cc_algorithms.c",
+        "picoquic/sacks.c",
+        "picoquic/sender.c",
+        "picoquic/sim_link.c",
+        "picoquic/siphash.c",
+        "picoquic/sockloop.c",
+        "picoquic/spinbit.c",
+        "picoquic/ticket_store.c",
+        "picoquic/timing.c",
+        "picoquic/tls_api.c",
+        "picoquic/token_store.c",
+        "picoquic/transport.c",
+        "picoquic/unified_log.c",
+        "picoquic/util.c",
+    };
+
+    // Add Picoquic source files
+    for (picoquic_sources) |source| {
+        const full_path = b.fmt("{s}/{s}", .{ picoquic_dir, source });
+        exe.addCSourceFile(.{
+            .file = b.path(full_path),
+            .flags = cflags,
+        });
+    }
+
+    // Link required system libraries for Picoquic/Picotls
+    exe.linkSystemLibrary("ssl");
+    exe.linkSystemLibrary("crypto");
+    exe.linkSystemLibrary("dl");
+    exe.linkSystemLibrary("pthread");
+
+    // Link Picotls static libraries if available
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    exe.addObjectFile(.{ .cwd_relative = "/usr/local/lib/libpicotls.a" });
+    exe.addObjectFile(.{ .cwd_relative = "/usr/local/lib/libpicotls-minicrypto.a" });
+}
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    // Explicitly set default target to Linux aarch64 (required for cross-compilation)
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_arch = .aarch64,
+            .os_tag = .linux,
+            .abi = .gnu,
+        },
+    });
     _ = b.standardOptimizeOption(.{}); // Optimize options are used via command line
+
+    // Picoquic integration - C-based QUIC implementation via FFI
 
     const root_module = b.addModule("root", .{
         .root_source_file = b.path("src/main.zig"),
@@ -12,7 +165,6 @@ pub fn build(b: *std.Build) void {
         .name = "blitz",
         .root_module = root_module,
     });
-    // Target and optimize are set via standardTargetOptions/standardOptimizeOption above
 
     // Link libc (required for C interop)
     exe.linkLibC();
@@ -20,44 +172,27 @@ pub fn build(b: *std.Build) void {
     // Platform-specific configuration
     if (target.result.os.tag == .linux) {
         // Add architecture-specific library paths for Ubuntu/Debian
-        // Docker containers use /usr/lib/x86_64-linux-gnu/
+        // Support both x86_64 and aarch64 architectures
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+        exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/aarch64-linux-gnu" });
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
         exe.addLibraryPath(.{ .cwd_relative = "/lib/x86_64-linux-gnu" });
+        exe.addLibraryPath(.{ .cwd_relative = "/lib/aarch64-linux-gnu" });
         exe.addLibraryPath(.{ .cwd_relative = "/lib" });
 
-        // Link liburing
-        exe.linkSystemLibrary("uring");
+        // Picoquic integration - C-based QUIC implementation via FFI
+        // NOTE: liburing-ffi is linked via addCSourceFiles() -> linkLiburingFFI()
+        // We use liburing-ffi.a (not liburing.a) for proper FFI symbol resolution
+        // Picoquic sources and dependencies are added via addCSourceFiles() -> addPicoquicSources()
 
-        // Link OpenSSL for TLS 1.3
-        exe.linkSystemLibrary("ssl");
-        exe.linkSystemLibrary("crypto");
+        // Add all C source files (io_uring bindings)
+        addCSourceFiles(b, exe, target);
 
-        // Add C wrappers with proper flags
-        exe.addCSourceFile(.{
-            .file = b.path("src/core/bind_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
-
-        exe.addCSourceFile(.{
-            .file = b.path("src/tls/openssl_wrapper.c"),
-            .flags = &[_][]const u8{
-                "-std=c99",
-                "-D_GNU_SOURCE",
-                "-fno-sanitize=undefined",
-            },
-        });
+        // Note: MsQuic linking removed - HTTP/3 is handled by Caddy
 
         // Add include paths for headers
         exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
         exe.addIncludePath(.{ .cwd_relative = "src" });
-
-        // Add picotls include paths (needed for openssl_wrapper.c)
-        exe.addIncludePath(b.path("deps/picotls/include"));
     }
 
     // Install the binary
@@ -86,7 +221,8 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibC();
 
     if (target.result.os.tag == .linux) {
-        unit_tests.linkSystemLibrary("uring");
+        // Link liburing-ffi for unit tests that use io_uring
+        linkLiburingFFI(unit_tests);
     }
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -153,29 +289,6 @@ pub fn build(b: *std.Build) void {
     const run_quic_packet_simple_tests = b.addRunArtifact(quic_packet_simple_tests);
     const quic_packet_simple_test_step = b.step("test-quic-packet-simple", "Run simple QUIC packet generation test");
     quic_packet_simple_test_step.dependOn(&run_quic_packet_simple_tests.step);
-
-    // QUIC standalone server executable - REMOVED (quic_main.zig deleted, use main.zig instead)
-
-    // QUIC Handshake Server (full TLS integration)
-    // Create a new module with src/main.zig as root, then override entry point
-    const quic_handshake_server_module = b.addModule("quic_handshake_server", .{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-    });
-    const quic_handshake_server_exe = b.addExecutable(.{
-        .name = "quic_handshake_server",
-        .root_module = quic_handshake_server_module,
-    });
-    quic_handshake_server_exe.linkLibC();
-    if (target.result.os.tag == .linux) {
-        quic_handshake_server_exe.linkSystemLibrary("ssl");
-        quic_handshake_server_exe.linkSystemLibrary("crypto");
-        quic_handshake_server_exe.linkSystemLibrary("uring");
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "/usr/include" });
-        quic_handshake_server_exe.addIncludePath(.{ .cwd_relative = "src" });
-        quic_handshake_server_exe.addIncludePath(b.path("deps/picotls/include"));
-    }
-    b.installArtifact(quic_handshake_server_exe);
 
     // Transport parameters tests
     const transport_params_tests = b.addTest(.{

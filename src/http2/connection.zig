@@ -302,9 +302,8 @@ pub const Http2Connection = struct {
             }
 
             // Process this frame
-            std.log.debug("Processing HTTP/2 frame: type={any}, stream_id={d}, length={d}", .{ header.frame_type, header.stream_id, header.length });
+            std.log.debug("Processing HTTP/2 frame: stream_id={d}, length={d}", .{ header.stream_id, header.length });
             const action = try self.handleFrame(data[offset..][0..frame_size]);
-            std.log.debug("Frame processed, action: {any}", .{action});
 
             // Track actions that require a response
             // CRITICAL: If we need SETTINGS ACK, we MUST send it BEFORE any response
@@ -488,16 +487,16 @@ pub const Http2Connection = struct {
         errdefer self.allocator.free(content_length_str);
 
         // Zig 0.15.2: append requires allocator
-        try response_headers.append(hpack.HeaderField{ .name = ":status", .value = "200" });
-        try response_headers.append(hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
-        try response_headers.append(hpack.HeaderField{ .name = "content-length", .value = content_length_str });
-        try response_headers.append(hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = ":status", .value = "200" });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-type", .value = "text/plain" });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "content-length", .value = content_length_str });
+        try response_headers.append(self.allocator, hpack.HeaderField{ .name = "server", .value = "blitz-gateway" });
 
         return ResponseAction{
             .send_response = .{
                 .stream_id = stream_id,
                 .status = status,
-                .headers = try response_headers.toOwnedSlice(),
+                .headers = try response_headers.toOwnedSlice(self.allocator),
                 .body = body,
             },
         };

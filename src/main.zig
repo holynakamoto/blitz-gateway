@@ -1,18 +1,18 @@
-//! Blitz Gateway - High-performance QUIC/HTTP3 reverse proxy and load balancer
+//! Blitz Gateway - High-performance HTTP/1.1 and HTTP/2 reverse proxy and load balancer
 //!
 //! Usage:
-//!   zig build run                    # Run QUIC/HTTP3 server (default)
+//!   zig build run                    # Run HTTP/1.1 server (default)
 //!   zig build run -- --mode echo     # Run echo server demo
 //!   zig build run -- --mode http     # Run HTTP/1.1 server with JWT
-//!   zig build run -- --mode quic     # Run QUIC/HTTP3 server
 //!   zig build run -- --lb config.toml # Run load balancer mode
+//!
+//! Note: HTTP/3 (QUIC) is handled by Caddy. See scripts/bench/bench.sh for setup.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("core/mod.zig");
 const io_uring = core.io_uring;
 const graceful_reload = core.graceful_reload;
-const udp_server = @import("quic/udp_server.zig");
 const config = @import("config/mod.zig");
 const load_balancer = @import("load_balancer/mod.zig");
 const middleware = @import("middleware/mod.zig");
@@ -20,11 +20,29 @@ const rate_limit = middleware.rate_limit;
 const metrics = @import("metrics/mod.zig");
 const auth = @import("auth/mod.zig");
 const jwt = auth.jwt;
+const benchmark = @import("benchmark.zig");
+const http2 = @import("http2_minimal.zig");
+
+
+// C imports for socket timeout configuration
+const c = @cImport({
+    @cInclude("sys/socket.h");
+    @cInclude("sys/time.h");
+    @cInclude("unistd.h");
+    @cInclude("errno.h");
+});
+
+// HTTP request reading configuration
+const MAX_REQUEST_SIZE: usize = 16 * 1024 * 1024; // 16MB max request size
+const MAX_HEADER_SIZE: usize = 64 * 1024; // 64KB max header size
+const READ_TIMEOUT_SECONDS: u64 = 30; // 30 second read timeout
+const READ_BUFFER_SIZE: usize = 8192; // 8KB read buffer
 
 const Mode = enum {
-    quic, // QUIC/HTTP3 server (default)
+    quic, // QUIC/HTTP3 server (deprecated - use Caddy for HTTP/3)
     echo, // Echo server demo
-    http, // HTTP/1.1 server with JWT
+    http, // HTTP/1.1 server with JWT (default)
+    bench, // Built-in benchmark mode
 };
 
 pub fn main() !void {
@@ -36,9 +54,22 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    var mode: Mode = .quic;
+    var mode: Mode = .http;
     var config_path: ?[]const u8 = null;
     var port: ?u16 = null;
+
+    // Benchmark options
+    var bench_protocol: ?[]const u8 = null;
+    var bench_duration: u32 = 30;
+    var bench_connections: u32 = 100;
+    var bench_threads: ?u32 = null;
+
+    // TLS certificate options (for QUIC mode)
+    var cert_path: ?[]const u8 = null;
+    var key_path: ?[]const u8 = null;
+    
+    // Packet capture option (for QUIC mode)
+    var enable_capture: bool = false;
 
     // Simple argument parsing
     var i: usize = 1;
@@ -57,6 +88,35 @@ pub fn main() !void {
                     return error.InvalidMode;
                 }
             }
+        } else if (std.mem.eql(u8, args[i], "--bench")) {
+            mode = .bench;
+            // Check if next arg is a protocol name
+            if (i + 1 < args.len) {
+                const next = args[i + 1];
+                if (std.mem.eql(u8, next, "http1") or
+                    std.mem.eql(u8, next, "http2") or
+                    std.mem.eql(u8, next, "http3") or
+                    std.mem.eql(u8, next, "all"))
+                {
+                    bench_protocol = next;
+                    i += 1;
+                }
+            }
+        } else if (std.mem.eql(u8, args[i], "--duration")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                bench_duration = try std.fmt.parseInt(u32, args[i], 10);
+            }
+        } else if (std.mem.eql(u8, args[i], "--connections")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                bench_connections = try std.fmt.parseInt(u32, args[i], 10);
+            }
+        } else if (std.mem.eql(u8, args[i], "--threads")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                bench_threads = try std.fmt.parseInt(u32, args[i], 10);
+            }
         } else if (std.mem.eql(u8, args[i], "--lb") or std.mem.eql(u8, args[i], "--config")) {
             if (i + 1 < args.len) {
                 i += 1;
@@ -67,8 +127,23 @@ pub fn main() !void {
                 i += 1;
                 port = try std.fmt.parseInt(u16, args[i], 10);
             }
+        } else if (std.mem.eql(u8, args[i], "--cert")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                cert_path = args[i];
+            }
+        } else if (std.mem.eql(u8, args[i], "--key")) {
+            if (i + 1 < args.len) {
+                i += 1;
+                key_path = args[i];
+            }
+        } else if (std.mem.eql(u8, args[i], "--capture")) {
+            enable_capture = true;
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             printUsage();
+            return;
+        } else if (std.mem.eql(u8, args[i], "--version") or std.mem.eql(u8, args[i], "-v")) {
+            std.debug.print("Blitz Gateway v1.0.0\n", .{});
             return;
         }
         i += 1;
@@ -76,53 +151,106 @@ pub fn main() !void {
 
     // Route to appropriate mode
     switch (mode) {
-        .quic => try runQuicServer(allocator, config_path, port),
+        .quic => try runQuicServer(allocator, config_path, port, cert_path, key_path, enable_capture),
         .echo => try runEchoServer(port orelse 8080),
         .http => try runHttpServer(port orelse 8080),
+        .bench => try runBenchmarkMode(allocator, bench_protocol, bench_duration, bench_connections, bench_threads, port),
     }
 }
 
 fn printUsage() void {
     std.debug.print(
-        \\Blitz Gateway v0.6.0
-        \\High-performance QUIC/HTTP3 reverse proxy and load balancer
+        \\Blitz Gateway v1.0.0
+        \\High-performance HTTP/1.1 and HTTP/2 reverse proxy and load balancer
         \\
         \\Usage:
-        \\  zig build run [OPTIONS]
+        \\  blitz [OPTIONS]
         \\
-        \\Options:
-        \\  --mode <mode>     Server mode: quic (default), echo, or http
-        \\  --lb <config>     Load balancer mode with config file
-        \\  --config <file>   Configuration file path
-        \\  --port <port>     Port to listen on (default: 8443 for QUIC, 8080 for others)
-        \\  --help, -h        Show this help message
+        \\Server Options:
+        \\  --mode <mode>       Server mode: http (default), echo, or quic (deprecated)
+        \\  --lb <config>       Load balancer mode with config file
+        \\  --config <file>     Configuration file path
+        \\  --port <port>       Port to listen on (default: 8080)
+        \\  --cert <file>       TLS certificate file (PEM format, deprecated for QUIC mode)
+        \\  --key <file>        TLS private key file (PEM format, deprecated for QUIC mode)
+        \\  --capture           Enable packet capture (deprecated for QUIC mode)
+        \\
+        \\Benchmark Options:
+        \\  --bench [protocol]  Run built-in benchmarks (http1, http2, http3, or all)
+        \\  --duration <secs>   Benchmark duration in seconds (default: 30)
+        \\  --connections <n>   Concurrent connections (default: 100)
+        \\  --threads <n>       Worker threads (default: CPU count)
+        \\
+        \\General:
+        \\  --help, -h          Show this help message
+        \\  --version, -v       Show version
         \\
         \\Examples:
-        \\  zig build run                           # QUIC/HTTP3 server
-        \\  zig build run -- --mode echo            # Echo server demo
-        \\  zig build run -- --mode http            # HTTP/1.1 server
-        \\  zig build run -- --lb config.toml       # Load balancer mode
-        \\  zig build run -- --port 9000            # Custom port
+        \\  blitz                               # HTTP/1.1 server (default)
+        \\  blitz --mode echo                   # Echo server demo
+        \\  blitz --mode http                   # HTTP/1.1 server with JWT
+        \\  blitz --lb config.toml              # Load balancer mode
+        \\  blitz --bench                       # Benchmark all protocols
+        \\  blitz --bench http1                 # Benchmark HTTP/1.1 only
+        \\  blitz --bench http1 --duration 60  # 60-second HTTP/1.1 benchmark
+        \\
+        \\Note: HTTP/3 (QUIC) is handled by Caddy. See scripts/bench/bench.sh for setup.
         \\
     , .{});
 }
 
-fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?u16) !void {
-    if (builtin.os.tag != .linux) {
-        std.log.err("QUIC server requires Linux (io_uring support)", .{});
-        return error.UnsupportedPlatform;
-    }
+fn runBenchmarkMode(
+    allocator: std.mem.Allocator,
+    protocol_arg: ?[]const u8,
+    duration: u32,
+    connections: u32,
+    threads_arg: ?u32,
+    port_arg: ?u16,
+) !void {
+    std.debug.print("\n", .{});
+    std.debug.print("╔════════════════════════════════════════════════════════╗\n", .{});
+    std.debug.print("║  Blitz Gateway - Built-in Benchmark Suite             ║\n", .{});
+    std.debug.print("╚════════════════════════════════════════════════════════╝\n", .{});
+    std.debug.print("\n", .{});
 
-    std.debug.print("Blitz QUIC/HTTP3 Server v0.6.0\n", .{});
-    std.debug.print("================================\n\n", .{});
+    const threads = threads_arg orelse @as(u32, @intCast(std.Thread.getCpuCount() catch 4));
+    const port = port_arg orelse 8080;
 
-    // Initialize io_uring
-    try io_uring.init();
-    defer io_uring.deinit();
+    // Determine which protocol(s) to benchmark
+    const protocol = if (protocol_arg) |p|
+        if (std.mem.eql(u8, p, "http1"))
+            benchmark.BenchmarkConfig.Protocol.http1
+        else if (std.mem.eql(u8, p, "http2"))
+            benchmark.BenchmarkConfig.Protocol.http2
+        else if (std.mem.eql(u8, p, "http3"))
+            benchmark.BenchmarkConfig.Protocol.http3
+        else
+            benchmark.BenchmarkConfig.Protocol.all
+    else
+        benchmark.BenchmarkConfig.Protocol.http1; // Default to http1
 
-    const ring = &io_uring.ring;
+    std.debug.print("NOTE: Start the server first in another terminal!\n", .{});
+    std.debug.print("  HTTP/1.1: JWT_SECRET=test ./blitz --mode http\n", .{});
+    std.debug.print("  Echo:     ./blitz --mode echo\n", .{});
+    std.debug.print("  QUIC:     ./blitz\n", .{});
+    std.debug.print("\n", .{});
 
-    // Load configuration if provided
+    const cfg = benchmark.BenchmarkConfig{
+        .protocol = protocol,
+        .duration_seconds = duration,
+        .connections = connections,
+        .threads = threads,
+        .port = port,
+    };
+
+    const result = try benchmark.runBenchmark(allocator, cfg);
+    benchmark.printResults(result);
+}
+
+fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, _: ?u16, _: ?[]const u8, _: ?[]const u8, _: bool) !void {
+    std.log.info("Blitz Gateway starting up (Zig HTTP/1.1 and HTTP/2 only)", .{});
+
+    // Load configuration if provided (for load balancer mode)
     if (config_path) |cfg_path| {
         std.debug.print("Loading configuration from: {s}\n", .{cfg_path});
         var cfg = try config.loadConfig(allocator, cfg_path);
@@ -135,10 +263,10 @@ fn runQuicServer(allocator: std.mem.Allocator, config_path: ?[]const u8, port: ?
         }
     }
 
-    // Default: Run QUIC server on port 8443
-    const listen_port = port orelse 8443;
-    std.debug.print("Starting QUIC/HTTP3 server on port {d}...\n", .{listen_port});
-    try udp_server.runQuicServer(ring, listen_port);
+    std.log.err("QUIC/HTTP/3 mode is no longer supported in Zig.", .{});
+    std.log.err("Please use Caddy for HTTP/3 support. See scripts/bench/bench.sh for an example.", .{});
+    std.log.err("Blitz Gateway now supports HTTP/1.1 and HTTP/2 (h2c) only.", .{});
+    return error.QuicModeNotSupported;
 }
 
 fn runEchoServer(port: u16) !void {
@@ -165,12 +293,38 @@ fn runHttpServer(port: u16) !void {
 
     // Create JWT validator configuration
     var jwt_config = jwt.ValidatorConfig.init(std.heap.page_allocator);
-    defer jwt_config.deinit(std.heap.page_allocator);
+    // Note: jwt_config ownership is transferred to jwt_validator on success.
+    // Only deinit on error paths before successful initialization.
 
     jwt_config.algorithm = .HS256;
-    jwt_config.secret = try std.heap.page_allocator.dupe(u8, "your-256-bit-secret");
-    jwt_config.issuer = try std.heap.page_allocator.dupe(u8, "blitz-gateway");
-    jwt_config.audience = try std.heap.page_allocator.dupe(u8, "blitz-api");
+
+    // Read JWT secret from environment variable (required)
+    const jwt_secret_env = std.posix.getenv("JWT_SECRET");
+    const jwt_secret_raw = jwt_secret_env orelse {
+        std.log.err("JWT_SECRET environment variable is required but not set", .{});
+        jwt_config.deinit(std.heap.page_allocator);
+        return error.JwtSecretMissing;
+    };
+    if (jwt_secret_raw.len == 0) {
+        std.log.err("JWT_SECRET environment variable cannot be empty", .{});
+        jwt_config.deinit(std.heap.page_allocator);
+        return error.JwtSecretEmpty;
+    }
+    jwt_config.secret = try std.heap.page_allocator.dupe(u8, jwt_secret_raw);
+
+    // Read JWT issuer from environment variable (optional, defaults to "blitz-gateway")
+    const jwt_issuer_env = std.posix.getenv("JWT_ISSUER");
+    jwt_config.issuer = if (jwt_issuer_env) |issuer|
+        try std.heap.page_allocator.dupe(u8, issuer)
+    else
+        try std.heap.page_allocator.dupe(u8, "blitz-gateway");
+
+    // Read JWT audience from environment variable (optional, defaults to "blitz-api")
+    const jwt_audience_env = std.posix.getenv("JWT_AUDIENCE");
+    jwt_config.audience = if (jwt_audience_env) |audience|
+        try std.heap.page_allocator.dupe(u8, audience)
+    else
+        try std.heap.page_allocator.dupe(u8, "blitz-api");
 
     var jwt_validator = jwt.Validator.init(std.heap.page_allocator, jwt_config);
     defer jwt_validator.deinit();
@@ -194,18 +348,59 @@ fn runHttpServer(port: u16) !void {
 }
 
 fn handleHttpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, jwt_validator: *jwt.Validator) !void {
-    var buffer: [8192]u8 = undefined;
-    const bytes_read = try stream.read(&buffer);
-    if (bytes_read == 0) return;
+    // Configure socket timeout
+    const fd = stream.handle;
+    var timeout: c.struct_timeval = undefined;
+    timeout.tv_sec = @intCast(READ_TIMEOUT_SECONDS);
+    timeout.tv_usec = 0;
+    _ = c.setsockopt(fd, c.SOL_SOCKET, c.SO_RCVTIMEO, &timeout, @sizeOf(c.struct_timeval));
 
-    const request_data = buffer[0..bytes_read];
-    const request_str = std.mem.sliceTo(request_data, 0);
-    var request_lines = std.mem.splitSequence(u8, request_str, "\r\n");
+    // Peek at first bytes to detect protocol before full read
+    var peek_buf: [32]u8 = undefined;
+    const peek_read = stream.read(&peek_buf) catch |err| {
+        if (err == error.WouldBlock) return;
+        return err;
+    };
+    if (peek_read == 0) return;
 
-    const request_line = request_lines.next() orelse return;
+    // Check for direct HTTP/2 connection (prior knowledge - used by h2load)
+    // HTTP/2 preface is "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" (24 bytes)
+    if (peek_read >= 3 and std.mem.startsWith(u8, peek_buf[0..peek_read], "PRI")) {
+        std.log.info("Direct HTTP/2 connection detected", .{});
+        http2.handleDirectHttp2(stream, peek_buf[0..peek_read]) catch |err| {
+            std.log.err("HTTP/2 error: {}", .{err});
+        };
+        return;
+    }
+
+    // Not HTTP/2, continue reading as HTTP/1.1 (prepend what we read)
+    const request_data = try readHttpRequestWithPrefix(allocator, stream, peek_buf[0..peek_read]);
+    defer allocator.free(request_data);
+
+    // Check for HTTP/2 upgrade (h2c) BEFORE parsing as HTTP/1.1
+    if (std.mem.indexOf(u8, request_data, "Upgrade: h2c") != null and
+        std.mem.indexOf(u8, request_data, "HTTP2-Settings:") != null)
+    {
+        std.log.info("HTTP/2 cleartext upgrade detected", .{});
+        http2.handleHttp2Upgrade(stream) catch |err| {
+            std.log.err("HTTP/2 error: {}", .{err});
+        };
+        return; // HTTP/2 handler manages the connection
+    }
+
+
+    // Parse request
+    const header_end = std.mem.indexOf(u8, request_data, "\r\n\r\n") orelse {
+        return error.InvalidRequest;
+    };
+    const header_section = request_data[0..header_end];
+
+    // Parse request line and headers
+    var request_lines = std.mem.splitSequence(u8, header_section, "\r\n");
+    const request_line = request_lines.next() orelse return error.InvalidRequestLine;
     var request_parts = std.mem.splitSequence(u8, request_line, " ");
-    const method = request_parts.next() orelse return;
-    const path = request_parts.next() orelse return;
+    const method = request_parts.next() orelse return error.InvalidRequestLine;
+    const path = request_parts.next() orelse return error.InvalidRequestLine;
 
     var headers = std.StringHashMap([]const u8).init(allocator);
     defer headers.deinit();
@@ -221,6 +416,194 @@ fn handleHttpConnection(allocator: std.mem.Allocator, stream: std.net.Stream, jw
 
     try handleHttpRequest(allocator, method, path, &headers, jwt_validator, stream);
 }
+
+/// Read complete HTTP request (headers + body) with proper timeout and size limits
+fn readHttpRequest(allocator: std.mem.Allocator, stream: std.net.Stream) ![]u8 {
+    var buffer = std.ArrayListUnmanaged(u8){};
+    errdefer buffer.deinit(allocator);
+
+    var read_buf: [READ_BUFFER_SIZE]u8 = undefined;
+    var header_end_pos: ?usize = null;
+    var content_length: ?usize = null;
+    var is_chunked: bool = false;
+
+    // Read until we find the header terminator "\r\n\r\n"
+    while (true) {
+        const bytes_read = stream.read(&read_buf) catch |err| {
+            // Check if it's a timeout or would-block error
+            if (err == error.WouldBlock or err == error.TimedOut) {
+                return error.ReadTimeout;
+            }
+            return err;
+        };
+
+        if (bytes_read == 0) {
+            if (buffer.items.len == 0) {
+                return error.ConnectionClosed;
+            }
+            // EOF reached, check if we have complete headers
+            if (header_end_pos == null) {
+                return error.IncompleteRequest;
+            }
+            break;
+        }
+
+        try buffer.appendSlice(allocator, read_buf[0..bytes_read]);
+
+        // Check for header terminator
+        if (header_end_pos == null) {
+            if (buffer.items.len > MAX_HEADER_SIZE) {
+                return error.HeaderTooLarge;
+            }
+
+            if (std.mem.indexOf(u8, buffer.items, "\r\n\r\n")) |pos| {
+                header_end_pos = pos;
+                const header_section = buffer.items[0..pos];
+
+                // Parse headers to determine body handling
+                var header_lines = std.mem.splitSequence(u8, header_section, "\r\n");
+                _ = header_lines.next(); // Skip request line
+
+                while (header_lines.next()) |line| {
+                    if (line.len == 0) break;
+                    if (std.mem.indexOf(u8, line, ":")) |colon_pos| {
+                        const name = std.mem.trim(u8, line[0..colon_pos], &std.ascii.whitespace);
+                        const value = std.mem.trim(u8, line[colon_pos + 1 ..], &std.ascii.whitespace);
+
+                        // Check for Content-Length
+                        if (std.ascii.eqlIgnoreCase(name, "content-length")) {
+                            content_length = std.fmt.parseInt(usize, value, 10) catch null;
+                        }
+
+                        // Check for Transfer-Encoding: chunked
+                        if (std.ascii.eqlIgnoreCase(name, "transfer-encoding") and
+                            std.ascii.eqlIgnoreCase(value, "chunked"))
+                        {
+                            is_chunked = true;
+                        }
+                    }
+                }
+
+                // If no body expected, we're done
+                if (content_length == null and !is_chunked) {
+                    // Check if it's a method that might have a body
+                    var method_iter = std.mem.splitSequence(u8, header_section, " ");
+                    const method = method_iter.next() orelse break;
+                    if (std.mem.eql(u8, method, "GET") or
+                        std.mem.eql(u8, method, "HEAD") or
+                        std.mem.eql(u8, method, "DELETE") or
+                        std.mem.eql(u8, method, "OPTIONS"))
+                    {
+                        break; // No body expected
+                    }
+                }
+            }
+        }
+
+        // If we have headers, check if we need to read body
+        if (header_end_pos) |header_end| {
+            const body_start = header_end + 4;
+            const body_received = buffer.items.len - body_start;
+
+            if (content_length) |cl| {
+                if (body_received >= cl) {
+                    // We have the complete body
+                    break;
+                }
+                // Check total request size
+                if (buffer.items.len > MAX_REQUEST_SIZE) {
+                    return error.RequestTooLarge;
+                }
+            } else if (is_chunked) {
+                // For chunked encoding, read until we get "0\r\n\r\n"
+                if (buffer.items.len > MAX_REQUEST_SIZE) {
+                    return error.RequestTooLarge;
+                }
+                // Check if we have the final chunk terminator
+                const body_section = buffer.items[body_start..];
+                if (std.mem.endsWith(u8, body_section, "0\r\n\r\n")) {
+                    break;
+                }
+            } else {
+                // No Content-Length and not chunked - assume no body or connection close
+                break;
+            }
+        }
+    }
+
+    return try buffer.toOwnedSlice(allocator);
+}
+
+/// Read HTTP request with a prefix already read (for protocol detection)
+fn readHttpRequestWithPrefix(allocator: std.mem.Allocator, stream: std.net.Stream, prefix: []const u8) ![]u8 {
+    var buffer = std.ArrayListUnmanaged(u8){};
+    errdefer buffer.deinit(allocator);
+
+    // Start with the prefix data
+    try buffer.appendSlice(allocator, prefix);
+
+    var read_buf: [READ_BUFFER_SIZE]u8 = undefined;
+    var header_end_pos: ?usize = null;
+    var content_length: ?usize = null;
+    var is_chunked: bool = false;
+
+    // Check if prefix already contains header end
+    if (std.mem.indexOf(u8, buffer.items, "\r\n\r\n")) |pos| {
+        header_end_pos = pos;
+    }
+
+    while (true) {
+        // If we already found headers, check if done
+        if (header_end_pos) |_| {
+            // For simple GET requests without body, we are done
+            break;
+        }
+
+        const bytes_read = stream.read(&read_buf) catch |err| {
+            if (err == error.WouldBlock or err == error.TimedOut) {
+                return error.ReadTimeout;
+            }
+            return err;
+        };
+
+        if (bytes_read == 0) {
+            if (buffer.items.len == 0) return error.ConnectionClosed;
+            if (header_end_pos == null) return error.IncompleteRequest;
+            break;
+        }
+
+        try buffer.appendSlice(allocator, read_buf[0..bytes_read]);
+
+        if (buffer.items.len > MAX_HEADER_SIZE) {
+            return error.HeaderTooLarge;
+        }
+
+        if (std.mem.indexOf(u8, buffer.items, "\r\n\r\n")) |pos| {
+            header_end_pos = pos;
+            // Check for Content-Length or chunked
+            const header_section = buffer.items[0..pos];
+            var lines = std.mem.splitSequence(u8, header_section, "\r\n");
+            _ = lines.next(); // Skip request line
+            while (lines.next()) |line| {
+                if (line.len == 0) break;
+                if (std.mem.indexOf(u8, line, ":")) |colon| {
+                    const name = std.mem.trim(u8, line[0..colon], &std.ascii.whitespace);
+                    const value = std.mem.trim(u8, line[colon + 1 ..], &std.ascii.whitespace);
+                    if (std.ascii.eqlIgnoreCase(name, "content-length")) {
+                        content_length = std.fmt.parseInt(usize, value, 10) catch null;
+                    }
+                    if (std.ascii.eqlIgnoreCase(name, "transfer-encoding") and std.ascii.eqlIgnoreCase(value, "chunked")) {
+                        is_chunked = true;
+                    }
+                }
+            }
+            if (content_length == null and !is_chunked) break;
+        }
+    }
+
+    return try buffer.toOwnedSlice(allocator);
+}
+
 
 fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const u8, headers: *std.StringHashMap([]const u8), jwt_validator: *jwt.Validator, stream: std.net.Stream) !void {
     var status_code: u16 = 200;
@@ -283,10 +666,21 @@ fn handleHttpRequest(allocator: std.mem.Allocator, _: []const u8, path: []const 
         }
     }
 
-    try sendHttpResponse(stream, status_code, "application/json", response_body);
+    try sendHttpResponse(allocator, stream, status_code, "application/json", response_body);
 }
 
-fn sendHttpResponse(stream: std.net.Stream, status_code: u16, content_type: []const u8, body: []const u8) !void {
+// Helper function to calculate formatted string size
+fn calculateFormattedSize(comptime fmt: []const u8, args: anytype) usize {
+    var temp_buf: [512]u8 = undefined;
+    const result = std.fmt.bufPrint(&temp_buf, fmt, args) catch {
+        // If formatting fails, return a conservative estimate
+        // This should never happen with valid inputs, but provides safety
+        return 512;
+    };
+    return result.len;
+}
+
+fn sendHttpResponse(allocator: std.mem.Allocator, stream: std.net.Stream, status_code: u16, content_type: []const u8, body: []const u8) !void {
     const status_text = switch (status_code) {
         200 => "OK",
         401 => "Unauthorized",
@@ -296,7 +690,26 @@ fn sendHttpResponse(stream: std.net.Stream, status_code: u16, content_type: []co
         else => "Unknown",
     };
 
-    var response_buf: [2048]u8 = undefined;
+    // Calculate required sizes for each component
+    const status_line_size = calculateFormattedSize("HTTP/1.1 {d} {s}\r\n", .{ status_code, status_text });
+    const content_type_header_size = calculateFormattedSize("Content-Type: {s}\r\n", .{content_type});
+    const content_length_header_size = calculateFormattedSize("Content-Length: {}\r\n\r\n", .{body.len});
+    const total_size = status_line_size + content_type_header_size + content_length_header_size + body.len;
+
+    const response_buf_size = 2048;
+    var response_buf_stack: [response_buf_size]u8 = undefined;
+    var response_buf: []u8 = undefined;
+    var response_buf_allocated: ?[]u8 = null;
+    defer if (response_buf_allocated) |buf| allocator.free(buf);
+
+    // Use stack buffer if it fits, otherwise allocate dynamically
+    if (total_size <= response_buf_size) {
+        response_buf = &response_buf_stack;
+    } else {
+        response_buf_allocated = try allocator.alloc(u8, total_size);
+        response_buf = response_buf_allocated.?;
+    }
+
     var response_len: usize = 0;
 
     const status_line = try std.fmt.bufPrint(response_buf[response_len..], "HTTP/1.1 {d} {s}\r\n", .{ status_code, status_text });
@@ -308,6 +721,10 @@ fn sendHttpResponse(stream: std.net.Stream, status_code: u16, content_type: []co
     const content_length_header = try std.fmt.bufPrint(response_buf[response_len..], "Content-Length: {}\r\n\r\n", .{body.len});
     response_len += content_length_header.len;
 
+    // Ensure we have enough space for the body before copying
+    if (response_len + body.len > response_buf.len) {
+        return error.ResponseTooLarge;
+    }
     @memcpy(response_buf[response_len .. response_len + body.len], body);
     response_len += body.len;
 

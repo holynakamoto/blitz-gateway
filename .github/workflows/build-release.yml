@@ -1,0 +1,198 @@
+name: Build Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.2)'
+        required: true
+        default: 'v1.0.2'
+
+jobs:
+  build-x86_64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: System Info
+        run: |
+          echo "=== Build Environment ==="
+          uname -a
+          nproc
+          free -h
+          
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+
+      - name: Install Zig
+        run: |
+          wget -q https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz
+          tar xf zig-linux-x86_64-0.14.0.tar.xz
+          sudo mv zig-linux-x86_64-0.14.0 /opt/zig
+          echo "/opt/zig" >> $GITHUB_PATH
+
+      - name: Build liburing
+        run: |
+          cd deps/liburing || git clone https://github.com/axboe/liburing deps/liburing && cd deps/liburing
+          ./configure --prefix=/usr/local
+          make -j$(nproc)
+          sudo make install
+          
+          # Build FFI version
+          cd src
+          gcc -c -fPIC -O2 liburing.c -o liburing-ffi.o
+          ar rcs liburing-ffi.a liburing-ffi.o
+          sudo cp liburing-ffi.a /usr/local/lib/
+
+      - name: Build picotls
+        run: |
+          cd deps/picotls || git clone https://github.com/h2o/picotls deps/picotls && cd deps/picotls
+          git submodule update --init --recursive
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DPTLS_MINICRYPTO=ON -DPTLS_OPENSSL=OFF
+          make -j$(nproc) picotls-core picotls-minicrypto
+          sudo cp libpicotls-core.a /usr/local/lib/libpicotls.a
+          sudo cp libpicotls-minicrypto.a /usr/local/lib/
+          sudo cp -r ../include/picotls /usr/local/include/
+          sudo cp ../include/picotls.h /usr/local/include/
+
+      - name: Build Blitz (x86_64)
+        run: |
+          /opt/zig/zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+          
+      - name: Verify Binary
+        run: |
+          ls -lh zig-out/bin/
+          file zig-out/bin/blitz
+          ./zig-out/bin/blitz --version || echo "Cannot run x86_64 binary on ARM runner"
+
+      - name: Create Release Artifact
+        run: |
+          mkdir -p release
+          cp zig-out/bin/blitz release/blitz-linux-x86_64
+          cd release
+          sha256sum blitz-linux-x86_64 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-linux-x86_64
+          path: |
+            release/blitz-linux-x86_64
+            release/SHA256SUMS.txt
+
+  build-arm64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Cross-Compilation Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install Zig
+        run: |
+          wget -q https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz
+          tar xf zig-linux-x86_64-0.14.0.tar.xz
+          sudo mv zig-linux-x86_64-0.14.0 /opt/zig
+          echo "/opt/zig" >> $GITHUB_PATH
+
+      - name: Build Dependencies for ARM64
+        run: |
+          # Cross-compile liburing for ARM64
+          cd deps/liburing || git clone https://github.com/axboe/liburing deps/liburing && cd deps/liburing
+          make clean || true
+          CC=aarch64-linux-gnu-gcc ./configure --prefix=/usr/local/aarch64
+          CC=aarch64-linux-gnu-gcc make -j$(nproc)
+          sudo make DESTDIR=/usr/local/aarch64 install
+          
+          # Build FFI version for ARM64
+          cd src
+          aarch64-linux-gnu-gcc -c -fPIC -O2 liburing.c -o liburing-ffi.o
+          aarch64-linux-gnu-ar rcs liburing-ffi.a liburing-ffi.o
+          sudo mkdir -p /usr/local/aarch64/lib
+          sudo cp liburing-ffi.a /usr/local/aarch64/lib/
+
+      - name: Build Blitz (ARM64)
+        run: |
+          /opt/zig/zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux-musl
+          
+      - name: Create Release Artifact
+        run: |
+          mkdir -p release
+          cp zig-out/bin/blitz release/blitz-linux-arm64
+          cd release
+          sha256sum blitz-linux-arm64 > SHA256SUMS.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blitz-linux-arm64
+          path: |
+            release/blitz-linux-arm64
+            release/SHA256SUMS.txt
+
+  create-release:
+    needs: [build-x86_64, build-arm64]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download x86_64 Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: blitz-linux-x86_64
+          path: x86_64/
+
+      - name: Download ARM64 Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: blitz-linux-arm64
+          path: arm64/
+
+      - name: Create Combined Checksums
+        run: |
+          cat x86_64/SHA256SUMS.txt arm64/SHA256SUMS.txt > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            x86_64/blitz-linux-x86_64
+            arm64/blitz-linux-arm64
+            SHA256SUMS.txt
+          body: |
+            ## Blitz Gateway ${{ github.ref_name }}
+            
+            ### Downloads
+            - **blitz-linux-x86_64**: For AMD/Intel Linux servers (EPYC, Xeon, etc.)
+            - **blitz-linux-arm64**: For ARM64 Linux servers (Graviton, Ampere, Apple Silicon VMs)
+            
+            ### Checksums
+            ```
+            $(cat SHA256SUMS.txt)
+            ```
+            
+            ### Quick Install
+            ```bash
+            # x86_64
+            curl -L -o blitz https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/blitz-linux-x86_64
+            chmod +x blitz
+            
+            # ARM64
+            curl -L -o blitz https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/blitz-linux-arm64
+            chmod +x blitz
+            ```
+

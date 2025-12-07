@@ -3,6 +3,11 @@ zig-out/
 zig-cache/
 .zig-cache/
 
+# Rust build artifacts
+target/
+Cargo.lock
+**/*.rs.bk
+
 # Benchmark results
 benches/results/
 benches/*.txt
@@ -43,6 +48,14 @@ deps/
 *.crt
 *.p12
 *.pfx
+
+# Environment files with secrets (never commit these!)
+.env
+.env.local
+.env.*.local
+*.env
+secrets.*
+*.secret
 
 # Fuzz corpora (too large, belongs in CI/fuzzing setup)
 deps/picotls/fuzz/*-corpus/

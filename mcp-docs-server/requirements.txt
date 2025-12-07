@@ -1,0 +1,12 @@
+# MCP SDK for Python
+# Install the appropriate MCP SDK version for your setup
+# Common options:
+# - mcp (official SDK)
+# - anthropic-mcp (if using Anthropic's implementation)
+
+# Note: Adjust package name based on your MCP SDK
+mcp>=0.1.0
+
+# Optional: For better error handling and async support
+aiofiles>=23.0.0
+

@@ -303,3 +303,10 @@ test "Metrics: Memory management" {
     try testing.expectEqual(@as(usize, 0), registry.counters.items.len);
     try testing.expectEqual(@as(usize, 0), registry.gauges.items.len);
 }
+
+// Note: MetricsHttpServer thread safety tests are implemented as integration tests
+// in tests/integration/ due to the complexity of testing HTTP server thread management.
+// The key fixes implemented are:
+// 1. Track active handler threads instead of detaching them immediately
+// 2. Join all active threads in stop() to prevent use-after-free
+// 3. Use proper synchronization with mutexes for thread-safe access to the thread list

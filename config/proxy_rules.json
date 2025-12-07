@@ -1,0 +1,9 @@
+{
+  "default_backend": "https://httpbin.org",
+  "routes": {
+    "/api/": "https://api.example.com",
+    "/static/": "https://cdn.example.com",
+    "/health": "https://health.example.com"
+  }
+}
+

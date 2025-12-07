@@ -285,7 +285,7 @@ echo ""
     echo "   ./zig-out/bin/blitz"
     echo ""
     echo "6. Test install script:"
-    echo "   cd /vagrant && ./scripts/vm/test-install-in-vm.sh"
+    echo "   cd /vagrant && ./# VM scripts removed - use scripts/vm/linux-build.sh instead"
     echo ""
     echo "=========================================="
 EOF
